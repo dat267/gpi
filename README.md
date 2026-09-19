@@ -60,7 +60,8 @@ Update the pin whenever upstream source is re-read for a port.
 | `client` | `packages/client` — transport contract, connection state machine (handshake validation, sequence fencing, fail/close semantics), requests with cancel-on-abort, attachment routing, state listeners, service catalogue + subscriptions (hydration, queued updates, start gating, dispose), Chord service transport, dispose | ported |
 | `chord/services` | `packages/chord/src/services/{wire,state-codec,errors}.ts` — control calls, strict snapshot/update validation, per-subscription state codec registries, remote-service error codes | ported |
 | `chord/delta` | `packages/chord/src/delta` — op vocabulary + wire compression, diff engine, applier (mutable/immutable), validation; JSON value contract (`chord` root) | ported |
-| `chord` (facets, bundler, replicated-state runtime), `server`, `telemetry`, `durable`, `tui` | upstream packages | queued |
+| `telemetry` | `packages/telemetry` — span/context contracts, noop + in-memory recorder (settlement, explicit-vs-automatic status, atomic recording), schema definition data, typed span starter, and the adapter conformance suite | ported |
+| `chord` (facets, bundler, replicated-state runtime), `server`, `durable`, `tui` | upstream packages | queued |
 | `chord` | `packages/chord` | queued |
 
 ## Build & test
