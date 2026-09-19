@@ -36,6 +36,8 @@ type EnvAPIKeyProviderSpec struct {
 	// WrapStreams wraps every implementation (Cloudflare placeholder
 	// resolution).
 	WrapStreams func(ai.ProviderStreams) ai.ProviderStreams
+	// OAuth overrides the provider's OAuth auth (when a flow is ported).
+	OAuth *ai.OAuthAuth
 }
 
 // EnvAPIKeyProvider builds one provider from a spec.
@@ -79,6 +81,15 @@ func EnvAPIKeyProvider(spec EnvAPIKeyProviderSpec) *ai.Provider {
 	auth := ai.ProviderAuth{APIKey: ai.EnvApiKeyAuth(authName, spec.EnvVars)}
 	if spec.Auth != nil {
 		auth = ai.ProviderAuth{APIKey: spec.Auth}
+	}
+	switch spec.ID {
+	case "xai":
+		auth.OAuth = ai.XaiOAuth()
+	case "kimi-coding":
+		auth.OAuth = ai.KimiCodingOAuth()
+	}
+	if spec.OAuth != nil {
+		auth.OAuth = spec.OAuth
 	}
 	options := ai.CreateProviderOptions{
 		ID:      spec.ID,
