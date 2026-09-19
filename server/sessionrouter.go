@@ -493,9 +493,12 @@ func (r *SessionRouter) invalidate(hosted *hostedSession, err error) {
 }
 
 func newAttachmentID() string {
-	// UUIDs come from the protocol package's v7 generator; attachments only
-	// need uniqueness within the server.
-	return fmt.Sprintf("attachment-%d", time.Now().UnixNano())
+	// Upstream uses node:crypto randomUUID() (v4) for attachment ids.
+	id, err := newRandomID()
+	if err != nil {
+		return fmt.Sprintf("attachment-%d", time.Now().UnixNano())
+	}
+	return id
 }
 
 var _ = errors.Is
