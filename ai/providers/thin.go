@@ -31,6 +31,11 @@ type EnvAPIKeyProviderSpec struct {
 	Azure       bool
 	// OpenCode wraps every implementation with the session header.
 	OpenCode bool
+	// Auth overrides the default env API-key auth (Cloudflare, Vertex).
+	Auth *ai.ApiKeyAuth
+	// WrapStreams wraps every implementation (Cloudflare placeholder
+	// resolution).
+	WrapStreams func(ai.ProviderStreams) ai.ProviderStreams
 }
 
 // EnvAPIKeyProvider builds one provider from a spec.
@@ -62,15 +67,24 @@ func EnvAPIKeyProvider(spec EnvAPIKeyProviderSpec) *ai.Provider {
 			streams[api] = WithOpenCodeSessionHeader(implementation)
 		}
 	}
+	if spec.WrapStreams != nil {
+		for api, implementation := range streams {
+			streams[api] = spec.WrapStreams(implementation)
+		}
+	}
 	authName := spec.AuthName
 	if authName == "" {
 		authName = spec.Name + " API key"
+	}
+	auth := ai.ProviderAuth{APIKey: ai.EnvApiKeyAuth(authName, spec.EnvVars)}
+	if spec.Auth != nil {
+		auth = ai.ProviderAuth{APIKey: spec.Auth}
 	}
 	options := ai.CreateProviderOptions{
 		ID:      spec.ID,
 		Name:    spec.Name,
 		BaseURL: spec.BaseURL,
-		Auth:    ai.ProviderAuth{APIKey: ai.EnvApiKeyAuth(authName, spec.EnvVars)},
+		Auth:    auth,
 		Models:  ai.GetBuiltinModels(spec.ID),
 	}
 	if len(streams) == 1 {
@@ -269,7 +283,7 @@ var BuiltinProviderIDs = []string{
 // UnportedBuiltinProviderIDs are built-in providers whose API adapters are not
 // ported yet; BuiltinProviders skips them.
 var UnportedBuiltinProviderIDs = []string{
-	"amazon-bedrock", "cloudflare-ai-gateway", "cloudflare-workers-ai", "openai-codex", "radius",
+	"amazon-bedrock", "openai-codex", "radius",
 }
 
 // BuiltinProviders returns every built-in provider whose adapter is ported, in
@@ -305,6 +319,10 @@ func builtinProvider(id string) *ai.Provider {
 		return AzureOpenAIResponsesProvider()
 	case "github-copilot":
 		return GitHubCopilotProvider()
+	case "cloudflare-ai-gateway":
+		return CloudflareAIGatewayProvider()
+	case "cloudflare-workers-ai":
+		return CloudflareWorkersAIProvider()
 	case "mistral":
 		return MistralProvider()
 	}
