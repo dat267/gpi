@@ -130,7 +130,9 @@ func AnthropicProvider(streams ai.ProviderStreams) *ai.Provider {
 		BaseURL: anthropicBaseURL,
 		Auth: ai.ProviderAuth{
 			APIKey: AnthropicAPIKeyAuth(),
-			// OAuth (Claude Pro/Max) lands with the OAuth flow port.
+			// OAuth (Claude Pro/Max): the flow lives in the ai package, so the
+			// provider holds it directly (upstream uses lazyOAuth for bundlers).
+			OAuth: ai.AnthropicOAuth(),
 		},
 		Models: models,
 		Single: func() ai.ProviderStreams {
