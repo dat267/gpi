@@ -163,30 +163,69 @@ func (c ModelCompat) MarshalJSON() ([]byte, error) {
 	}
 }
 
+// DecodeModelCompat decodes a compat object for a known API. The catalog
+// loader and generated data always know the model's api, so decoding is
+// explicit rather than probed.
+func DecodeModelCompat(api Api, data []byte) (*ModelCompat, error) {
+	if len(data) == 0 || string(data) == "null" {
+		return nil, nil
+	}
+	c := &ModelCompat{}
+	var err error
+	switch api {
+	case APIAnthropicMessages:
+		c.AnthropicMessages = new(AnthropicMessagesCompat)
+		err = jsonUnmarshalStrict(data, c.AnthropicMessages)
+	case APIOpenAICompletions:
+		c.OpenAICompletions = new(OpenAICompletionsCompat)
+		err = jsonUnmarshalStrict(data, c.OpenAICompletions)
+	case APIOpenAIResponses, APIAzureOpenAIResponses, APIOpenAICodexResponses:
+		c.OpenAIResponses = new(OpenAIResponsesCompat)
+		err = jsonUnmarshalStrict(data, c.OpenAIResponses)
+	case APIMistralConversations:
+		c.MistralConversations = new(MistralConversationsCompat)
+		err = jsonUnmarshalStrict(data, c.MistralConversations)
+	case APIBedrockConverse:
+		c.Bedrock = new(BedrockCompat)
+		err = jsonUnmarshalStrict(data, c.Bedrock)
+	default:
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// UnmarshalJSON decodes a compat object when the API is unambiguous (used by
+// generic JSON round-trips). Catalog loading uses DecodeModelCompat, which
+// knows the model's api.
 func (c *ModelCompat) UnmarshalJSON(data []byte) error {
 	if len(data) == 0 || string(data) == "null" {
 		return nil
 	}
-	// Probe which compat family the JSON belongs to by its known keys.
 	var keys map[string]json.RawMessage
 	if err := json.Unmarshal(data, &keys); err != nil {
 		return err
 	}
-	if _, ok := keys["supportsEagerToolInputStreaming"]; ok {
+	has := func(k string) bool { _, ok := keys[k]; return ok }
+	switch {
+	case has("supportsEagerToolInputStreaming") || has("forceAdaptiveThinking") || has("allowedFallbackModels"):
 		c.AnthropicMessages = new(AnthropicMessagesCompat)
 		return json.Unmarshal(data, c.AnthropicMessages)
-	}
-	if _, ok := keys["supportsStrictMode"]; ok {
-		if _, ok := keys["supportsMidConvoSystemMessages"]; ok {
-			// Ambiguous between completions/responses/mistral; decode all
-			// three views into the completions arm by default, corrected by
-			// the catalog loader which knows the API.
-		}
+	case has("supportsStore") || has("maxTokensField") || has("thinkingFormat") || has("chatTemplateKwargs"):
 		c.OpenAICompletions = new(OpenAICompletionsCompat)
 		return json.Unmarshal(data, c.OpenAICompletions)
+	case has("supportsAdditionalTools") || has("supportsToolSearch") || has("supportsExplicitPromptCacheMode") || has("supportsMaxOutputTokens"):
+		c.OpenAIResponses = new(OpenAIResponsesCompat)
+		return json.Unmarshal(data, c.OpenAIResponses)
+	case len(keys) == 1 && has("supportsMidConvoSystemMessages"):
+		c.MistralConversations = new(MistralConversationsCompat)
+		return json.Unmarshal(data, c.MistralConversations)
+	default:
+		c.OpenAIResponses = new(OpenAIResponsesCompat)
+		return json.Unmarshal(data, c.OpenAIResponses)
 	}
-	c.OpenAIResponses = new(OpenAIResponsesCompat)
-	return json.Unmarshal(data, c.OpenAIResponses)
 }
 
 // Model is the unified model descriptor.
