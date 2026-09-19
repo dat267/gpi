@@ -436,3 +436,12 @@ func ctxErrOf(ctx context.Context) error {
 	}
 	return ctx.Err()
 }
+
+// mustMarshalJSON panics on marshal failure (schemas are static).
+func mustMarshalJSON(v any) json.RawMessage {
+	enc, err := ai.MarshalJSON(v)
+	if err != nil {
+		panic(err)
+	}
+	return enc
+}
