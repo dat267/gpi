@@ -295,7 +295,7 @@ func (d *Directory[E]) start(observer *directoryObserver, entry E) {
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				if ctx.Err() == nil {
-					d.report(toReplicatedStateError(recovered))
+					d.report(toError(recovered))
 				}
 			}
 		}()

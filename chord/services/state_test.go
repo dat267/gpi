@@ -39,9 +39,10 @@ func TestMutableStatePublishesDiffs(t *testing.T) {
 	// Publishing emits the diff, bumps the sequence, and advances the value.
 	var opsBatches [][]delta.Op
 	var sequences []int
-	state.SubscribeOps(func(ops []delta.Op, sequence int, ctx context.Context) {
+	state.SubscribeOps(func(ops []delta.Op, sequence int, ctx context.Context) error {
 		opsBatches = append(opsBatches, ops)
 		sequences = append(sequences, sequence)
+		return nil
 	})
 	if err := state.PublishState(context.Background()); err != nil {
 		t.Fatal(err)

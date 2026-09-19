@@ -24,8 +24,9 @@ type ReplicatedStateSource interface {
 	Published() chord.JsonValue
 	// PublishState emits pending changes.
 	PublishState(ctx context.Context) error
-	// SubscribeOps observes published op batches.
-	SubscribeOps(listener func(ops []delta.Op, sequence int, ctx context.Context)) func()
+	// SubscribeOps observes published op batches. A listener error aborts the
+	// publication (upstream source listeners may throw).
+	SubscribeOps(listener func(ops []delta.Op, sequence int, ctx context.Context) error) func()
 }
 
 // GetReplicatedStateInternals returns the internals of a replicated state value,
@@ -48,7 +49,7 @@ type MutableState struct {
 	published   chord.JsonValue
 	sequence    int
 	listeners   map[int]func(value chord.JsonValue, ctx context.Context, delivery chord.ReplicatedStateDelivery)
-	sources     map[int]func(ops []delta.Op, sequence int, ctx context.Context)
+	sources     map[int]func(ops []delta.Op, sequence int, ctx context.Context) error
 	nextID      int
 	publishLock sync.Mutex
 }
@@ -69,7 +70,7 @@ func NewMutableState(initial chord.JsonValue) (*MutableState, error) {
 		state:     initial,
 		published: published,
 		listeners: map[int]func(value chord.JsonValue, ctx context.Context, delivery chord.ReplicatedStateDelivery){},
-		sources:   map[int]func(ops []delta.Op, sequence int, ctx context.Context){},
+		sources:   map[int]func(ops []delta.Op, sequence int, ctx context.Context) error{},
 	}, nil
 }
 
@@ -129,7 +130,7 @@ func (s *MutableState) PublishState(ctx context.Context) error {
 	sequence := s.sequence
 	s.published = next
 	next = s.published
-	sourceListeners := make([]func(ops []delta.Op, sequence int, ctx context.Context), 0, len(s.sources))
+	sourceListeners := make([]func(ops []delta.Op, sequence int, ctx context.Context) error, 0, len(s.sources))
 	for _, listener := range s.sources {
 		sourceListeners = append(sourceListeners, listener)
 	}
@@ -140,7 +141,11 @@ func (s *MutableState) PublishState(ctx context.Context) error {
 	s.mu.Unlock()
 
 	for _, listener := range sourceListeners {
-		listener(ops, sequence, ctx)
+		if err := listener(ops, sequence, ctx); err != nil {
+			// Upstream stops at the first throwing source listener, so value
+			// listeners are skipped for this publication.
+			return err
+		}
 	}
 	delivery := chord.ReplicatedStateDelivery{Kind: chord.DeliveryUpdate, Sequence: sequence}
 	for _, listener := range valueListeners {
@@ -180,7 +185,7 @@ func (s *MutableState) Subscribe(listener func(value chord.JsonValue, ctx contex
 }
 
 // SubscribeOps observes published op batches (upstream's internals subscribe).
-func (s *MutableState) SubscribeOps(listener func(ops []delta.Op, sequence int, ctx context.Context)) func() {
+func (s *MutableState) SubscribeOps(listener func(ops []delta.Op, sequence int, ctx context.Context) error) func() {
 	s.mu.Lock()
 	id := s.nextID
 	s.nextID++
@@ -333,7 +338,7 @@ func (r *StateReplica) deliver(
 ) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			r.report(toReplicatedStateError(recovered))
+			r.report(toError(recovered))
 		}
 	}()
 	listener(value, ctx, delivery)
@@ -342,10 +347,3 @@ func (r *StateReplica) deliver(
 // ServiceDeliveryContext is the synthetic context for deliveries without a
 // caller (upstream serviceDeliveryContext).
 func ServiceDeliveryContext() context.Context { return context.Background() }
-
-func toReplicatedStateError(value any) error {
-	if err, ok := value.(error); ok {
-		return err
-	}
-	return fmt.Errorf("%v", value)
-}

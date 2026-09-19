@@ -1,8 +1,34 @@
 package chord
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"strings"
+)
 
 // Port of the service portion of packages/chord/src/types.ts.
+
+// Service is a stable service identity (upstream Service<T>).
+//
+// Go has no phantom type parameter for the contract, so the contract type is
+// not represented; the id and process-locality are.
+type Service struct {
+	ID string `json:"id"`
+	// Local marks a process-local service that is never published remotely.
+	Local bool `json:"local"`
+}
+
+// DefineService declares a service identity (upstream defineService): the id
+// must be non-empty and must not use the reserved $chord. namespace.
+func DefineService(id string, local bool) (Service, error) {
+	if id == "" {
+		return Service{}, fmt.Errorf("Service ID must not be empty")
+	}
+	if strings.HasPrefix(id, "$chord.") {
+		return Service{}, fmt.Errorf("Service IDs beginning with $chord. are reserved")
+	}
+	return Service{ID: id, Local: local}, nil
+}
 
 // ServiceMode is the replication mode of a service.
 type ServiceMode = string
