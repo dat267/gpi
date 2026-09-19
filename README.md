@@ -56,7 +56,8 @@ Update the pin whenever upstream source is re-read for a port.
 | `coding` (compaction) | `core/compaction/{compaction.ts, utils.ts}` — cut points, token estimation, summarization (retry-wrapped), file-op tracking; `core/messages.ts` convertToLlm | ported |
 | `coding` (session facade) | `core/agent-session.ts` (extension-free reduction: persistence, queue tracking, auto-compaction/retry, stats, skill blocks) + `core/defaults.ts` | ported |
 | `coding` | powershell tool (windows), CLI/modes, TUI | queued |
-| `chord`, `server`/`client`/`protocol`, `telemetry`, `durable` | upstream packages | queued |
+| `protocol` | `packages/protocol` — strict definite-length CBOR subset with limits, 4-byte length framing, v8 message schemas (hello/request/cancel/response/service_update/attachment), strict validation codecs | ported |
+| `chord`, `server`/`client`, `telemetry`, `durable` | upstream packages | queued |
 | `chord` | `packages/chord` | queued |
 
 ## Build & test
