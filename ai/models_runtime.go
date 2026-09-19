@@ -1147,3 +1147,12 @@ func ModelsAreEqual(a, b *Model) bool {
 	}
 	return a.ID == b.ID && a.Provider == b.Provider
 }
+
+// ApplyProviderModelFilter applies a provider's credential-specific model policy
+// (upstream provider.filterModels).
+func ApplyProviderModelFilter(provider *Provider, models []*Model, credential *Credential) []*Model {
+	if provider == nil || provider.FilterModels == nil {
+		return models
+	}
+	return provider.FilterModels(models, credential)
+}
