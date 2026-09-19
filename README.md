@@ -50,7 +50,8 @@ Update the pin whenever upstream source is re-read for a port.
 | `coding` (tools) | `core/tools/{truncate,path-utils,file-mutation-queue,read,write,ls}.ts` | ported |
 | `coding` (edit) | `core/tools/{edit.ts, edit-diff.ts}` — exact/fuzzy matching, overlap detection, CRLF/BOM preservation, diffs | ported |
 | `coding` (search) | `core/tools/{find.ts, grep.ts}` — real fd/rg backends, gitignore respect, relativized output, match/context formatting | ported |
-| `coding` | `core/tools/{bash,powershell}.ts`, system prompt, sessions | queued |
+| `coding` (bash) | `core/tools/bash.ts` + `output-accumulator.ts` — bounded-memory streaming, temp-file full output, tree-kill, 128+N signal mapping, timeouts, aborts, PI_* env handling | ported |
+| `coding` | powershell tool (windows), system prompt, sessions | queued |
 | `chord` | `packages/chord` | queued |
 
 ## Build & test
