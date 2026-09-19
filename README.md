@@ -42,7 +42,8 @@ Update the pin whenever upstream source is re-read for a port.
 | `ai` (auth) | `packages/ai/src/auth/*` (types, resolve, credential-store, helpers) | ported |
 | `ai` (models runtime) | `packages/ai/src/models.ts`, `models-store.ts`, `api/lazy.ts` (lazyStream) | ported |
 | `ai` (catalog) | generated model data via upstream's own generator (`scripts/gen_catalog.py`), `env-api-keys.ts`, `utils/provider-env.ts` | ported |
-| `ai` | real API providers (`anthropic-messages`, `openai-*`, `google-*`), provider factories | queued |
+| `ai` (anthropic wire) | `api/anthropic-messages.ts` request construction (`buildParams`), `transform-messages.ts`, `simple-options.ts`, `constrained-sampling.ts`, `utils/{json-parse,estimate,sanitize-unicode}.ts` | ported |
+| `ai` | anthropic-messages SSE streaming + HTTP client; openai-*/google-* APIs; remaining provider factories | queued |
 | `agent` | `packages/agent` (`agent-loop.ts`, `agent.ts`) | queued |
 | `coding` | `packages/coding-agent` core (tools, system prompt, sessions) | queued |
 | `chord` | `packages/chord` | queued |

@@ -334,37 +334,8 @@ func normalizeFauxAssistantContent(content any) ai.ContentList {
 	}
 }
 
-// jsLength counts UTF-16 code units, matching JavaScript's string.length.
-// D-row D1: JS string length semantics.
-func jsLength(s string) int {
-	n := 0
-	for _, r := range s {
-		if r > 0xFFFF {
-			n += 2
-		} else {
-			n++
-		}
-	}
-	return n
-}
-
-// jsSlice slices by UTF-16 code units, matching JavaScript's String.slice.
-func jsSlice(s string, start, end int) string {
-	units := utf16.Encode([]rune(s))
-	if start < 0 {
-		start = 0
-	}
-	if end > len(units) {
-		end = len(units)
-	}
-	if start >= end {
-		return ""
-	}
-	return string(utf16.Decode(units[start:end]))
-}
-
 func fauxEstimateTokens(text string) int {
-	return (jsLength(text) + 3) / 4 // Math.ceil(length / 4)
+	return (ai.JSLength(text) + 3) / 4 // Math.ceil(length / 4)
 }
 
 func fauxRandomID(prefix string) string {
@@ -391,7 +362,7 @@ func fauxContentToText(content ai.StringOrBlocks) string {
 		case ai.TextContent:
 			parts = append(parts, b.Text)
 		case ai.ImageContent:
-			parts = append(parts, fmt.Sprintf("[image:%s:%d]", b.MimeType, jsLength(b.Data)))
+			parts = append(parts, fmt.Sprintf("[image:%s:%d]", b.MimeType, ai.JSLength(b.Data)))
 		}
 	}
 	return joinLines(parts)
@@ -513,8 +484,8 @@ func fauxWithUsageEstimate(
 		previousPrompt, ok := promptCache[options.SessionID]
 		if ok {
 			cachedChars := fauxPrefixLength(previousPrompt, promptText)
-			cacheRead = int64(fauxEstimateTokens(jsSlice(previousPrompt, 0, cachedChars)))
-			cacheWrite = int64(fauxEstimateTokens(jsSlice(promptText, cachedChars, jsLength(promptText))))
+			cacheRead = int64(fauxEstimateTokens(ai.JSSlice(previousPrompt, 0, cachedChars)))
+			cacheWrite = int64(fauxEstimateTokens(ai.JSSlice(promptText, cachedChars, ai.JSLength(promptText))))
 			input = max(0, promptTokens-int(cacheRead))
 		} else {
 			cacheWrite = int64(promptTokens)
@@ -565,11 +536,11 @@ func fauxReattribute(message *ai.AssistantMessage, api, provider, modelID string
 func fauxSplitStringByTokenSize(text string, minTokenSize, maxTokenSize int) []string {
 	var chunks []string
 	index := 0
-	length := jsLength(text)
+	length := ai.JSLength(text)
 	for index < length {
 		tokenSize := minTokenSize + rand.Intn(maxTokenSize-minTokenSize+1)
 		charSize := max(1, tokenSize*4)
-		chunks = append(chunks, jsSlice(text, index, index+charSize))
+		chunks = append(chunks, ai.JSSlice(text, index, index+charSize))
 		index += charSize
 	}
 	if len(chunks) == 0 {
