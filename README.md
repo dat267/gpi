@@ -54,7 +54,9 @@ Update the pin whenever upstream source is re-read for a port.
 | `coding` (sessions) | `core/session-manager.ts` — v3 JSONL trees, branching, compaction context, migrations, discovery/listing; `core/messages.ts` custom roles | ported |
 | `coding` (prompt) | `core/system-prompt.ts` (structured sections, forced prompts, section diffing) + `core/skills.ts` + `utils/frontmatter.ts` | ported |
 | `coding` (compaction) | `core/compaction/{compaction.ts, utils.ts}` — cut points, token estimation, summarization (retry-wrapped), file-op tracking; `core/messages.ts` convertToLlm | ported |
-| `coding` | powershell tool (windows), agent-session assembly | queued |
+| `coding` (session facade) | `core/agent-session.ts` (extension-free reduction: persistence, queue tracking, auto-compaction/retry, stats, skill blocks) + `core/defaults.ts` | ported |
+| `coding` | powershell tool (windows), CLI/modes, TUI | queued |
+| `chord`, `server`/`client`/`protocol`, `telemetry`, `durable` | upstream packages | queued |
 | `chord` | `packages/chord` | queued |
 
 ## Build & test
