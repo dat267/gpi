@@ -289,7 +289,7 @@ func GitHubCopilotProvider() *ai.Provider {
 // advertises auth and the refreshed catalogue while dispatching to a
 // missing-implementation error.
 func RadiusProvider(gateway string) *ai.Provider {
-	return ai.RadiusProvider(ai.RadiusProviderOptions{Gateway: gateway})
+	return ai.RadiusProvider(ai.RadiusProviderOptions{Gateway: gateway, Streams: piMessagesStreams{}})
 }
 
 // BuiltinProviderIDs is the upstream builtinProviders() order.
@@ -443,4 +443,15 @@ func jsonUnmarshalLenient(raw []byte, target any) error {
 		return fmt.Errorf("empty value")
 	}
 	return json.Unmarshal(raw, target)
+}
+
+// piMessagesStreams adapts the pi-messages implementation.
+type piMessagesStreams struct{}
+
+func (piMessagesStreams) Stream(model *ai.Model, context ai.TranscriptContext, options *ai.StreamOptions) *ai.AssistantMessageEventStream {
+	return ai.StreamPiMessages(model, context, &ai.PiMessagesOptions{StreamOptions: derefStreamOptions(options)})
+}
+
+func (piMessagesStreams) StreamSimple(model *ai.Model, context ai.TranscriptContext, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+	return ai.StreamPiMessagesSimple(model, context, options)
 }
