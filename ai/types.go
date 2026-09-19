@@ -7,7 +7,10 @@
 // payloads stay interoperable with pi.
 package ai
 
-import "encoding/json"
+import (
+	"context"
+	"encoding/json"
+)
 
 // KnownApi enumerates the APIs with concrete implementations upstream.
 type KnownApi = string
@@ -121,8 +124,18 @@ type ThinkingBudgets struct {
 	High    *int `json:"high,omitempty"`
 }
 
+// DeferredRequest asks a capable provider to return a durable handle and
+// continue the request asynchronously (upstream's `deferred` option).
+type DeferredRequest struct {
+	// Window is "15m", "1h", or "24h".
+	Window string
+}
+
 // StreamOptions are the options all providers share.
 type StreamOptions struct {
+	// Ctx is upstream's AbortSignal: cancel it to abort the request.
+	// Nil means context.Background().
+	Ctx    context.Context
 	APIKey string
 	Env    ProviderEnv
 	// Headers are merged with provider defaults; caller values override
@@ -144,6 +157,9 @@ type StreamOptions struct {
 	OnPayload func(payload json.RawMessage, model *Model) json.RawMessage
 	// OnResponse is invoked after an HTTP response is received.
 	OnResponse func(response ProviderResponse, model *Model)
+	// Deferred asks a capable provider to return a durable handle and
+	// continue the request asynchronously.
+	Deferred *DeferredRequest
 }
 
 // SimpleStreamOptions adds reasoning and tool selection to StreamOptions for

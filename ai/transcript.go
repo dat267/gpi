@@ -42,6 +42,9 @@ func NormalizeContext(context Context) TranscriptContext {
 	return TranscriptContext{Messages: messages}
 }
 
+// RoleOf returns a message's role (upstream's `role` data field).
+func RoleOf(m Message) Role { return m.messageRole() }
+
 // systemMessageOf narrows a message to *SystemMessage by role.
 func systemMessageOf(m Message) *SystemMessage {
 	if s, ok := m.(*SystemMessage); ok {

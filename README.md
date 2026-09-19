@@ -28,6 +28,7 @@ from upstream source, not inferred.
 |---|---|
 | Repository | https://github.com/earendil-works/pi (cloned at `../pi`) |
 | Pin | `36b60d2e8` — "fix: clean up delta test lint diagnostics" |
+| Stale upstream test | `packages/ai/test/faux-provider.test.ts` "estimates prompt and output tokens" still expects pre-`9e05370b2` faux serialization; source wins |
 
 Update the pin whenever upstream source is re-read for a port.
 
@@ -37,7 +38,8 @@ Update the pin whenever upstream source is re-read for a port.
 |---|---|---|
 | `ai` | `packages/ai` core (`types.ts`, `utils/event-stream.ts`, `utils/text.ts`, `utils/transcript.ts`, `utils/diagnostics.ts`) | ported |
 | `ai` | `packages/ai` models/compat (`models.ts` surface, compat interfaces) | ported (types) |
-| `ai` | model catalog, providers, API implementations | queued |
+| `ai/providers` (faux) | `packages/ai/src/providers/faux.ts` | ported |
+| `ai` | model catalog, real providers, API implementations | queued |
 | `agent` | `packages/agent` (`agent-loop.ts`, `agent.ts`) | queued |
 | `coding` | `packages/coding-agent` core (tools, system prompt, sessions) | queued |
 | `chord` | `packages/chord` | queued |

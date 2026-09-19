@@ -79,27 +79,30 @@ func TestEventStreamDeliversToWaitingConsumersInRegistrationOrder(t *testing.T) 
 		func(event int) int { return event },
 	)
 
-	start := make(chan struct{})
+	start1 := make(chan struct{})
+	start2 := make(chan struct{})
 	first := make(chan int, 1)
 	second := make(chan int, 1)
 	go func() {
-		<-start
+		<-start1
 		ev, ok := stream.Next(context.Background())
 		if ok {
 			first <- ev
 		}
 	}()
 	go func() {
-		<-start
+		<-start2
 		ev, ok := stream.Next(context.Background())
 		if ok {
 			second <- ev
 		}
 	}()
 
-	// Wake both consumers so they register as waiters, strictly in order.
-	close(start)
+	// Wake the first consumer and let it register before starting the
+	// second, so registration order is deterministic.
+	close(start1)
 	waitRegistered(t, stream, 1)
+	close(start2)
 	waitRegistered(t, stream, 2)
 	stream.Push(1)
 	stream.Push(2)
