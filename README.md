@@ -51,7 +51,8 @@ Update the pin whenever upstream source is re-read for a port.
 | `coding` (edit) | `core/tools/{edit.ts, edit-diff.ts}` — exact/fuzzy matching, overlap detection, CRLF/BOM preservation, diffs | ported |
 | `coding` (search) | `core/tools/{find.ts, grep.ts}` — real fd/rg backends, gitignore respect, relativized output, match/context formatting | ported |
 | `coding` (bash) | `core/tools/bash.ts` + `output-accumulator.ts` — bounded-memory streaming, temp-file full output, tree-kill, 128+N signal mapping, timeouts, aborts, PI_* env handling | ported |
-| `coding` | powershell tool (windows), system prompt, sessions | queued |
+| `coding` (sessions) | `core/session-manager.ts` — v3 JSONL trees, branching, compaction context, migrations, discovery/listing; `core/messages.ts` custom roles | ported |
+| `coding` | powershell tool (windows), system prompt builder, compaction, agent-session | queued |
 | `chord` | `packages/chord` | queued |
 
 ## Build & test
