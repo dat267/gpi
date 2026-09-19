@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sky-valley/pi/ai"
+	"github.com/dat267/gpi/ai"
 )
 
 // Port of packages/ai/test/faux-provider.test.ts. The "unregisters the

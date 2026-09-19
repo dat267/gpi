@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sky-valley/pi/ai"
+	"github.com/dat267/gpi/ai"
 )
 
 // Port of the Models-integration subset of

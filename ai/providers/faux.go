@@ -14,7 +14,7 @@ import (
 	"time"
 	"unicode/utf16"
 
-	"github.com/sky-valley/pi/ai"
+	"github.com/dat267/gpi/ai"
 )
 
 // Port of providers/faux.ts.

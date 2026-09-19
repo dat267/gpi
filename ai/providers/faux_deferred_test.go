@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/sky-valley/pi/ai"
+	"github.com/dat267/gpi/ai"
 )
 
 // Behavior tests for the faux deferred-response protocol (upstream
