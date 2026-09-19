@@ -215,7 +215,14 @@ func UnmarshalMessage(data json.RawMessage) (Message, error) {
 		}
 		return &m, nil
 	default:
-		return nil, fmt.Errorf("ai: unknown message role %q", probe.Role)
+		// Unknown roles persist as custom messages (upstream AgentMessage
+		// extensibility).
+		var m CustomMessage
+		if err := json.Unmarshal(data, &m); err != nil {
+			return nil, fmt.Errorf("ai: unknown message role %q", probe.Role)
+		}
+		m.Extra = data
+		return &m, nil
 	}
 }
 

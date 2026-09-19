@@ -101,6 +101,9 @@ func (s *EventStream[T, R]) End(result *R) {
 // Next returns the next event. The second return is false when the stream is
 // exhausted (upstream's `{ done: true }`).
 func (s *EventStream[T, R]) Next(ctx context.Context) (T, bool) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	for {
 		s.mu.Lock()
 		if len(s.queue) > 0 {
@@ -143,6 +146,9 @@ func (s *EventStream[T, R]) Next(ctx context.Context) (T, bool) {
 // Result resolves the stream's final result, blocking until a terminal event
 // or End fixes it.
 func (s *EventStream[T, R]) Result(ctx context.Context) (R, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	s.mu.Lock()
 	has := s.hasResult
 	s.mu.Unlock()

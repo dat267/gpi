@@ -228,6 +228,22 @@ func (m *SystemMessage) sectionNames() []string {
 // SectionOrder returns the section declaration order.
 func (m *SystemMessage) SectionOrder() []string { return m.sectionsOrder }
 
+// Clone deep-copies the message (preserving section order).
+func (m *SystemMessage) Clone() *SystemMessage {
+	out := &SystemMessage{
+		Content:       m.Content,
+		Sections:      map[string]*string{},
+		ToolsAdded:    append([]Tool{}, m.ToolsAdded...),
+		ToolsRemoved:  append([]ToolReference{}, m.ToolsRemoved...),
+		Timestamp:     m.Timestamp,
+		sectionsOrder: append([]string{}, m.sectionsOrder...),
+	}
+	for k, v := range m.Sections {
+		out.Sections[k] = v
+	}
+	return out
+}
+
 // orderedSections is the upstream JSON shape of `sections`.
 type orderedSections []struct {
 	Name  string  `json:"name"`
@@ -595,3 +611,16 @@ type Context struct {
 type TranscriptContext struct {
 	Messages []Message
 }
+
+// CustomMessage is an app-defined message with a custom role, the Go analog
+// of upstream's CustomAgentMessages declaration merging. It satisfies Message
+// for agent transcripts and session persistence; providers receive custom
+// messages only after the app's convertToLlm maps them.
+type CustomMessage struct {
+	Role      string          `json:"role"`
+	Content   json.RawMessage `json:"content,omitempty"`
+	Timestamp int64           `json:"timestamp,omitempty"`
+	Extra     json.RawMessage `json:"-"`
+}
+
+func (m *CustomMessage) messageRole() Role { return Role(m.Role) }
