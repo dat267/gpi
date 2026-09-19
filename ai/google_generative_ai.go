@@ -224,6 +224,40 @@ type googleChunk struct {
 // StreamGoogleGenerativeAI implements the google-generative-ai stream
 // function.
 func StreamGoogleGenerativeAI(model *Model, context TranscriptContext, options *GoogleOptions) *AssistantMessageEventStream {
+	return streamGoogle(model, context, options, nil)
+}
+
+// googleStreamConfig parameterizes the shared Google streaming loop for the
+// Gemini and Vertex API dialects.
+type googleStreamConfig struct {
+	// api is stamped on the assistant message.
+	api Api
+	// preflight validates the request configuration before building params.
+	preflight func(model *Model, options *GoogleOptions) error
+	// request issues the streaming call.
+	request func(ctx context.Context, model *Model, params *GoogleGenerateContentParams, options *GoogleOptions) (*http.Response, error)
+	// noFinishReasonMessage is reported when the stream ends without a finish
+	// reason.
+	noFinishReasonMessage string
+}
+
+var googleGenerativeAIConfig = &googleStreamConfig{
+	api: APIGoogleGenerativeAI,
+	preflight: func(model *Model, options *GoogleOptions) error {
+		if options.APIKey == "" {
+			return fmt.Errorf("No API key for provider: %s", model.Provider)
+		}
+		return nil
+	},
+	request:               requestGoogleStream,
+	noFinishReasonMessage: "Google stream ended without a finish reason",
+}
+
+// streamGoogle runs one Google streaming request through the shared loop.
+func streamGoogle(model *Model, context TranscriptContext, options *GoogleOptions, config *googleStreamConfig) *AssistantMessageEventStream {
+	if config == nil {
+		config = googleGenerativeAIConfig
+	}
 	stream := NewAssistantMessageEventStream()
 	normalizedContext := CollapseSystemMessages(context)
 
@@ -236,7 +270,7 @@ func StreamGoogleGenerativeAI(model *Model, context TranscriptContext, options *
 			options = &GoogleOptions{}
 		}
 		output := &AssistantMessage{
-			API: APIGoogleGenerativeAI, Provider: model.Provider, Model: model.ID,
+			API: config.api, Provider: model.Provider, Model: model.ID,
 			Usage: Usage{Cost: UsageCost{}}, StopReason: StopPending,
 			Timestamp: time.Now().UnixMilli(),
 		}
@@ -261,8 +295,8 @@ func StreamGoogleGenerativeAI(model *Model, context TranscriptContext, options *
 			}
 		}()
 
-		if options.APIKey == "" {
-			fail(fmt.Errorf("No API key for provider: %s", model.Provider))
+		if err := config.preflight(model, options); err != nil {
+			fail(err)
 			return
 		}
 		params, err := BuildGoogleParams(model, normalizedContext, options)
@@ -279,7 +313,7 @@ func StreamGoogleGenerativeAI(model *Model, context TranscriptContext, options *
 			}
 		}
 
-		resp, err := requestGoogleStream(ctx, model, params, options)
+		resp, err := config.request(ctx, model, params, options)
 		if err != nil {
 			fail(err)
 			return
@@ -440,7 +474,7 @@ func StreamGoogleGenerativeAI(model *Model, context TranscriptContext, options *
 			return
 		}
 		if output.StopReason == StopPending {
-			fail(fmt.Errorf("Google stream ended without a finish reason"))
+			fail(fmt.Errorf("%s", config.noFinishReasonMessage))
 			return
 		}
 		if output.StopReason == StopAborted || output.StopReason == StopError {

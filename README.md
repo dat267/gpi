@@ -43,7 +43,8 @@ Update the pin whenever upstream source is re-read for a port.
 | `ai` (models runtime) | `packages/ai/src/models.ts`, `models-store.ts`, `api/lazy.ts` (lazyStream) | ported |
 | `ai` (catalog) | generated model data via upstream's own generator (`scripts/gen_catalog.py`), `env-api-keys.ts`, `utils/provider-env.ts` | ported |
 | `ai` (anthropic wire) | `api/anthropic-messages.ts` request construction (`buildParams`), `transform-messages.ts`, `simple-options.ts`, `constrained-sampling.ts`, `utils/{json-parse,estimate,sanitize-unicode}.ts` | ported |
-| `ai` | anthropic-messages SSE streaming + HTTP client; openai-*/google-* APIs; remaining provider factories | queued |
+| `ai` (google-vertex) | `api/google-vertex.ts` — Vertex AI dialect over the shared Google streaming loop: `{location}`-templated and custom base URLs with API-version detection, project/location resolution with upstream's error messages, Vertex API keys (including the ADC marker and `<placeholder>` fallback), Application Default Credentials (authorized-user refresh-token and GCE metadata flows with token caching; service-account keys reported per D27), bearer + `x-goog-user-project` headers, and the Vertex thinking budget/level mapping | ported |
+| `ai` | openai-codex, mistral, azure, bedrock, cloudflare adapters; remaining provider factories | queued |
 | `agent` | `packages/agent/src/{agent-loop.ts, types.ts, stream-fn.ts}` — the loop, tool execution (sequential/parallel), steering/follow-up queues, terminate rules, validation (D6 subset) | ported |
 | `agent` (Agent) | `agent.ts` — stateful wrapper: state, subscribe, steer/follow-up queues (one-at-a-time default), continue semantics, run-failure lifecycle, reset baseline | ported |
 | `agent` | harness/ (compaction, context, execution) | queued |
