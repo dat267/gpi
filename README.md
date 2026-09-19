@@ -57,7 +57,7 @@ Update the pin whenever upstream source is re-read for a port.
 | `coding` (session facade) | `core/agent-session.ts` (extension-free reduction: persistence, queue tracking, auto-compaction/retry, stats, skill blocks) + `core/defaults.ts` | ported |
 | `coding` | powershell tool (windows), CLI/modes, TUI | queued |
 | `protocol` | `packages/protocol` — strict definite-length CBOR subset with limits, 4-byte length framing, v8 message schemas (hello/request/cancel/response/service_update/attachment), strict validation codecs | ported |
-| `client` | `packages/client` core — transport contract, connection state machine (handshake validation, sequence fencing, fail/close semantics), requests with cancel-on-abort, attachment routing, state listeners, dispose | ported (chord-backed service subscriptions queued) |
+| `client` | `packages/client` — transport contract, connection state machine (handshake validation, sequence fencing, fail/close semantics), requests with cancel-on-abort, attachment routing, state listeners, service catalogue + subscriptions (hydration, queued updates, start gating, dispose), Chord service transport, dispose | ported |
 | `chord/services` | `packages/chord/src/services/{wire,state-codec,errors}.ts` — control calls, strict snapshot/update validation, per-subscription state codec registries, remote-service error codes | ported |
 | `chord/delta` | `packages/chord/src/delta` — op vocabulary + wire compression, diff engine, applier (mutable/immutable), validation; JSON value contract (`chord` root) | ported |
 | `chord` (facets, bundler, replicated-state runtime), `server`, `telemetry`, `durable`, `tui` | upstream packages | queued |

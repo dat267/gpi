@@ -155,3 +155,25 @@ type ServiceStateEncoder interface {
 	EncodeSnapshot(snapshot *ServiceSubscriptionSnapshot) (*WireServiceSubscriptionSnapshot, error)
 	EncodeUpdate(update *ServiceProviderUpdate) (*WireServiceProviderUpdate, error)
 }
+
+// RemoteServiceTransport is the client-side transport a Chord service facade
+// drives (upstream RemoteServiceTransport).
+type RemoteServiceTransport interface {
+	Invoke(call chord.ServiceCall, ctx chord.Context) (chord.JsonValue, error)
+	Subscribe(
+		serviceID string,
+		mode chord.ServiceMode,
+		listener func(update *ServiceProviderUpdate, ctx chord.Context),
+		ctx chord.Context,
+	) (*ServiceSubscription, error)
+}
+
+// ServiceSubscription is one live remote subscription handed back to the
+// service facade.
+type ServiceSubscription struct {
+	Snapshot *ServiceSubscriptionSnapshot
+	// Activate begins ordered update delivery after the snapshot is installed.
+	Activate func()
+	// Close ends the subscription.
+	Close func() error
+}

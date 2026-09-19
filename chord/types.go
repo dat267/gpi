@@ -33,3 +33,17 @@ type ServiceCatalogueEntry struct {
 // Context is the Chord context handle (upstream Context); the full context
 // implementation is queued, so this aliases the value shape used by services.
 type Context = any
+
+// JSONValue renders a service call as a plain JSON value for the wire
+// (upstream passes the call object itself, which is already JSON).
+func (c ServiceCall) JSONValue() map[string]any {
+	value := map[string]any{
+		"serviceId": c.ServiceID,
+		"member":    c.Member,
+		"args":      c.Args,
+	}
+	if c.Instance != nil {
+		value["instance"] = map[string]any{"key": c.Instance.Key, "generation": c.Instance.Generation}
+	}
+	return value
+}

@@ -51,6 +51,9 @@ type Client struct {
 	attachments  map[int]AttachmentChangeListener
 	watchSeq     int
 
+	serviceListeners map[string]*activeServiceListener
+	serviceSequence  int
+
 	requestSequence int
 	hello           *protocol.ServerHello
 	attachment      *protocol.RpcTarget
@@ -63,10 +66,11 @@ func NewClient(options ClientOptions) (*Client, error) {
 		return nil, fmt.Errorf("serverId must be a canonical lowercase UUIDv4")
 	}
 	client := &Client{
-		options:      options,
-		pending:      map[string]*pendingRequest{},
-		stateWatches: map[int]func(change ConnectionStateChange){},
-		attachments:  map[int]AttachmentChangeListener{},
+		options:          options,
+		pending:          map[string]*pendingRequest{},
+		stateWatches:     map[int]func(change ConnectionStateChange){},
+		attachments:      map[int]AttachmentChangeListener{},
+		serviceListeners: map[string]*activeServiceListener{},
 	}
 	connection, err := NewConnection(ConnectionOptions{
 		TransportFactory: options.TransportFactory,
@@ -185,6 +189,14 @@ func (c *Client) OnAttachmentChange(listener AttachmentChangeListener) (Unsubscr
 // Request invokes one protocol call against an explicit routed target. The
 // call is an opaque JSON value (chord service calls are the usual payload).
 func (c *Client) Request(ctx context.Context, target protocol.RpcTarget, call any) (any, error) {
+	return c.requestWithTransform(ctx, target, call, nil)
+}
+
+// requestWithTransform is Request with an optional result transform that runs
+// before the caller sees the result (upstream's transform argument). A
+// transform failure fails the connection, because the peer produced a payload
+// that cannot be trusted.
+func (c *Client) requestWithTransform(ctx context.Context, target protocol.RpcTarget, call any, transform func(result any) (any, error)) (any, error) {
 	c.mu.Lock()
 	if c.disposed {
 		c.mu.Unlock()
@@ -195,11 +207,32 @@ func (c *Client) Request(ctx context.Context, target protocol.RpcTarget, call an
 		return nil, NewDisconnectedError("", nil)
 	}
 	c.requestSequence++
+	// Calls are structs with a wire rendering (chord service calls); other
+	// callers pass plain JSON values directly.
+	callValue := call
+	if renderer, ok := call.(interface{ JSONValue() map[string]any }); ok {
+		callValue = renderer.JSONValue()
+	}
 	id := fmt.Sprintf("request-%d", c.requestSequence)
 	result := make(chan any, 1)
 	failure := make(chan error, 1)
 	c.pending[id] = &pendingRequest{
-		resolve: func(value any) { result <- value },
+		resolve: func(value any) {
+			if transform == nil {
+				result <- value
+				return
+			}
+			transformed, err := transform(value)
+			if err != nil {
+				validationError := &protocol.ProtocolValidationError{
+					Message: fmt.Sprintf("Invalid service operation stream: %s", err.Error()),
+				}
+				c.connection.Fail(validationError)
+				failure <- validationError
+				return
+			}
+			result <- transformed
+		},
 		reject:  func(err error) { failure <- err },
 		cleanup: func() {},
 	}
@@ -230,7 +263,7 @@ func (c *Client) Request(ctx context.Context, target protocol.RpcTarget, call an
 		Request: &protocol.RequestEnvelope{
 			ID:     id,
 			Target: target,
-			Call:   call,
+			Call:   callValue,
 		},
 	}, &protocol.FrameDecoderOptions{MaxFrameLength: maxFrameLengthPtr(c.connection.MaxFrameLength())})
 	if err != nil {
@@ -271,7 +304,7 @@ func (c *Client) handleMessage(message *protocol.ServerMessage) {
 		c.setAttachment(message.Attachment.Attachment)
 		return
 	case protocol.ServerMessageServiceUpdate:
-		// Service subscriptions are deferred with the chord layer.
+		c.handleServiceUpdate(message)
 		return
 	}
 
@@ -355,6 +388,7 @@ func (c *Client) Dispose() error {
 	c.disposed = true
 	c.stateWatches = map[int]func(change ConnectionStateChange){}
 	c.attachments = map[int]AttachmentChangeListener{}
+	c.serviceListeners = map[string]*activeServiceListener{}
 	c.hello = nil
 	c.attachment = nil
 	c.mu.Unlock()
