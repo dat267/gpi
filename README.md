@@ -45,7 +45,8 @@ Update the pin whenever upstream source is re-read for a port.
 | `ai` (anthropic wire) | `api/anthropic-messages.ts` request construction (`buildParams`), `transform-messages.ts`, `simple-options.ts`, `constrained-sampling.ts`, `utils/{json-parse,estimate,sanitize-unicode}.ts` | ported |
 | `ai` | anthropic-messages SSE streaming + HTTP client; openai-*/google-* APIs; remaining provider factories | queued |
 | `agent` | `packages/agent/src/{agent-loop.ts, types.ts, stream-fn.ts}` — the loop, tool execution (sequential/parallel), steering/follow-up queues, terminate rules, validation (D6 subset) | ported |
-| `agent` | `agent.ts` (stateful Agent), harness/ | queued |
+| `agent` (Agent) | `agent.ts` — stateful wrapper: state, subscribe, steer/follow-up queues (one-at-a-time default), continue semantics, run-failure lifecycle, reset baseline | ported |
+| `agent` | harness/ (compaction, context, execution) | queued |
 | `coding` | `packages/coding-agent` core (tools, system prompt, sessions) | queued |
 | `chord` | `packages/chord` | queued |
 
