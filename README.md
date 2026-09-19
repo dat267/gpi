@@ -39,6 +39,8 @@ Update the pin whenever upstream source is re-read for a port.
 | `ai` | `packages/ai` core (`types.ts`, `utils/event-stream.ts`, `utils/text.ts`, `utils/transcript.ts`, `utils/diagnostics.ts`) | ported |
 | `ai` | `packages/ai` models/compat (`models.ts` surface, compat interfaces) | ported (types) |
 | `ai/providers` (faux) | `packages/ai/src/providers/faux.ts` | ported |
+| `ai` (auth) | `packages/ai/src/auth/*` (types, resolve, credential-store, helpers) | ported |
+| `ai` (models runtime) | `packages/ai/src/models.ts`, `models-store.ts`, `api/lazy.ts` (lazyStream) | ported |
 | `ai` | model catalog, real providers, API implementations | queued |
 | `agent` | `packages/agent` (`agent-loop.ts`, `agent.ts`) | queued |
 | `coding` | `packages/coding-agent` core (tools, system prompt, sessions) | queued |

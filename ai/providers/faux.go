@@ -932,3 +932,60 @@ func (c *FauxCore) CancelDeferred(requestModel *ai.Model, handle *ai.DeferredHan
 }
 
 var _ = math.Ceil // retained for parity notes
+
+// FauxProviderHandle is the faux provider registration surface (upstream
+// FauxProviderHandle minus the global-registry unregister, which arrives
+// with the API registry port).
+type FauxProviderHandle struct {
+	Provider *ai.Provider
+	Core     *FauxCore
+}
+
+// FauxProvider builds a faux provider through CreateProvider for tests built
+// on explicit Models collections (port of fauxProvider()).
+//
+//	var faux = providers.FauxProvider(providers.FauxOptions{})
+//	models := ai.CreateModels(nil)
+//	models.SetProvider(faux.Provider)
+//	faux.Core.SetResponses([]providers.FauxResponseStep{{Message: ...}})
+func FauxProvider(options FauxOptions) *FauxProviderHandle {
+	core := NewFauxCore(options)
+	provider := ai.CreateProvider(ai.CreateProviderOptions{
+		ID:     core.Provider(),
+		Auth:   ai.ProviderAuth{APIKey: &ai.ApiKeyAuth{Name: "Faux", Resolve: func(ai.AuthResolveInput) (*ai.AuthResult, error) { return &ai.AuthResult{Auth: ai.ModelAuth{}}, nil }}},
+		Models: core.Models(),
+		Single: fauxStreams{core},
+	})
+	return &FauxProviderHandle{Provider: provider, Core: core}
+}
+
+// fauxStreams adapts FauxCore to the ProviderStreams contract.
+type fauxStreams struct{ core *FauxCore }
+
+func (f fauxStreams) Stream(model *ai.Model, context ai.TranscriptContext, options *ai.StreamOptions) *ai.AssistantMessageEventStream {
+	simple := &ai.SimpleStreamOptions{}
+	if options != nil {
+		simple.StreamOptions = *options
+	}
+	return f.core.Stream(model, context, simple)
+}
+
+func (f fauxStreams) StreamSimple(model *ai.Model, context ai.TranscriptContext, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+	return f.core.Stream(model, context, options)
+}
+
+func (f fauxStreams) FetchDeferred(model *ai.Model, handle *ai.DeferredHandle, options *ai.StreamOptions) *ai.AssistantMessageEventStream {
+	simple := &ai.SimpleStreamOptions{}
+	if options != nil {
+		simple.StreamOptions = *options
+	}
+	return f.core.FetchDeferred(model, handle, simple)
+}
+
+func (f fauxStreams) CancelDeferred(model *ai.Model, handle *ai.DeferredHandle, options *ai.StreamOptions) error {
+	simple := &ai.SimpleStreamOptions{}
+	if options != nil {
+		simple.StreamOptions = *options
+	}
+	return f.core.CancelDeferred(model, handle, simple)
+}
