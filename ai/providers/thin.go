@@ -284,6 +284,14 @@ func GitHubCopilotProvider() *ai.Provider {
 	})
 }
 
+// RadiusProvider builds the dynamic Radius gateway provider (upstream
+// radiusProvider). Its pi-messages API adapter is not ported, so the provider
+// advertises auth and the refreshed catalogue while dispatching to a
+// missing-implementation error.
+func RadiusProvider(gateway string) *ai.Provider {
+	return ai.RadiusProvider(ai.RadiusProviderOptions{Gateway: gateway})
+}
+
 // BuiltinProviderIDs is the upstream builtinProviders() order.
 var BuiltinProviderIDs = []string{
 	"amazon-bedrock", "ant-ling", "anthropic", "azure-openai-responses", "baseten", "cerebras",
@@ -298,7 +306,7 @@ var BuiltinProviderIDs = []string{
 // UnportedBuiltinProviderIDs are built-in providers whose API adapters are not
 // ported yet; BuiltinProviders skips them.
 var UnportedBuiltinProviderIDs = []string{
-	"amazon-bedrock", "openai-codex", "radius",
+	"amazon-bedrock", "openai-codex",
 }
 
 // BuiltinProviders returns every built-in provider whose adapter is ported, in
@@ -322,6 +330,8 @@ func BuiltinProviders() []*ai.Provider {
 
 func builtinProvider(id string) *ai.Provider {
 	switch id {
+	case "radius":
+		return RadiusProvider("")
 	case "anthropic":
 		return AnthropicProvider(anthropicMessagesStreams{})
 	case "google":
