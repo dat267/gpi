@@ -97,3 +97,15 @@ func JSSlice(s string, start, end int) string {
 	}
 	return string(utf16.Decode(units[start:end]))
 }
+
+// GetPiUserAgent renders the pi user agent: "pi (<platform> <release>; <arch>)"
+// (port of utils/pi-user-agent.ts). Node's os.release() is the kernel
+// version; Go reads uname where available (D-row D5: os-release mapping is
+// best-effort per platform).
+func GetPiUserAgent() string {
+	release := kernelRelease()
+	if release == "" {
+		release = "unknown"
+	}
+	return "pi (" + runtimeGOOS() + " " + release + "; " + runtimeGOARCH() + ")"
+}

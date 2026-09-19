@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/dat267/gpi/ai"
 )
@@ -86,6 +87,37 @@ func ctxErrOf(ctx context.Context) error {
 	return ctx.Err()
 }
 
+// anthropicStreams adapts the anthropic-messages implementation to
+// ai.ProviderStreams.
+type anthropicStreams struct{}
+
+func (anthropicStreams) Stream(model *ai.Model, context ai.TranscriptContext, options *ai.StreamOptions) *ai.AssistantMessageEventStream {
+	anthropicOptions := &ai.AnthropicOptions{StreamOptions: derefStreamOptions(options)}
+	return ai.StreamAnthropic(model, context, anthropicOptions)
+}
+
+func (anthropicStreams) StreamSimple(model *ai.Model, context ai.TranscriptContext, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+	return ai.StreamAnthropicSimple(model, context, options)
+}
+
+func (anthropicStreams) FetchDeferred(model *ai.Model, handle *ai.DeferredHandle, options *ai.StreamOptions) *ai.AssistantMessageEventStream {
+	stream := ai.NewAssistantMessageEventStream()
+	err := fmt.Errorf("Provider anthropic does not support deferred responses for %q", model.API)
+	msgText := err.Error()
+	msg := &ai.AssistantMessage{API: model.API, Provider: model.Provider, Model: model.ID,
+		StopReason: ai.StopError, ErrorMessage: &msgText, Timestamp: time.Now().UnixMilli()}
+	stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopError, Error: msg})
+	stream.End(&msg)
+	return stream
+}
+
+func derefStreamOptions(options *ai.StreamOptions) ai.StreamOptions {
+	if options == nil {
+		return ai.StreamOptions{}
+	}
+	return *options
+}
+
 // AnthropicProvider builds the built-in Anthropic provider with its catalog
 // models (port of anthropicProvider). The api implementation argument
 // completes the wiring; nil means the provider streams errors until the
@@ -101,7 +133,12 @@ func AnthropicProvider(streams ai.ProviderStreams) *ai.Provider {
 			// OAuth (Claude Pro/Max) lands with the OAuth flow port.
 		},
 		Models: models,
-		Single: streams,
+		Single: func() ai.ProviderStreams {
+			if streams != nil {
+				return streams
+			}
+			return anthropicStreams{}
+		}(),
 	})
 }
 
