@@ -266,6 +266,37 @@ type ShellToolConfig struct {
 	PromptSnippet    string
 	PromptGuidelines []string
 	TempFilePrefix   string
+	// ResolveShell resolves the shell invocation at exec time (upstream's
+	// resolveShellConfig callback passed to createLocalShellOperations).
+	ResolveShell func(shellPath string) (ShellConfig, error)
+	// TransformCommand rewrites the command before execution. The powershell
+	// variant prepends the UTF-8 output prefix, which upstream applies inside
+	// its operations wrapper.
+	TransformCommand func(command string) string
+}
+
+// BashToolSystemPromptContribution is the bash prompt contribution (upstream
+// bashToolSystemPromptContribution).
+var BashToolSystemPromptContribution = struct {
+	Snippet    string
+	Guidelines []string
+}{
+	Snippet:    "Execute bash commands (ls, grep, find, etc.)",
+	Guidelines: []string{"You can inspect PI_* environment variables for current model and session details."},
+}
+
+// BashShellToolConfig is the bash variant of the shell tool.
+var BashShellToolConfig = ShellToolConfig{
+	Name:             "bash",
+	Label:            "bash",
+	ShellName:        "bash",
+	Prompt:           "$",
+	PromptSnippet:    BashToolSystemPromptContribution.Snippet,
+	PromptGuidelines: BashToolSystemPromptContribution.Guidelines,
+	TempFilePrefix:   "pi-bash",
+	ResolveShell: func(shellPath string) (ShellConfig, error) {
+		return GetShellConfig(shellPath)
+	},
 }
 
 // BashToolOptions tune the shell tool.
@@ -330,7 +361,14 @@ func KillProcessTree(pid int) {
 
 // CreateBashTool builds the bash tool (port of createShellToolDefinition
 // with the bash config).
+// CreateBashTool builds the bash tool (upstream createBashTool).
 func CreateBashTool(cwd string, options *BashToolOptions) agent.AgentTool {
+	return CreateShellTool(cwd, BashShellToolConfig, options)
+}
+
+// CreateShellTool builds a shell tool variant (upstream
+// createShellToolDefinition).
+func CreateShellTool(cwd string, config ShellToolConfig, options *BashToolOptions) agent.AgentTool {
 	commandPrefix := ""
 	exposeSessionEnv := true
 	shellPath := ""
@@ -345,10 +383,10 @@ func CreateBashTool(cwd string, options *BashToolOptions) agent.AgentTool {
 	}
 
 	return agent.AgentTool{
-		Name:        "bash",
-		Description: BashToolDescription("bash"),
+		Name:        config.Name,
+		Description: BashToolDescription(config.ShellName),
 		Parameters:  bashSchemaJSON,
-		Label:       "bash",
+		Label:       config.Label,
 		Execute: func(toolCallID string, params json.RawMessage, ctx context.Context, onUpdate func(agent.AgentToolResult)) (agent.AgentToolResult, error) {
 			var input struct {
 				Command string   `json:"command"`
@@ -361,23 +399,21 @@ func CreateBashTool(cwd string, options *BashToolOptions) agent.AgentTool {
 			if commandPrefix != "" {
 				command = commandPrefix + "\n" + command
 			}
+			if config.TransformCommand != nil {
+				command = config.TransformCommand(command)
+			}
 
-			// Shell config: bash -c (stdin transport is legacy-WSL-only).
-			shell := shellPath
-			if shell == "" {
-				resolved, err := exec.LookPath("bash")
-				if err != nil {
-					return agent.AgentToolResult{}, fmt.Errorf("bash is not available on PATH")
-				}
-				shell = resolved
+			shellConfig, err := config.ResolveShell(shellPath)
+			if err != nil {
+				return agent.AgentToolResult{}, err
 			}
 
 			// Working directory must exist.
 			if _, err := os.Stat(cwd); err != nil {
-				return agent.AgentToolResult{}, fmt.Errorf("Working directory does not exist: %s\nCannot execute bash commands.", cwd)
+				return agent.AgentToolResult{}, fmt.Errorf("Working directory does not exist: %s\nCannot execute %s commands.", cwd, config.ShellName)
 			}
 
-			output := NewOutputAccumulator(0, 0, "pi-bash")
+			output := NewOutputAccumulator(0, 0, config.TempFilePrefix)
 			var updateWG sync.WaitGroup
 
 			emitOutputUpdate := func() {
@@ -408,7 +444,13 @@ func CreateBashTool(cwd string, options *BashToolOptions) agent.AgentTool {
 				onUpdate(agent.AgentToolResult{Content: nil, Details: nil})
 			}
 
-			cmd := exec.Command(shell, "-c", command)
+			var cmd *exec.Cmd
+			commandFromStdin := shellConfig.CommandTransport == "stdin"
+			if commandFromStdin {
+				cmd = exec.Command(shellConfig.Shell, shellConfig.Args...)
+			} else {
+				cmd = exec.Command(shellConfig.Shell, append(append([]string{}, shellConfig.Args...), command)...)
+			}
 			cmd.Dir = cwd
 			cmd.Env = shellEnv(sessionEnv, exposeSessionEnv)
 			// Detached process group for tree kills.
@@ -416,6 +458,9 @@ func CreateBashTool(cwd string, options *BashToolOptions) agent.AgentTool {
 
 			stdoutPipe, _ := cmd.StdoutPipe()
 			stderrPipe, _ := cmd.StderrPipe()
+			if commandFromStdin {
+				cmd.Stdin = strings.NewReader(command)
+			}
 
 			if err := cmd.Start(); err != nil {
 				return agent.AgentToolResult{}, err
