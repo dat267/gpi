@@ -487,16 +487,23 @@ func (p *RemoteServiceProvider) Dispose() error {
 		return nil
 	}
 	p.disposed = true
-	var collected []error
+	// Instances are retired first; the lifecycle updates are emitted after the
+	// provider lock is released (emit takes the same lock), and subscribers are
+	// settled only after those updates were delivered.
+	type emission struct {
+		registration *serviceRegistration
+		update       *ServiceProviderUpdate
+	}
+	var emissions []emission
+	registrations := make([]*serviceRegistration, 0, len(p.order))
 	for _, serviceID := range p.order {
 		registration := p.registrations[serviceID]
 		if registration == nil {
 			continue
 		}
+		registrations = append(registrations, registration)
 		if singleton := takeSingleton(registration); singleton != nil {
-			if err := p.emit(registration, &ServiceProviderUpdate{Type: UpdateUnavailable}, nil); err != nil {
-				collected = append(collected, err)
-			}
+			emissions = append(emissions, emission{registration, &ServiceProviderUpdate{Type: UpdateUnavailable}})
 		}
 		for _, key := range sortedInstanceKeys(registration) {
 			instance := registration.instances[key]
@@ -505,10 +512,20 @@ func (p *RemoteServiceProvider) Dispose() error {
 				remove()
 			}
 			delete(registration.instances, key)
-			if err := p.emit(registration, &ServiceProviderUpdate{Type: UpdateClosed, ClosedInstance: instance.address}, nil); err != nil {
-				collected = append(collected, err)
-			}
+			emissions = append(emissions, emission{registration, &ServiceProviderUpdate{Type: UpdateClosed, ClosedInstance: instance.address}})
 		}
+	}
+	p.mu.Unlock()
+
+	var collected []error
+	for _, entry := range emissions {
+		if err := p.emit(entry.registration, entry.update, nil); err != nil {
+			collected = append(collected, err)
+		}
+	}
+
+	p.mu.Lock()
+	for _, registration := range registrations {
 		for _, subscriber := range registration.subscribers {
 			if subscriber.active {
 				subscriber.closed = true

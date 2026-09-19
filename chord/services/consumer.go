@@ -325,12 +325,10 @@ type GuardedFacade struct {
 	assertAccess func() error
 }
 
-// Member returns the guarded handle for one member name.
+// Member returns the guarded handle for one member name. The handle shares the
+// facade member's state and runs the view guard before the member's own guard.
 func (g *GuardedFacade) Member(name string) *RemoteMember {
-	member := g.facade.Member(name)
-	guarded := *member
-	guarded.assertAccess = g.assertAccess
-	return &guarded
+	return GuardMember(g.facade.Member(name), g.assertAccess)
 }
 
 // ServiceID is the underlying facade's service id.
