@@ -17,8 +17,8 @@ var unicodeSpaces = regexp.MustCompile(`[\x{00A0}\x{2000}-\x{200A}\x{202F}\x{205
 type PathInputOptions struct {
 	// Trim strips leading/trailing whitespace first.
 	Trim bool
-	// ExpandTilde expands a leading ~ (default true).
-	ExpandTilde bool
+	// ExpandTilde expands a leading ~. Nil means upstream's default (true).
+	ExpandTilde *bool
 	// HomeDir overrides the home directory for ~ expansion.
 	HomeDir string
 	// StripAtPrefix strips a leading @ (CLI @file paths).
@@ -66,8 +66,8 @@ func NormalizePath(input string, options PathInputOptions) string {
 		normalized = normalized[1:]
 	}
 	expandTilde := true
-	if options.ExpandTilde {
-		expandTilde = false
+	if options.ExpandTilde != nil {
+		expandTilde = *options.ExpandTilde
 	}
 	if expandTilde {
 		home := options.HomeDir
