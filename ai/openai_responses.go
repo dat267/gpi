@@ -255,7 +255,10 @@ type responseInputItem = json.RawMessage
 
 // ConvertResponsesMessagesOptions tune message conversion.
 type ConvertResponsesMessagesOptions struct {
-	IncludeSystemPrompt            *bool
+	IncludeSystemPrompt *bool
+	// ToolCallProviders overrides the dialects that accept the
+	// `call_id|item_id` tool-call id form.
+	ToolCallProviders              map[string]bool
 	GrammarToolInputProperties     map[string]string
 	SupportsMidConvoSystemMessages bool
 	SupportsAdditionalTools        bool
@@ -273,7 +276,8 @@ func normalizeResponsesIDPart(part string) string {
 }
 
 // ConvertResponsesMessages builds the Responses `input` array
-// (port of convertResponsesMessages).
+// (port of convertResponsesMessages). Set ToolCallProviders to override the
+// dialects that accept the `call_id|item_id` tool-call id form.
 func ConvertResponsesMessages(model *Model, context TranscriptContext, options *ConvertResponsesMessagesOptions) (json.RawMessage, error) {
 	if options == nil {
 		options = &ConvertResponsesMessagesOptions{}
@@ -281,8 +285,12 @@ func ConvertResponsesMessages(model *Model, context TranscriptContext, options *
 	normalizedContext := ResolveTranscript(context, options.SupportsMidConvoSystemMessages)
 	var messages []responseInputItem
 
+	providers := options.ToolCallProviders
+	if providers == nil {
+		providers = openAIToolCallProviders
+	}
 	normalizeToolCallID := func(id string, _ *Model, source *AssistantMessage) string {
-		if !openAIToolCallProviders[model.Provider] {
+		if !providers[model.Provider] {
 			return normalizeResponsesIDPart(id)
 		}
 		if !strings.Contains(id, "|") {

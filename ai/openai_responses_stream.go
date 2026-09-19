@@ -19,6 +19,19 @@ import (
 // BuildOpenAIResponsesParams builds the streaming request body
 // (port of buildParams).
 func BuildOpenAIResponsesParams(model *Model, context TranscriptContext, options *OpenAIResponsesOptions, compat *ResolvedOpenAIResponsesCompat, grammarToolInputProperties map[string]string) (*OpenAIResponsesParams, error) {
+	return BuildOpenAIResponsesParamsWithProviders(model, context, options, compat, grammarToolInputProperties, nil)
+}
+
+// BuildOpenAIResponsesParamsWithProviders is BuildOpenAIResponsesParams with an
+// explicit tool-call provider set.
+func BuildOpenAIResponsesParamsWithProviders(
+	model *Model,
+	context TranscriptContext,
+	options *OpenAIResponsesOptions,
+	compat *ResolvedOpenAIResponsesCompat,
+	grammarToolInputProperties map[string]string,
+	toolCallProviders map[string]bool,
+) (*OpenAIResponsesParams, error) {
 	if options == nil {
 		options = &OpenAIResponsesOptions{}
 	}
@@ -37,6 +50,7 @@ func BuildOpenAIResponsesParams(model *Model, context TranscriptContext, options
 		SupportsOpenAIGrammarTools: compat.SupportsOpenAIGrammarTools,
 	}
 	input, err := ConvertResponsesMessages(model, context, &ConvertResponsesMessagesOptions{
+		ToolCallProviders:              toolCallProviders,
 		GrammarToolInputProperties:     grammarToolInputProperties,
 		SupportsMidConvoSystemMessages: compat.SupportsMidConvoSystemMessages,
 		SupportsAdditionalTools:        compat.SupportsAdditionalTools,
@@ -836,6 +850,104 @@ func applyServiceTierPricing(usage *Usage, serviceTier string, model *Model) {
 
 // StreamOpenAIResponses implements the openai-responses stream function.
 func StreamOpenAIResponses(model *Model, context TranscriptContext, options *OpenAIResponsesOptions) *AssistantMessageEventStream {
+	return streamOpenAIResponses(model, context, options, nil)
+}
+
+// openAIResponsesStreamConfig parameterizes the shared Responses streaming loop
+// for the OpenAI and Azure dialects.
+type openAIResponsesStreamConfig struct {
+	// errorPrefix labels provider failures.
+	errorPrefix string
+	// noStopReasonMessage is reported when the stream ends without a stop reason.
+	noStopReasonMessage string
+	// toolCallProviders selects the tool-call id form the dialect expects.
+	toolCallProviders map[string]bool
+	// modelName resolves the request's model field (Azure sends the deployment
+	// name).
+	modelName func(model *Model, options *OpenAIResponsesOptions) string
+	// buildRequest issues the streaming call.
+	buildRequest func(
+		ctx context.Context, model *Model, body []byte, apiKey string,
+		options *OpenAIResponsesOptions, compat ResolvedOpenAIResponsesCompat,
+		cacheSessionID string, messages []Message,
+	) (*http.Request, error)
+}
+
+var defaultOpenAIResponsesStreamConfig = &openAIResponsesStreamConfig{
+	errorPrefix:         defaultOpenAIErrorPrefix(nil),
+	noStopReasonMessage: "OpenAI Responses stream ended without a stop reason",
+	toolCallProviders:   openAIToolCallProviders,
+	buildRequest:        buildOpenAIResponsesRequest,
+}
+
+func defaultOpenAIErrorPrefix(model *Model) string {
+	prefix := "OpenAI"
+	if model != nil && model.Provider != "openai" {
+		prefix = model.Provider
+	}
+	return prefix + " API error"
+}
+
+// buildOpenAIResponsesRequest posts the params to the provider's /responses
+// endpoint with bearer auth.
+func buildOpenAIResponsesRequest(
+	ctx context.Context, model *Model, body []byte, apiKey string,
+	options *OpenAIResponsesOptions, compat ResolvedOpenAIResponsesCompat,
+	cacheSessionID string, messages []Message,
+) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		strings.TrimSuffix(model.BaseURL, "/")+"/responses", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", GetPiUserAgent())
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	if model.Provider == "github-copilot" {
+		hasImages := HasCopilotVisionInput(messages)
+		for name, value := range BuildCopilotDynamicHeaders(messages, hasImages) {
+			req.Header.Set(name, value)
+		}
+	}
+	if cacheSessionID != "" {
+		if compat.SessionAffinityFormat == SessionAffinityOpenRouter {
+			req.Header.Set("x-session-id", cacheSessionID)
+		} else {
+			if compat.SessionAffinityFormat == SessionAffinityOpenAI {
+				req.Header.Set("session_id", cacheSessionID)
+			}
+			req.Header.Set("x-client-request-id", cacheSessionID)
+		}
+	}
+	for name, value := range model.Headers {
+		req.Header.Set(name, value)
+	}
+	for name, value := range options.Headers {
+		if value == nil {
+			req.Header.Del(name)
+			continue
+		}
+		req.Header.Set(name, *value)
+	}
+	return req, nil
+}
+
+// streamOpenAIResponses runs one Responses streaming request through the shared
+// loop.
+func streamOpenAIResponses(model *Model, context TranscriptContext, options *OpenAIResponsesOptions, config *openAIResponsesStreamConfig) *AssistantMessageEventStream {
+	if config == nil {
+		config = &openAIResponsesStreamConfig{
+			errorPrefix:         defaultOpenAIErrorPrefix(model),
+			noStopReasonMessage: "OpenAI Responses stream ended without a stop reason",
+			toolCallProviders:   openAIToolCallProviders,
+			buildRequest:        buildOpenAIResponsesRequest,
+		}
+	}
+	if config.toolCallProviders == nil {
+		config.toolCallProviders = openAIToolCallProviders
+	}
 	stream := NewAssistantMessageEventStream()
 	compat := GetOpenAIResponsesCompat(model)
 	normalizedContext := ResolveTranscript(context, compat.SupportsMidConvoSystemMessages)
@@ -865,11 +977,7 @@ func StreamOpenAIResponses(model *Model, context TranscriptContext, options *Ope
 			} else {
 				output.StopReason = StopError
 			}
-			prefix := model.Provider
-			if model.Provider == "openai" {
-				prefix = "OpenAI"
-			}
-			message := FormatProviderError(NormalizeProviderError(err), prefix+" API error")
+			message := FormatProviderError(NormalizeProviderError(err), config.errorPrefix)
 			output.ErrorMessage = &message
 			stream.Push(AssistantMessageEvent{Type: EventError, Reason: output.StopReason, Error: output})
 			stream.End(&output)
@@ -897,7 +1005,11 @@ func StreamOpenAIResponses(model *Model, context TranscriptContext, options *Ope
 		grammarToolInputProperties := CreateGrammarToolInputProperties(
 			GetDeclaredTools(normalizedContext.Messages), compat.SupportsOpenAIGrammarTools)
 
-		params, err := BuildOpenAIResponsesParams(model, normalizedContext, options, &compat, grammarToolInputProperties)
+		params, err := BuildOpenAIResponsesParamsWithProviders(model, normalizedContext, options, &compat,
+			grammarToolInputProperties, config.toolCallProviders)
+		if err == nil && config.modelName != nil {
+			params.Model = config.modelName(model, options)
+		}
 		if err != nil {
 			fail(err)
 			return
@@ -919,39 +1031,9 @@ func StreamOpenAIResponses(model *Model, context TranscriptContext, options *Ope
 				if berr != nil {
 					return nil, berr
 				}
-				req, nerr := http.NewRequestWithContext(ctx, http.MethodPost,
-					strings.TrimSuffix(model.BaseURL, "/")+"/responses", bytes.NewReader(body))
+				req, nerr := config.buildRequest(ctx, model, body, apiKey, options, compat, cacheSessionID, normalizedContext.Messages)
 				if nerr != nil {
 					return nil, nerr
-				}
-				req.Header.Set("Content-Type", "application/json")
-				req.Header.Set("User-Agent", GetPiUserAgent())
-				req.Header.Set("Authorization", "Bearer "+apiKey)
-				if model.Provider == "github-copilot" {
-					hasImages := HasCopilotVisionInput(normalizedContext.Messages)
-					for name, value := range BuildCopilotDynamicHeaders(normalizedContext.Messages, hasImages) {
-						req.Header.Set(name, value)
-					}
-				}
-				if cacheSessionID != "" {
-					if compat.SessionAffinityFormat == SessionAffinityOpenRouter {
-						req.Header.Set("x-session-id", cacheSessionID)
-					} else {
-						if compat.SessionAffinityFormat == SessionAffinityOpenAI {
-							req.Header.Set("session_id", cacheSessionID)
-						}
-						req.Header.Set("x-client-request-id", cacheSessionID)
-					}
-				}
-				for name, value := range model.Headers {
-					req.Header.Set(name, value)
-				}
-				for name, value := range options.Headers {
-					if value == nil {
-						req.Header.Del(name)
-						continue
-					}
-					req.Header.Set(name, *value)
 				}
 				hresp, rerr := http.DefaultClient.Do(req)
 				if rerr != nil {
@@ -993,7 +1075,7 @@ func StreamOpenAIResponses(model *Model, context TranscriptContext, options *Ope
 			return
 		}
 		if output.StopReason == StopPending {
-			fail(fmt.Errorf("OpenAI Responses stream ended without a stop reason"))
+			fail(fmt.Errorf("%s", config.noStopReasonMessage))
 			return
 		}
 		if output.StopReason == StopAborted || output.StopReason == StopError {
