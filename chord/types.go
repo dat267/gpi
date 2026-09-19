@@ -1,5 +1,7 @@
 package chord
 
+import "context"
+
 // Port of the service portion of packages/chord/src/types.ts.
 
 // ServiceMode is the replication mode of a service.
@@ -30,9 +32,46 @@ type ServiceCatalogueEntry struct {
 	Mode      ServiceMode `json:"mode"`
 }
 
-// Context is the Chord context handle (upstream Context); the full context
-// implementation is queued, so this aliases the value shape used by services.
-type Context = any
+// Context is the Chord invocation context (upstream Context).
+//
+// D14: upstream's chord Context is an ambient capability handle carrying typed
+// values plus an AbortSignal; the Go port aliases context.Context, so abort
+// handling, cancellation, and value propagation use the standard library
+// (withAbortSignal/withCancel/awaitWithContext map to context.WithCancel and
+// select-on-Done).
+type Context = context.Context
+
+// ReplicatedStateDelivery describes one replicated-state delivery.
+type ReplicatedStateDelivery struct {
+	Kind     string
+	Sequence int
+}
+
+// Delivery kinds.
+const (
+	DeliveryHydrate = "hydrate"
+	DeliveryUpdate  = "update"
+)
+
+// ReplicatedState is a read-only replicated value (upstream ReplicatedState).
+type ReplicatedState[T any] interface {
+	// Value is the current immutable value, absent until hydration.
+	Value() (T, bool)
+	// Subscribe registers a listener; the returned function unsubscribes.
+	Subscribe(listener func(value T, ctx Context, delivery ReplicatedStateDelivery)) func()
+}
+
+// MutableReplicatedState is host-owned state that publishes diffs (upstream
+// MutableReplicatedState).
+type MutableReplicatedState[T any] interface {
+	ReplicatedState[T]
+	// Published is the immutable published value (upstream `value`).
+	Published() T
+	// State is the mutable tracked state; all writes must go through it.
+	State() T
+	// Publish emits the changes made through State since the last publication.
+	Publish(ctx Context) error
+}
 
 // JSONValue renders a service call as a plain JSON value for the wire
 // (upstream passes the call object itself, which is already JSON).

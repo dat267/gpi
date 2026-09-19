@@ -197,12 +197,11 @@ type clientServiceTransport struct {
 }
 
 func (t *clientServiceTransport) Invoke(call chord.ServiceCall, ctx chord.Context) (chord.JsonValue, error) {
-	context, _ := ctx.(context.Context)
 	target, err := t.resolve()
 	if err != nil {
 		return nil, err
 	}
-	return t.client.Request(context, target, call)
+	return t.client.Request(ctx, target, call)
 }
 
 func (t *clientServiceTransport) Subscribe(
@@ -211,12 +210,11 @@ func (t *clientServiceTransport) Subscribe(
 	listener func(update *services.ServiceProviderUpdate, ctx chord.Context),
 	ctx chord.Context,
 ) (*services.ServiceSubscription, error) {
-	context, _ := ctx.(context.Context)
 	target, err := t.resolve()
 	if err != nil {
 		return nil, err
 	}
-	subscription, err := t.client.SubscribeService(context, target, serviceID, mode,
+	subscription, err := t.client.SubscribeService(ctx, target, serviceID, mode,
 		func(update *services.ServiceProviderUpdate) { listener(update, ctx) })
 	if err != nil {
 		return nil, err

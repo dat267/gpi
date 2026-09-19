@@ -65,7 +65,8 @@ Update the pin whenever upstream source is re-read for a port.
 | `server` | `packages/server` core — connection state machine (handshake timeout/version checks, hello_error failures, inbound pump ordering), request dispatch (service-call parsing, session vs server-scope routing, subscribe snapshot encoding with update flush ordering, unsubscribe, cancel), SessionRouter (per-client serialization, attachment leases, session open dedup, terminate invalidation), bounded error mapping, drain/close | ported |
 | `server` (unix) | `transports/unix/*` — socket path derivation, listener with stale-socket probing (live-listener refusal, rename-and-verify removal), atomic bind path + hard link + mode, owned-socket cleanup by device/inode identity, per-connection byte accounting, graceful final-chunk close with force-close timer, `createUnixServer` preset | ported |
 | `server/testing` | `testing/*` — `Deferred`, scriptable `TestHarness` (gated close/service calls, release counting), `TestServerHost` (seeded metadata, ambiguity, gated opens), `pi.session-management` test services, `ProtocolTestClient` with fragmented sends and attachment tracking, `connectUnixTestClient`, `createTestServer` | ported |
-| `chord` (facets, bundler, replicated-state runtime), `tui` | upstream packages | queued |
+| `chord/services` (replicated state) | `services/{state,state-internals,instances}.ts` — host-owned mutable state (deep-clone initial publication, diff-based publish, op-batch source listeners, hydrate-then-update deliveries), the cold consumer replica (base-batch-only hydration, sequence-gap clearing, listener-failure reporting), the internals lookup, and the keyed instance directory (generation identity, readiness gating, cancellable per-instance observation tasks, reset/dispose) | ported |
+| `chord` (facets host, provider/consumer, bundler), `tui` | upstream packages | queued |
 | `chord` | `packages/chord` | queued |
 
 ## Build & test
