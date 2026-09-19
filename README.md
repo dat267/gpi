@@ -47,7 +47,8 @@ Update the pin whenever upstream source is re-read for a port.
 | `agent` | `packages/agent/src/{agent-loop.ts, types.ts, stream-fn.ts}` — the loop, tool execution (sequential/parallel), steering/follow-up queues, terminate rules, validation (D6 subset) | ported |
 | `agent` (Agent) | `agent.ts` — stateful wrapper: state, subscribe, steer/follow-up queues (one-at-a-time default), continue semantics, run-failure lifecycle, reset baseline | ported |
 | `agent` | harness/ (compaction, context, execution) | queued |
-| `coding` | `packages/coding-agent` core (tools, system prompt, sessions) | queued |
+| `coding` (tools) | `core/tools/{truncate,path-utils,file-mutation-queue,read,write,ls}.ts` | ported |
+| `coding` | `core/tools/{edit,bash,find,grep}.ts`, system prompt, sessions | queued |
 | `chord` | `packages/chord` | queued |
 
 ## Build & test
