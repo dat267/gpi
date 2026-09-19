@@ -52,7 +52,8 @@ Update the pin whenever upstream source is re-read for a port.
 | `coding` (search) | `core/tools/{find.ts, grep.ts}` — real fd/rg backends, gitignore respect, relativized output, match/context formatting | ported |
 | `coding` (bash) | `core/tools/bash.ts` + `output-accumulator.ts` — bounded-memory streaming, temp-file full output, tree-kill, 128+N signal mapping, timeouts, aborts, PI_* env handling | ported |
 | `coding` (sessions) | `core/session-manager.ts` — v3 JSONL trees, branching, compaction context, migrations, discovery/listing; `core/messages.ts` custom roles | ported |
-| `coding` | powershell tool (windows), system prompt builder, compaction, agent-session | queued |
+| `coding` (prompt) | `core/system-prompt.ts` (structured sections, forced prompts, section diffing) + `core/skills.ts` + `utils/frontmatter.ts` | ported |
+| `coding` | powershell tool (windows), compaction, agent-session | queued |
 | `chord` | `packages/chord` | queued |
 
 ## Build & test
