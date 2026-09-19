@@ -89,6 +89,8 @@ func EnvAPIKeyProvider(spec EnvAPIKeyProviderSpec) *ai.Provider {
 		auth.OAuth = ai.KimiCodingOAuth()
 	case "openrouter":
 		auth.OAuth = ai.OpenRouterOAuth()
+	case "openai-codex":
+		auth.OAuth = ai.OpenAICodexOAuth()
 	}
 	if spec.OAuth != nil {
 		auth.OAuth = spec.OAuth

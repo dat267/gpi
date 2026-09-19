@@ -293,3 +293,17 @@ func replaceAll(input, from, to string) string {
 	}
 	return string(builder)
 }
+
+// randomHex returns n random bytes as a hex string (upstream createState).
+func randomHex(n int) (string, error) {
+	bytes := make([]byte, n)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	const digits = "0123456789abcdef"
+	out := make([]byte, 0, n*2)
+	for _, value := range bytes {
+		out = append(out, digits[value>>4], digits[value&0x0f])
+	}
+	return string(out), nil
+}
