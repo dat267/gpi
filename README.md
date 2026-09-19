@@ -49,7 +49,8 @@ Update the pin whenever upstream source is re-read for a port.
 | `agent` | harness/ (compaction, context, execution) | queued |
 | `coding` (tools) | `core/tools/{truncate,path-utils,file-mutation-queue,read,write,ls}.ts` | ported |
 | `coding` (edit) | `core/tools/{edit.ts, edit-diff.ts}` — exact/fuzzy matching, overlap detection, CRLF/BOM preservation, diffs | ported |
-| `coding` | `core/tools/{bash,find,grep,powershell}.ts`, system prompt, sessions | queued |
+| `coding` (search) | `core/tools/{find.ts, grep.ts}` — real fd/rg backends, gitignore respect, relativized output, match/context formatting | ported |
+| `coding` | `core/tools/{bash,powershell}.ts`, system prompt, sessions | queued |
 | `chord` | `packages/chord` | queued |
 
 ## Build & test

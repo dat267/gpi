@@ -445,3 +445,5 @@ func mustMarshalJSON(v any) json.RawMessage {
 	}
 	return enc
 }
+
+func boolPtr(b bool) *bool { return &b }
