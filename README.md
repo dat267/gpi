@@ -53,7 +53,8 @@ Update the pin whenever upstream source is re-read for a port.
 | `coding` (bash) | `core/tools/bash.ts` + `output-accumulator.ts` — bounded-memory streaming, temp-file full output, tree-kill, 128+N signal mapping, timeouts, aborts, PI_* env handling | ported |
 | `coding` (sessions) | `core/session-manager.ts` — v3 JSONL trees, branching, compaction context, migrations, discovery/listing; `core/messages.ts` custom roles | ported |
 | `coding` (prompt) | `core/system-prompt.ts` (structured sections, forced prompts, section diffing) + `core/skills.ts` + `utils/frontmatter.ts` | ported |
-| `coding` | powershell tool (windows), compaction, agent-session | queued |
+| `coding` (compaction) | `core/compaction/{compaction.ts, utils.ts}` — cut points, token estimation, summarization (retry-wrapped), file-op tracking; `core/messages.ts` convertToLlm | ported |
+| `coding` | powershell tool (windows), agent-session assembly | queued |
 | `chord` | `packages/chord` | queued |
 
 ## Build & test
