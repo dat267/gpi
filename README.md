@@ -62,7 +62,8 @@ Update the pin whenever upstream source is re-read for a port.
 | `chord/delta` | `packages/chord/src/delta` — op vocabulary + wire compression, diff engine, applier (mutable/immutable), validation; JSON value contract (`chord` root) | ported |
 | `telemetry` | `packages/telemetry` — span/context contracts, noop + in-memory recorder (settlement, explicit-vs-automatic status, atomic recording), schema definition data, typed span starter, and the adapter conformance suite | ported |
 | `durable` | `packages/durable` — conversation/entry/task/input/document record types, the Storage atomic persistence contract, and the detached in-memory reference storage (commit sequences, id ownership, cursors, fork-aware history, task/input indexes) | ported |
-| `chord` (facets, bundler, replicated-state runtime), `server`, `tui` | upstream packages | queued |
+| `server` | `packages/server` core — connection state machine (handshake timeout/version checks, hello_error failures, inbound pump ordering), request dispatch (service-call parsing, session vs server-scope routing, subscribe snapshot encoding with update flush ordering, unsubscribe, cancel), SessionRouter (per-client serialization, attachment leases, session open dedup, terminate invalidation), bounded error mapping, drain/close | ported (unix transport + testing helpers queued) |
+| `chord` (facets, bundler, replicated-state runtime), `tui` | upstream packages | queued |
 | `chord` | `packages/chord` | queued |
 
 ## Build & test

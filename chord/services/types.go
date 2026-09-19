@@ -177,3 +177,7 @@ type ServiceSubscription struct {
 	// Close ends the subscription.
 	Close func() error
 }
+
+// ServiceCallValue renders a chord service call as the plain JSON value the
+// protocol codec requires (Go structs are not JSON values).
+func ServiceCallValue(call chord.ServiceCall) any { return call.JSONValue() }
