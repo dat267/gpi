@@ -155,8 +155,8 @@ func TestMarkdownAgainstUpstreamGolden(t *testing.T) {
 
 func boolPtr(value bool) *bool { return &value }
 
-// TestMarkdownLatexAgainstUpstreamGolden is enabled once the latex.ts port
-// lands: upstream renders "math $x^2$ here" as "math x² here" (D68).
+// TestMarkdownLatexAgainstUpstreamGolden verifies the LaTeX path inside the
+// markdown renderer (upstream renders "math $x^2$ here" as "math x² here").
 func TestMarkdownLatexAgainstUpstreamGolden(t *testing.T) {
 	golden := loadMDRenderGolden(t)
 	want, ok := golden["latex-fallback@20"]
@@ -165,10 +165,9 @@ func TestMarkdownLatexAgainstUpstreamGolden(t *testing.T) {
 	}
 	markdown := NewMarkdown("math $x^2$ here", 0, 0, mdTestTheme(), nil, MarkdownOptions{})
 	got := markdown.Render(20)
-	if len(got) == len(want) && got[0] == want[0] {
-		return
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("got %q want %q", got, want)
 	}
-	t.Skipf("latex.ts port pending (D68): got %q want %q", got, want)
 }
 
 // TestMarkdownCacheAndLatexFallback covers the cache and the pending LaTeX
@@ -196,7 +195,13 @@ func TestMarkdownCacheAndLatexFallback(t *testing.T) {
 	if got := blank.Render(10); len(got) != 0 {
 		t.Fatalf("blank render = %q", got)
 	}
-	if _, ok := RenderLatex("x^2", RenderLatexOptions{}); ok {
-		t.Fatal("latex renderer is pending (D68)")
+	// The latex renderer is ported (D68 closed): x^2 renders as x².
+	if got, ok := RenderLatex("x^2", RenderLatexOptions{Display: false}); !ok || got != "x²" {
+		t.Fatalf("RenderLatex = %q,%v", got, ok)
+	}
+	// Unsupported syntax still reports unsupported so the renderer falls back
+	// to the raw source.
+	if _, ok := RenderLatex("\\foo{x}", RenderLatexOptions{Display: false}); ok {
+		t.Fatal("unknown command must be unsupported")
 	}
 }
