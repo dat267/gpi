@@ -46,6 +46,8 @@ type MdToken struct {
 	Task    bool
 	Checked bool
 	Pending bool
+	// Loose marks a list whose items are separated by blank lines.
+	Loose bool
 
 	// textSource is the item content with the task marker removed (used to
 	// build the list item text; not part of the token projection).
@@ -710,9 +712,9 @@ func (l *mdLexer) lexList(source string) (*MdToken, string) {
 			textSource = item.textSource
 		}
 		item.Text = itemTextFor(textSource, entry.raw.trailingBlank && index < len(pending)-1)
-		_ = index
 		token.Items = append(token.Items, item)
 	}
+	token.Loose = loose
 	return token, source[position:]
 }
 
