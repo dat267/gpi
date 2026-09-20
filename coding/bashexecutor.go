@@ -306,8 +306,10 @@ func (o *localShellOperations) Exec(ctx context.Context, command, cwd string, ex
 		})
 	}
 
-	// Stream stdout and stderr.
-	var streamWG sync.WaitGroup
+	// Stream stdout and stderr. Activity is reported so the post-exit drain can
+	// distinguish a quiet inherited handle from one still being written.
+	streamWG := &sync.WaitGroup{}
+	activity := make(chan struct{}, 1)
 	stream := func(reader interface{ Read([]byte) (int, error) }) {
 		streamWG.Add(1)
 		go func() {
@@ -315,10 +317,16 @@ func (o *localShellOperations) Exec(ctx context.Context, command, cwd string, ex
 			buffer := make([]byte, 32*1024)
 			for {
 				read, err := reader.Read(buffer)
-				if read > 0 && execOptions.OnData != nil {
-					chunk := make([]byte, read)
-					copy(chunk, buffer[:read])
-					execOptions.OnData(chunk)
+				if read > 0 {
+					select {
+					case activity <- struct{}{}:
+					default:
+					}
+					if execOptions.OnData != nil {
+						chunk := make([]byte, read)
+						copy(chunk, buffer[:read])
+						execOptions.OnData(chunk)
+					}
 				}
 				if err != nil {
 					return
@@ -350,7 +358,10 @@ func (o *localShellOperations) Exec(ctx context.Context, command, cwd string, ex
 	}
 
 	waitErr := cmd.Wait()
-	streamWG.Wait()
+	// Wait for the pipes to fall idle rather than hanging on a detached
+	// descendant that inherited them; the grace timer re-arms on every chunk
+	// (port of waitForChildProcess).
+	waitForPipeDrain(streamWG, activity)
 	close(stopAbort)
 	if timeoutTimer != nil {
 		timeoutTimer.Stop()
@@ -426,4 +437,37 @@ func tempFileID() string {
 		out[index*2+1] = hexDigits[value&0xf]
 	}
 	return string(out)
+}
+
+// exitStdioGraceMS is upstream's post-exit stdio grace window.
+const exitStdioGraceMS = 100
+
+// waitForPipeDrain waits for the output pipes to finish, but gives up after a
+// short idle grace so an inherited handle held open by a detached descendant
+// cannot hang the caller (port of waitForChildProcess).
+func waitForPipeDrain(streams *sync.WaitGroup, activity <-chan struct{}) {
+	done := make(chan struct{})
+	go func() {
+		streams.Wait()
+		close(done)
+	}()
+	timer := time.NewTimer(exitStdioGraceMS * time.Millisecond)
+	defer timer.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-activity:
+			// Output still arriving: defer finalizing so the tail is not lost.
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(exitStdioGraceMS * time.Millisecond)
+		case <-timer.C:
+			return
+		}
+	}
 }
