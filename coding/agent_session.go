@@ -134,6 +134,10 @@ type AgentSession struct {
 	// the upstream session's state/control surface.
 	control *AgentSessionControl
 
+	// CompactionStreamFn is the stream function used for compaction and branch
+	// summaries (upstream uses the agent's stream function).
+	CompactionStreamFn StreamFnFn
+
 	listenerMu sync.Mutex
 	listeners  []*sessionListenerKey
 

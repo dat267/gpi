@@ -54,6 +54,9 @@ type ModelCycleResult struct {
 	IsScoped      bool
 }
 
+// agentTool aliases the agent tool type for the control surface.
+type agentTool = agent.AgentTool
+
 // AgentSessionControl holds the optional runtime collaborators and mutation
 // state ported here.
 type AgentSessionControl struct {
@@ -94,6 +97,14 @@ func (s *AgentSession) State() agent.AgentState { return s.Agent.State() }
 
 // Model returns the current model.
 func (s *AgentSession) Model() *ai.Model { return s.Agent.State().Model }
+
+// HasModel reports whether a real model is selected. The agent keeps a
+// placeholder model when none was configured, which upstream represents as an
+// undefined model.
+func (s *AgentSession) HasModel() bool {
+	model := s.Model()
+	return model != nil && model.ID != "" && model.ID != "unknown"
+}
 
 // ThinkingLevel returns the current thinking level.
 func (s *AgentSession) ThinkingLevel() ai.ThinkingLevel { return s.Agent.State().ThinkingLevel }
