@@ -1,6 +1,9 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+	"sync"
+)
 
 // Early slice of the keys.ts port: the Kitty key-release/repeat detectors used
 // by the renderer's input routing. The rest of keys.ts (parseKey,
@@ -39,4 +42,26 @@ func containsAny(data string, needles ...string) bool {
 		}
 	}
 	return false
+}
+
+// ---- Global Kitty protocol state (keys.ts globals) ----
+
+var kittyProtocolState struct {
+	mu     sync.Mutex
+	active bool
+}
+
+// SetKittyProtocolActive sets the global Kitty keyboard protocol state.
+// Called by ProcessTerminal after detecting protocol support.
+func SetKittyProtocolActive(active bool) {
+	kittyProtocolState.mu.Lock()
+	defer kittyProtocolState.mu.Unlock()
+	kittyProtocolState.active = active
+}
+
+// IsKittyProtocolActive queries the global Kitty keyboard protocol state.
+func IsKittyProtocolActive() bool {
+	kittyProtocolState.mu.Lock()
+	defer kittyProtocolState.mu.Unlock()
+	return kittyProtocolState.active
 }
