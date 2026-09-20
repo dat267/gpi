@@ -262,3 +262,52 @@ func TestSettingsListBehaviour(t *testing.T) {
 		t.Fatalf("index = %d", empty.SelectedIndex())
 	}
 }
+
+// TestSettingsListFilteredActivationMutation guards D97: activating a row while
+// a search filter is active must update the stored item, not a filtered copy.
+func TestSettingsListFilteredActivationMutation(t *testing.T) {
+	theme := SettingsListTheme{
+		Label:       func(text string, selected bool) string { return text },
+		Value:       func(text string, selected bool) string { return text },
+		Description: func(text string) string { return text },
+		Hint:        func(text string) string { return text },
+	}
+	items := []SettingItem{
+		{ID: "alpha", Label: "Alpha", CurrentValue: "a1", Values: []string{"a1", "a2"}},
+		{ID: "beta", Label: "Beta", CurrentValue: "b1", Values: []string{"b1", "b2"}},
+	}
+	var changes []string
+	list := NewSettingsList(items, 10, theme,
+		func(id string, newValue string) { changes = append(changes, id+"="+newValue) },
+		func() {}, SettingsListOptions{EnableSearch: true})
+
+	// Filter to Beta and activate it twice: the stored item must cycle.
+	list.HandleInput("/")
+	for _, char := range "beta" {
+		list.HandleInput(string(char))
+	}
+	if ids := settingsListDisplayIDs(list); len(ids) != 1 || ids[0] != "beta" {
+		t.Fatalf("display = %v", ids)
+	}
+	list.HandleInput("\r")
+	list.HandleInput("\r")
+	if len(changes) != 2 || changes[0] != "beta=b2" || changes[1] != "beta=b1" {
+		t.Fatalf("changes = %v", changes)
+	}
+	if items[1].CurrentValue != "b1" || items[0].CurrentValue != "a1" {
+		t.Fatalf("items mutated wrongly: %+v", items)
+	}
+	rendered := strings.Join(list.Render(40), "\n")
+	if !strings.Contains(rendered, "b1") || strings.Contains(rendered, "a1") {
+		t.Fatalf("render = %q", rendered)
+	}
+}
+
+func settingsListDisplayIDs(list *SettingsList) []string {
+	items := list.getDisplayItems()
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	return ids
+}

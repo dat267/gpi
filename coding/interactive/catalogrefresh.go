@@ -23,6 +23,9 @@ type activeCatalogRefresh struct {
 	result  ai.ModelsRefreshResult
 	err     error
 	waiters int
+	// canceled marks a shared refresh whose last waiter gave up, so a later
+	// caller starts a fresh refresh instead of joining the doomed one (D98).
+	canceled bool
 }
 
 // ModelCatalogRefreshCoordinator deduplicates concurrent refreshes per
@@ -51,6 +54,15 @@ func (c *ModelCatalogRefreshCoordinator) Refresh(ctx context.Context, runtime Mo
 		c.active = map[ModelCatalogRuntime]*activeCatalogRefresh{}
 	}
 	active, ok := c.active[runtime]
+	if ok {
+		active.mu.Lock()
+		canceled := active.canceled
+		active.mu.Unlock()
+		if canceled {
+			delete(c.active, runtime)
+			ok = false
+		}
+	}
 	if !ok {
 		refreshContext, cancel := context.WithCancel(context.Background())
 		active = &activeCatalogRefresh{cancel: cancel, done: make(chan struct{})}
@@ -61,12 +73,16 @@ func (c *ModelCatalogRefreshCoordinator) Refresh(ctx context.Context, runtime Mo
 			active.result = result
 			active.err = err
 			active.mu.Unlock()
-			close(active.done)
+			// Unpublish before signalling completion (D98): the Go port has
+			// real concurrency, so a caller arriving after the shared refresh
+			// finished must start a fresh refresh instead of joining the
+			// completed one and observing its (possibly cancelled) error.
 			c.mu.Lock()
 			if c.active[runtime] == active {
 				delete(c.active, runtime)
 			}
 			c.mu.Unlock()
+			close(active.done)
 		}()
 	}
 	active.waiters++
@@ -103,6 +119,9 @@ func (c *ModelCatalogRefreshCoordinator) releaseWaiter(runtime ModelCatalogRunti
 	active.waiters--
 	if active.waiters == 0 && c.active[runtime] == active {
 		// The last waiter gave up: cancel the shared operation.
+		active.mu.Lock()
+		active.canceled = true
+		active.mu.Unlock()
 		active.cancel()
 	}
 }

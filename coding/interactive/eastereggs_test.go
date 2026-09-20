@@ -33,7 +33,13 @@ type easterCorpus struct {
 
 func loadEasterGolden(t *testing.T) map[string]string {
 	t.Helper()
-	file, err := os.Open("testdata/easter_golden.txt")
+	return loadGoldenFile(t, "testdata/easter_golden.txt")
+}
+
+// loadGoldenFile reads a "label => json" golden file.
+func loadGoldenFile(t *testing.T, path string) map[string]string {
+	t.Helper()
+	file, err := os.Open(path)
 	if err != nil {
 		t.Fatalf("open golden: %v", err)
 	}

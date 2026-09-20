@@ -39,8 +39,11 @@ type SettingsListOptions struct {
 
 // SettingsList renders configurable settings rows.
 type SettingsList struct {
-	items             []SettingItem
-	filteredItems     []SettingItem
+	items         []SettingItem
+	filteredItems []SettingItem
+	// filteredIndexes maps display positions to indexes in items, so
+	// activation mutates the stored item rather than a filtered copy (D97).
+	filteredIndexes   []int
 	theme             SettingsListTheme
 	selectedIndex     int
 	mousePressedIndex int
@@ -98,10 +101,7 @@ func (s *SettingsList) UpdateValue(id string, newValue string) {
 
 // SelectItem moves the selection to the item with the given id.
 func (s *SettingsList) SelectItem(id string) {
-	items := s.items
-	if s.searchEnabled {
-		items = s.filteredItems
-	}
+	items := s.getDisplayItems()
 	for index, item := range items {
 		if item.ID == id {
 			s.selectedIndex = index
@@ -314,10 +314,18 @@ func (s *SettingsList) SelectedIndex() int { return s.selectedIndex }
 func (s *SettingsList) SearchInput() *Input { return s.searchInput }
 
 func (s *SettingsList) getDisplayItems() []SettingItem {
-	if s.searchEnabled {
-		return s.filteredItems
+	if !s.searchEnabled || s.filteredIndexes == nil {
+		return s.items
 	}
-	return s.items
+	// Rebuild from the stored items so value mutations are visible (D97):
+	// upstream's filtered array holds references to the same objects.
+	display := make([]SettingItem, 0, len(s.filteredIndexes))
+	for _, index := range s.filteredIndexes {
+		if index >= 0 && index < len(s.items) {
+			display = append(display, s.items[index])
+		}
+	}
+	return display
 }
 
 func (s *SettingsList) getVisibleRange(displayItems []SettingItem) (startIndex int, endIndex int) {
@@ -330,16 +338,19 @@ func (s *SettingsList) activateItem() {
 	if s.selectedIndex < 0 || s.selectedIndex >= len(displayItems) {
 		return
 	}
-	item := &displayItems[s.selectedIndex]
+	realIndex := s.realItemIndex(s.selectedIndex)
+	if realIndex < 0 || realIndex >= len(s.items) {
+		return
+	}
+	item := &s.items[realIndex]
 
 	if item.Submenu != nil {
 		s.submenuItemIndex = s.selectedIndex
 		s.hasSubmenuItemIndex = true
-		itemIndex := s.selectedIndex
 		s.submenuComponent = item.Submenu(item.CurrentValue, func(result SubmenuResult) {
 			if result.HasSelectedValue {
-				s.items[itemIndex].CurrentValue = result.SelectedValue
-				s.onChange(s.items[itemIndex].ID, result.SelectedValue)
+				s.items[realIndex].CurrentValue = result.SelectedValue
+				s.onChange(s.items[realIndex].ID, result.SelectedValue)
 			}
 			if result.NavigateTo != "" {
 				s.navigateAfterClose = result.NavigateTo
@@ -364,6 +375,17 @@ func (s *SettingsList) activateItem() {
 	}
 }
 
+// realItemIndex resolves a display position to an index in items.
+func (s *SettingsList) realItemIndex(displayIndex int) int {
+	if !s.searchEnabled || s.filteredIndexes == nil {
+		return displayIndex
+	}
+	if displayIndex < 0 || displayIndex >= len(s.filteredIndexes) {
+		return -1
+	}
+	return s.filteredIndexes[displayIndex]
+}
+
 func (s *SettingsList) closeSubmenu() {
 	s.submenuComponent = nil
 	if s.navigateAfterClose != "" {
@@ -382,6 +404,18 @@ func (s *SettingsList) closeSubmenu() {
 
 func (s *SettingsList) applyFilter(query string) {
 	s.filteredItems = FuzzyFilter(s.items, query, func(item SettingItem) string { return item.Label })
+	s.filteredIndexes = make([]int, 0, len(s.filteredItems))
+	used := make([]bool, len(s.items))
+	for _, filtered := range s.filteredItems {
+		for index, item := range s.items {
+			if used[index] || item.ID != filtered.ID {
+				continue
+			}
+			used[index] = true
+			s.filteredIndexes = append(s.filteredIndexes, index)
+			break
+		}
+	}
 	s.selectedIndex = 0
 }
 
