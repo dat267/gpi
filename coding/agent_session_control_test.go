@@ -310,18 +310,19 @@ func TestSessionAutoTogglesAndBash(t *testing.T) {
 		t.Fatal("toggles not applied")
 	}
 
-	// Retry state.
+	// Retry state: isRetrying reflects an in-flight retry sleep (upstream's
+	// abort controller), while retryAttempt is the attempt counter.
 	if session.IsRetrying() || session.RetryAttempt() != 0 {
 		t.Fatal("no retry expected")
 	}
 	session.mu.Lock()
 	session.retryAttempt = 2
 	session.mu.Unlock()
-	if !session.IsRetrying() || session.RetryAttempt() != 2 {
+	if session.IsRetrying() || session.RetryAttempt() != 2 {
 		t.Fatalf("retry = %v %d", session.IsRetrying(), session.RetryAttempt())
 	}
 	session.AbortRetry()
-	if session.IsRetrying() || !session.control.retryAborted {
+	if session.IsRetrying() {
 		t.Fatal("abort retry")
 	}
 

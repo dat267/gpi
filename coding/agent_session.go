@@ -152,6 +152,8 @@ type AgentSession struct {
 
 	lastAssistantMessage *ai.AssistantMessage
 	retryAttempt         int
+	retryCancel          context.CancelFunc
+	retryActive          bool
 	willRetry            bool
 
 	// System prompt options for section diffing on tool changes.
@@ -308,11 +310,19 @@ func (s *AgentSession) handleAgentEvent(event *agent.AgentEvent) {
 			// bashExecution/compactionSummary/branchSummary persist elsewhere.
 		}
 
-		// Track the assistant message for auto-compaction and retry reset.
+		// Track the assistant message for auto-compaction; a successful response
+		// ends any retry sequence (upstream emits auto_retry_end success and
+		// resets the counter).
 		if assistant, ok := event.Message.(*ai.AssistantMessage); ok {
+			s.mu.Lock()
 			s.lastAssistantMessage = assistant
-			if assistant.StopReason != ai.StopError && assistant.StopReason != ai.StopLength {
+			attempt := s.retryAttempt
+			if assistant.StopReason != ai.StopError && attempt > 0 {
 				s.retryAttempt = 0
+			}
+			s.mu.Unlock()
+			if assistant.StopReason != ai.StopError && attempt > 0 {
+				s.emit(&SessionEvent{Type: SessionAutoRetryEnd, Success: true, Attempt: attempt})
 			}
 		}
 	}
@@ -335,16 +345,22 @@ func (s *AgentSession) emitQueueUpdate() {
 	})
 }
 
-// willRetryAfterAgentEnd: retry policy enabled, attempts remain, and the
-// last assistant error is transient.
+// willRetryAfterAgentEnd: retry policy enabled, attempts remain, and the last
+// assistant error is retryable (context overflow is not).
 func (s *AgentSession) willRetryAfterAgentEnd(event *agent.AgentEvent) bool {
-	settings := s.Settings.Retry
-	if settings == nil || !settings.Enabled || s.retryAttempt >= settings.MaxRetries {
+	settings := s.retrySettings()
+	if settings == nil || !settings.Enabled {
+		return false
+	}
+	s.mu.Lock()
+	attempt := s.retryAttempt
+	s.mu.Unlock()
+	if attempt >= settings.MaxRetries {
 		return false
 	}
 	for i := len(event.Messages) - 1; i >= 0; i-- {
 		if assistant, ok := event.Messages[i].(*ai.AssistantMessage); ok {
-			return ai.IsRetryableAssistantError(assistant)
+			return s.IsRetryableError(assistant)
 		}
 	}
 	return false

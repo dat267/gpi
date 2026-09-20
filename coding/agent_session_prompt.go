@@ -182,6 +182,11 @@ func (s *AgentSession) runAgentPrompt(ctx context.Context, messages []ai.Message
 	state.mu.Unlock()
 
 	err := s.Agent.PromptMessages(ctx, messages)
+	if err == nil {
+		// Post-run continuation: auto-retry, then queued continuations
+		// (upstream's _runAgentPrompt loop).
+		err = s.runPostRunLoop(ctx)
+	}
 
 	state.mu.Lock()
 	state.runActive = false

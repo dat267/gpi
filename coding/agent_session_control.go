@@ -154,24 +154,6 @@ func (s *AgentSession) RetryAttempt() int {
 	return s.retryAttempt
 }
 
-// IsRetrying reports whether a retry is scheduled.
-func (s *AgentSession) IsRetrying() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.retryAttempt > 0
-}
-
-// AbortRetry cancels a pending retry.
-func (s *AgentSession) AbortRetry() {
-	s.mu.Lock()
-	s.retryAttempt = 0
-	s.willRetry = false
-	if s.control != nil {
-		s.control.retryAborted = true
-	}
-	s.mu.Unlock()
-}
-
 // Messages returns the transcript including custom message types.
 func (s *AgentSession) Messages() []ai.Message { return s.Agent.State().Messages }
 
