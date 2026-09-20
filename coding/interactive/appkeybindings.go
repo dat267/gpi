@@ -146,7 +146,7 @@ func KeybindingsFor(goos string, env func(string) string) (map[string]tui.Keybin
 		"app.models.toggleProvider":     {DefaultKeys: []string{"ctrl+p"}, Description: "Toggle all models for provider"},
 		"app.models.reorderUp":          {DefaultKeys: []string{"alt+up"}, Description: "Move model up in priority order"},
 		"app.models.reorderDown":        {DefaultKeys: []string{"alt+down"}, Description: "Move model down in priority order"},
-		"app.tree.filter.default":       {DefaultKeys: []string{"ctrl+f"}, Description: "Tree filter: default"},
+		"app.tree.filter.default":       {DefaultKeys: []string{"ctrl+d"}, Description: "Tree filter: default"},
 		"app.tree.filter.noTools":       {DefaultKeys: []string{"ctrl+t"}, Description: "Tree filter: hide tool calls"},
 		"app.tree.filter.userOnly":      {DefaultKeys: []string{"ctrl+u"}, Description: "Tree filter: user messages only"},
 		"app.tree.filter.labeledOnly":   {DefaultKeys: []string{"ctrl+l"}, Description: "Tree filter: labeled only"},

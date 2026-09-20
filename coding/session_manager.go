@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -902,3 +903,67 @@ func contentTextJoined(content ai.StringOrBlocks) string {
 
 // SessionDir returns the session directory (exported accessor).
 func (m *SessionManager) SessionDir() string { return m.sessionDir }
+
+// SessionTreeNode is a node of the session entry tree (upstream getTree()).
+type SessionTreeNode struct {
+	Entry          SessionEntry
+	Children       []*SessionTreeNode
+	Label          string
+	HasLabel       bool
+	LabelTimestamp string
+}
+
+// GetTree builds the session entry tree with resolved labels.
+func (m *SessionManager) GetTree() []*SessionTreeNode {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entries := m.getEntriesLocked()
+
+	nodeMap := map[string]*SessionTreeNode{}
+	var roots []*SessionTreeNode
+	for _, entry := range entries {
+		node := &SessionTreeNode{Entry: entry}
+		if label, ok := m.labelsByID[entry.ID]; ok {
+			node.Label = label
+			node.HasLabel = true
+			node.LabelTimestamp = m.labelTimestamps[entry.ID]
+		}
+		nodeMap[entry.ID] = node
+	}
+
+	for _, entry := range entries {
+		node := nodeMap[entry.ID]
+		if entry.ParentID == nil || *entry.ParentID == entry.ID {
+			roots = append(roots, node)
+			continue
+		}
+		if parent, ok := nodeMap[*entry.ParentID]; ok {
+			parent.Children = append(parent.Children, node)
+		} else {
+			// Orphan: treat as root.
+			roots = append(roots, node)
+		}
+	}
+
+	// Sort children by timestamp (oldest first).
+	stack := append([]*SessionTreeNode{}, roots...)
+	for len(stack) > 0 {
+		node := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		sort.SliceStable(node.Children, func(i int, j int) bool {
+			return node.Children[i].Entry.Timestamp < node.Children[j].Entry.Timestamp
+		})
+		stack = append(stack, node.Children...)
+	}
+	return roots
+}
+
+func (m *SessionManager) getEntriesLocked() []SessionEntry {
+	var out []SessionEntry
+	for _, entry := range m.fileEntries {
+		if entry.Entry != nil {
+			out = append(out, *entry.Entry)
+		}
+	}
+	return out
+}
