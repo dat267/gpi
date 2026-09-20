@@ -91,20 +91,71 @@ func (t *Theme) Bg(color ThemeBg, text string) string {
 	return ansi + text + "\x1b[49m"
 }
 
+// styleColorsEnabled mirrors chalk's color-support detection: when disabled
+// the style helpers return plain text (divergence D86: a package switch
+// instead of chalk's NO_COLOR/FORCE_COLOR environment handling).
+var styleColorsState struct {
+	mu      sync.Mutex
+	enabled bool
+	set     bool
+}
+
+// SetStyleColorsEnabled toggles the chalk-equivalent style helpers.
+func SetStyleColorsEnabled(enabled bool) {
+	styleColorsState.mu.Lock()
+	defer styleColorsState.mu.Unlock()
+	styleColorsState.enabled = enabled
+	styleColorsState.set = true
+}
+
+func styleColorsEnabled() bool {
+	styleColorsState.mu.Lock()
+	defer styleColorsState.mu.Unlock()
+	if !styleColorsState.set {
+		return true
+	}
+	return styleColorsState.enabled
+}
+
 // Bold applies bold (chalk.bold).
-func (t *Theme) Bold(text string) string { return "\x1b[1m" + text + "\x1b[22m" }
+func (t *Theme) Bold(text string) string {
+	if !styleColorsEnabled() {
+		return text
+	}
+	return "\x1b[1m" + text + "\x1b[22m"
+}
 
 // Italic applies italic (chalk.italic).
-func (t *Theme) Italic(text string) string { return "\x1b[3m" + text + "\x1b[23m" }
+func (t *Theme) Italic(text string) string {
+	if !styleColorsEnabled() {
+		return text
+	}
+	return "\x1b[3m" + text + "\x1b[23m"
+}
 
 // Underline applies underline (chalk.underline).
-func (t *Theme) Underline(text string) string { return "\x1b[4m" + text + "\x1b[24m" }
+func (t *Theme) Underline(text string) string {
+	if !styleColorsEnabled() {
+		return text
+	}
+	return "\x1b[4m" + text + "\x1b[24m"
+}
 
 // Inverse applies inverse video (chalk.inverse).
-func (t *Theme) Inverse(text string) string { return "\x1b[7m" + text + "\x1b[27m" }
+func (t *Theme) Inverse(text string) string {
+	if !styleColorsEnabled() {
+		return text
+	}
+	return "\x1b[7m" + text + "\x1b[27m"
+}
 
 // Strikethrough applies strikethrough (chalk.strikethrough).
-func (t *Theme) Strikethrough(text string) string { return "\x1b[9m" + text + "\x1b[29m" }
+func (t *Theme) Strikethrough(text string) string {
+	if !styleColorsEnabled() {
+		return text
+	}
+	return "\x1b[9m" + text + "\x1b[29m"
+}
 
 // GetFgAnsi returns the raw foreground sequence.
 func (t *Theme) GetFgAnsi(color ThemeColor) string {

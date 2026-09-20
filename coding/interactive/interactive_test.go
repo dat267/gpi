@@ -196,11 +196,14 @@ func TestCatalogRefreshSharing(t *testing.T) {
 		}(i)
 	}
 
-	// Wait for the shared refresh to start, then release it.
-	select {
-	case <-runtime.started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("refresh did not start")
+	// Wait until all three callers share the in-flight refresh before
+	// releasing it (a late caller would legitimately start a new refresh).
+	deadline := time.Now().Add(2 * time.Second)
+	for coordinator.activeWaiters(runtime) < 3 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if waiters := coordinator.activeWaiters(runtime); waiters != 3 {
+		t.Fatalf("waiters = %d", waiters)
 	}
 	close(runtime.release)
 	wg.Wait()

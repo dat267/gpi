@@ -86,6 +86,17 @@ func (c *ModelCatalogRefreshCoordinator) Refresh(ctx context.Context, runtime Mo
 	}
 }
 
+// activeWaiters reports the number of waiters on the in-flight refresh for a
+// runtime (test observation helper).
+func (c *ModelCatalogRefreshCoordinator) activeWaiters(runtime ModelCatalogRuntime) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if active, ok := c.active[runtime]; ok {
+		return active.waiters
+	}
+	return 0
+}
+
 func (c *ModelCatalogRefreshCoordinator) releaseWaiter(runtime ModelCatalogRuntime, active *activeCatalogRefresh) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
