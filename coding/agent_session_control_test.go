@@ -495,7 +495,15 @@ func TestSessionDefaultsWithoutControl(t *testing.T) {
 	}
 }
 
-// stubStreamFn is a no-op stream used by the control-surface tests.
+// stubStreamFn answers every prompt with a fixed assistant message.
 func stubStreamFn(model *ai.Model, context ai.TranscriptContext, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
-	return ai.NewAssistantMessageEventStream()
+	stream := ai.NewAssistantMessageEventStream()
+	go func() {
+		message := &ai.AssistantMessage{
+			API: model.API, Provider: model.Provider, Model: model.ID,
+			Content: ai.ContentList{ai.TextContent{Text: "ack"}}, StopReason: ai.StopStop,
+		}
+		stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: ai.StopStop, Message: message})
+	}()
+	return stream
 }
