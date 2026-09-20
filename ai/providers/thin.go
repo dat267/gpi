@@ -284,6 +284,14 @@ func GitHubCopilotProvider() *ai.Provider {
 	})
 }
 
+// OpenRouterImagesProvider builds the built-in OpenRouter image provider.
+func OpenRouterImagesProvider() *ai.ImagesProvider { return ai.OpenRouterImagesProvider() }
+
+// BuiltinImagesModels registers every built-in image provider.
+func BuiltinImagesModels(models *ai.ImagesModels) *ai.ImagesModels {
+	return ai.BuiltinImagesModels(models)
+}
+
 // RadiusProvider builds the dynamic Radius gateway provider (upstream
 // radiusProvider). Its pi-messages API adapter is not ported, so the provider
 // advertises auth and the refreshed catalogue while dispatching to a
