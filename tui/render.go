@@ -351,8 +351,11 @@ func (t *Renderer) requestRenderLocked(force bool) {
 }
 
 // requestImmediateRenderLocked schedules a next-tick render. Callers hold the
-// lock.
+// lock. Auto-render is disabled in tests (D83), including this path.
 func (t *Renderer) requestImmediateRenderLocked() {
+	if t.autoRenderDisabled {
+		return
+	}
 	t.cancelRenderTimerLocked()
 	t.renderRequested = true
 	if t.immediateRenderScheduled {
