@@ -160,15 +160,18 @@ func (b *FileAuthStorageBackend) WithLock(fn func(current *string) (LockResult, 
 	if err := b.ensureParentDir(); err != nil {
 		return nil, err
 	}
-	if err := b.ensureFileExists(); err != nil {
-		return nil, err
-	}
 
 	release, err := b.acquireAuthLockSync()
 	if err != nil {
 		return nil, err
 	}
 	defer release()
+
+	// The file is created inside the lock: creating it before locking lets a
+	// concurrent writer's content be truncated by the empty placeholder.
+	if err := b.ensureFileExists(); err != nil {
+		return nil, err
+	}
 
 	var current *string
 	if PathExists(b.authPath) {
@@ -200,15 +203,16 @@ func (b *FileAuthStorageBackend) WithLockAsync(ctx context.Context, fn func(curr
 	if err := b.ensureParentDir(); err != nil {
 		return nil, err
 	}
-	if err := b.ensureFileExists(); err != nil {
-		return nil, err
-	}
 
 	release, err := b.acquireAuthLockAsync(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = release() }()
+
+	if err := b.ensureFileExists(); err != nil {
+		return nil, err
+	}
 
 	if err := ctx.Err(); err != nil {
 		return nil, err
