@@ -116,6 +116,12 @@ type Renderer struct {
 
 	// DoRender is the screen-specific render implementation.
 	DoRender func()
+	// Lifecycle hooks (see the OnBeforeTerminalStart comment above).
+	OnBeforeTerminalStart func()
+	OnAfterTerminalStart  func()
+	OnBeforeTerminalStop  func(options TuiStopOptions)
+	OnAfterTerminalStop   func(options TuiStopOptions)
+	OnResetRenderState    func()
 	// MatchesDebugKey matches the global debug key (Shift+Ctrl+D). Nil leaves
 	// the debug key disabled; the keys.ts port supplies it.
 	MatchesDebugKey func(data string) bool
@@ -225,9 +231,13 @@ func (t *Renderer) Start() {
 	t.mu.Lock()
 	t.stopped = false
 	t.mu.Unlock()
-	t.BeforeTerminalStart()
+	if t.OnBeforeTerminalStart != nil {
+		t.OnBeforeTerminalStart()
+	}
 	t.Terminal.Start(func(data string) { t.HandleTerminalInput(data) }, func() { t.RequestRender(false) })
-	t.AfterTerminalStart()
+	if t.OnAfterTerminalStart != nil {
+		t.OnAfterTerminalStart()
+	}
 	t.Terminal.HideCursor()
 	t.RequestRender(false)
 }
@@ -238,18 +248,24 @@ func (t *Renderer) Stop(options TuiStopOptions) {
 	t.stopped = true
 	t.cancelRenderTimerLocked()
 	t.mu.Unlock()
-	t.BeforeTerminalStop(options)
+	if t.OnBeforeTerminalStop != nil {
+		t.OnBeforeTerminalStop(options)
+	}
 	t.Terminal.ShowCursor()
 	t.Terminal.Stop()
-	t.AfterTerminalStop(options)
+	if t.OnAfterTerminalStop != nil {
+		t.OnAfterTerminalStop(options)
+	}
 }
 
-// Hooks for the concrete screens (upstream's protected lifecycle methods).
-func (t *Renderer) BeforeTerminalStart()                {}
-func (t *Renderer) AfterTerminalStart()                 {}
-func (t *Renderer) BeforeTerminalStop(_ TuiStopOptions) {}
-func (t *Renderer) AfterTerminalStop(_ TuiStopOptions)  {}
-func (t *Renderer) ResetRenderState()                   {}
+// Hooks for the concrete screens (upstream's protected lifecycle methods are
+// overridable; Go uses function fields: D44).
+//
+// OnBeforeTerminalStart func()
+// OnAfterTerminalStart  func()
+// OnBeforeTerminalStop  func(options TuiStopOptions)
+// OnAfterTerminalStop   func(options TuiStopOptions)
+// OnResetRenderState    func()
 
 // AddInputListener registers an input listener and returns a removal function.
 func (t *Renderer) AddInputListener(listener TuiInputListener) func() {
@@ -278,7 +294,7 @@ func (t *Renderer) RemoveInputListener(listener TuiInputListener) {
 func (t *Renderer) RenderNow(force bool) {
 	t.mu.Lock()
 	if force {
-		t.ResetRenderState()
+		t.resetRenderState()
 	}
 	t.renderRequested = false
 	t.cancelRenderTimerLocked()
@@ -297,7 +313,7 @@ func (t *Renderer) RequestRender(force bool) {
 // requestRenderLocked is RequestRender for callers that hold the lock.
 func (t *Renderer) requestRenderLocked(force bool) {
 	if force {
-		t.ResetRenderState()
+		t.resetRenderState()
 		t.requestImmediateRenderLocked()
 		return
 	}
@@ -370,6 +386,13 @@ func (t *Renderer) scheduleRenderLocked() {
 		}
 		t.mu.Unlock()
 	})
+}
+
+// resetRenderState invokes the screen's reset hook.
+func (t *Renderer) resetRenderState() {
+	if t.OnResetRenderState != nil {
+		t.OnResetRenderState()
+	}
 }
 
 func (t *Renderer) doRender() {
