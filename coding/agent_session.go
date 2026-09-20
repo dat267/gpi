@@ -156,6 +156,10 @@ type AgentSession struct {
 	retryActive          bool
 	willRetry            bool
 
+	compactionCancel context.CancelFunc
+	compactionActive bool
+	overflowRecovery overflowRecoveryState
+
 	// System prompt options for section diffing on tool changes.
 	SystemPromptOptions *BuildSystemPromptOptions
 }
@@ -451,18 +455,17 @@ func adaptStreamFn(streamFn agent.StreamFn) StreamFnFn {
 
 // maybeAutoCompact checks the threshold and compacts when crossed (the
 // prepareNextTurn hook upstream: _compactBeforeNextAssistantResponse).
+// maybeAutoCompact runs the pre-turn compaction check over the last assistant
+// message (upstream's pre-prompt _checkCompaction(lastAssistant, false)).
 func (s *AgentSession) maybeAutoCompact(ctx context.Context) error {
-	model := s.Agent.State().Model
-	if model == nil || model.ContextWindow <= 0 {
+	last := s.findLastAssistantMessage()
+	if last == nil {
 		return nil
 	}
-	messages := s.Agent.State().Messages
-	tokens := EstimateContextTokens(messages).Tokens
-	if !ShouldCompact(int64(tokens), model.ContextWindow, s.Settings.Compaction) {
-		return nil
+	if _, err := s.CheckCompaction(ctx, last, false); err != nil {
+		return err
 	}
-	_, err := s.runCompaction(ctx, CompactionThreshold, s.Agent.StreamFunction)
-	return err
+	return nil
 }
 
 // ---------------------------------------------------------------------------

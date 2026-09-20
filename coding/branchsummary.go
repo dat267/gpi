@@ -511,9 +511,18 @@ type SummarizationRequestAuth struct {
 	Env     map[string]string
 }
 
-// compactionStreamFn exposes the compaction stream function (host wiring;
-// upstream uses the agent's stream function).
-func (s *AgentSession) compactionStreamFn() StreamFnFn { return s.CompactionStreamFn }
+// compactionStreamFn exposes the compaction stream function: the explicit
+// CompactionStreamFn when configured, otherwise the session's stream function
+// (upstream uses the agent's stream function).
+func (s *AgentSession) compactionStreamFn() StreamFnFn {
+	if s.CompactionStreamFn != nil {
+		return s.CompactionStreamFn
+	}
+	if s.streamFn != nil {
+		return adaptStreamFn(s.streamFn)
+	}
+	return nil
+}
 
 // RestoreToolsFromTranscript re-declares the tool set the branch last used,
 // taken from the transcript's current system message (port of

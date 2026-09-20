@@ -715,7 +715,11 @@ type CompactionPreparation struct {
 // PrepareCompaction pre-computes the compaction cut and spans
 // (port of prepareCompaction); undefined when there is nothing to compact.
 func PrepareCompaction(pathEntries []SessionEntry, settings CompactionSettings) *CompactionPreparation {
-	if len(pathEntries) > 0 && pathEntries[len(pathEntries)-1].Type == "compaction" {
+	// Nothing to compact without entries (upstream returns null).
+	if len(pathEntries) == 0 {
+		return nil
+	}
+	if pathEntries[len(pathEntries)-1].Type == "compaction" {
 		return nil
 	}
 

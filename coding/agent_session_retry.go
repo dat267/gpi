@@ -2,7 +2,6 @@ package coding
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/dat267/gpi/ai"
@@ -29,38 +28,10 @@ func (s *AgentSession) IsRetryableError(message *ai.AssistantMessage) bool {
 	if model != nil {
 		contextWindow = model.ContextWindow
 	}
-	if isContextOverflowMessage(message, contextWindow) {
+	if ai.IsContextOverflow(message, contextWindow) {
 		return false
 	}
 	return ai.IsRetryableAssistantError(message)
-}
-
-// isContextOverflowMessage reports a context-overflow error or length stop
-// (port of isContextOverflow).
-func isContextOverflowMessage(message *ai.AssistantMessage, contextWindow int64) bool {
-	if message == nil {
-		return false
-	}
-	if message.StopReason == ai.StopLength {
-		return true
-	}
-	if message.ErrorMessage == nil {
-		return false
-	}
-	lower := strings.ToLower(*message.ErrorMessage)
-	for _, needle := range []string{
-		"context length", "context_length", "context window", "context_window",
-		"maximum context", "max context", "too many tokens", "prompt is too long",
-		"exceeds the maximum", "input is too long",
-	} {
-		if strings.Contains(lower, needle) {
-			return true
-		}
-	}
-	if contextWindow > 0 && message.Usage.Input+message.Usage.CacheRead > contextWindow {
-		return true
-	}
-	return false
 }
 
 // retrySettings resolves the retry policy from settings or the session config.
@@ -195,6 +166,18 @@ func (s *AgentSession) runPostRunLoop(ctx context.Context) error {
 				}
 				s.emit(&SessionEvent{Type: SessionAutoRetryEnd, Success: false, Attempt: attempt, ErrorMessage: finalError})
 			}
+		}
+
+		// Automatic compaction (overflow recovery reports continue).
+		compacted, err := s.CheckCompaction(ctx, message, true)
+		if err != nil {
+			return err
+		}
+		if compacted {
+			if err := s.Agent.Continue(ctx); err != nil {
+				return err
+			}
+			continue
 		}
 
 		// Messages queued by agent_end listeners need a continuation.

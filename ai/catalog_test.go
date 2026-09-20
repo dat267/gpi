@@ -170,15 +170,17 @@ func TestGetEnvApiKey(t *testing.T) {
 		t.Fatalf("process fallback = %q", got)
 	}
 
-	// google-vertex: ADC + project + location.
-	if got := GetEnvApiKey("google-vertex", ProviderEnv{
-		"GOOGLE_CLOUD_PROJECT":  "p",
-		"GOOGLE_CLOUD_LOCATION": "l",
-	}); got != "" {
-		t.Fatalf("vertex without ADC = %q", got)
+	// google-vertex: ADC + project + location. ADC file presence is
+	// environment-dependent: machines logged into gcloud report the ambient
+	// branch as authenticated, so the no-ADC expectation only holds without one.
+	if !hasVertexAdcCredentials(ProviderEnv{}) {
+		if got := GetEnvApiKey("google-vertex", ProviderEnv{
+			"GOOGLE_CLOUD_PROJECT":  "p",
+			"GOOGLE_CLOUD_LOCATION": "l",
+		}); got != "" {
+			t.Fatalf("vertex without ADC = %q", got)
+		}
 	}
-	// (ADC file presence is environment-dependent; the ambient branch is
-	// covered by upstream's provider tests and the coding agent's live tests.)
 
 	// amazon-bedrock: standard IAM keys.
 	if got := GetEnvApiKey("amazon-bedrock", ProviderEnv{
