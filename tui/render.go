@@ -589,11 +589,14 @@ func (t *Renderer) containsComponent(root Component, target Component) bool {
 	if root == target {
 		return true
 	}
-	container, ok := root.(*Container)
+	// Upstream checks `root instanceof Container`; in Go any component that
+	// exposes its children through the Container (or embeds one, like Stack)
+	// is treated the same (divergence D55).
+	holder, ok := root.(childrenHolder)
 	if !ok {
 		return false
 	}
-	for _, child := range container.Children {
+	for _, child := range holder.childComponents() {
 		if t.containsComponent(child, target) {
 			return true
 		}

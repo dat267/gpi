@@ -171,6 +171,12 @@ func RetargetMouseEvent(event TuiMouseEvent, target TuiMouseDispatchTarget) TuiM
 	return event
 }
 
+// childrenHolder exposes a component's children to the renderer's mount
+// checks (upstream uses `instanceof Container`; D55).
+type childrenHolder interface {
+	childComponents() []Component
+}
+
 // Container is a component that contains other components.
 type Container struct {
 	Children []Component
@@ -183,6 +189,9 @@ type mouseChild struct {
 	component Component
 	height    int
 }
+
+// childComponents implements childrenHolder.
+func (c *Container) childComponents() []Component { return c.Children }
 
 // AddChild appends a child component.
 func (c *Container) AddChild(component Component) {
