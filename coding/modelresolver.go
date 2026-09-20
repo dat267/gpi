@@ -353,7 +353,7 @@ type ResolveCliModelOptions struct {
 	CLIModel       string
 	CLIThinking    ai.ThinkingLevel
 	HasCLIThinking bool
-	ModelRuntime   ModelRuntime
+	ModelRuntime   ModelRuntimeSource
 }
 
 // ResolveCliModel resolves a single model from CLI flags.
@@ -591,7 +591,7 @@ type FindInitialModelOptions struct {
 	DefaultThinkingLevel ai.ThinkingLevel
 	HasDefaultThinking   bool
 	ModelThinkingLevels  map[string]ai.ThinkingLevel
-	ModelRuntime         ModelRuntime
+	ModelRuntime         ModelRuntimeSource
 }
 
 // FindInitialModel picks the initial model with upstream's priority order.
@@ -683,7 +683,7 @@ type RestoreModelResult struct {
 func RestoreModelFromSession(
 	savedProvider, savedModelID string,
 	currentModel *ai.Model,
-	modelRuntime ModelRuntime,
+	modelRuntime ModelRuntimeSource,
 ) RestoreModelResult {
 	restoredModel := modelRuntime.GetModel(savedProvider, savedModelID)
 	hasAuth := restoredModel != nil && modelRuntime.HasConfiguredAuth(restoredModel.Provider)
@@ -730,9 +730,9 @@ func RestoreModelFromSession(
 	return RestoreModelResult{}
 }
 
-// ModelRuntime is the model-runtime surface the resolver needs (the Go subset
-// of upstream ModelRuntime).
-type ModelRuntime interface {
+// ModelRuntimeSource is the model-runtime surface the resolver needs (the Go
+// subset of upstream ModelRuntime, satisfied by *ModelRuntime).
+type ModelRuntimeSource interface {
 	GetModels(providerID string) []*ai.Model
 	GetModel(providerID, modelID string) *ai.Model
 	GetAvailable(providerID string, ctx context.Context) ([]*ai.Model, error)
@@ -740,7 +740,9 @@ type ModelRuntime interface {
 	HasConfiguredAuth(providerID string) bool
 }
 
-// ModelsRuntime adapts an ai.Models registry to the resolver's ModelRuntime.
+// ModelsRuntime adapts a bare ai.Models registry to ModelRuntimeSource. It is
+// used when no *ModelRuntime is available (for example a registry built by hand
+// in tests); the real runtime satisfies ModelRuntimeSource directly.
 //
 // D21: upstream ModelRuntime keeps a pushed snapshot of available models and
 // configured providers; this adapter queries the registry on demand and caches
@@ -802,7 +804,7 @@ func (r *ModelsRuntime) HasConfiguredAuth(providerID string) bool {
 }
 
 // ResolveModelScopeWithDiagnostics resolves patterns against the runtime.
-func ResolveModelScopeWithDiagnostics(patterns []string, runtime ModelRuntime, ctx context.Context) (ResolveModelScopeResult, error) {
+func ResolveModelScopeWithDiagnostics(patterns []string, runtime ModelRuntimeSource, ctx context.Context) (ResolveModelScopeResult, error) {
 	models, err := runtime.GetAvailable("", ctx)
 	if err != nil {
 		return ResolveModelScopeResult{}, err
@@ -812,7 +814,7 @@ func ResolveModelScopeWithDiagnostics(patterns []string, runtime ModelRuntime, c
 
 // ResolveModelScope resolves patterns and returns the scoped models (warnings
 // are returned as the result's diagnostics).
-func ResolveModelScope(patterns []string, runtime ModelRuntime, ctx context.Context) ([]ScopedModel, error) {
+func ResolveModelScope(patterns []string, runtime ModelRuntimeSource, ctx context.Context) ([]ScopedModel, error) {
 	result, err := ResolveModelScopeWithDiagnostics(patterns, runtime, ctx)
 	if err != nil {
 		return nil, err

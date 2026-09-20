@@ -213,6 +213,13 @@ func asModelsError(err error, target **ModelsError) bool {
 }
 
 func resolveAPIKey(authContext AuthContext, apiKey *ApiKeyAuth, providerID string, credential *ApiKeyCredential, ctx context.Context) (*AuthResult, error) {
+	// D38: upstream's ApiKeyAuth.resolve is required, so a missing one is a
+	// programmer error there. Go function fields cannot be required, so a nil
+	// Resolve means "this provider has no api-key resolution" and reports no
+	// auth instead of panicking.
+	if apiKey.Resolve == nil {
+		return nil, nil
+	}
 	result, err := apiKey.Resolve(AuthResolveInput{Ctx: authContext, Credential: credential, Ctx2: ctx})
 	if err != nil {
 		return nil, NewModelsError(ErrCodeAuth, fmt.Sprintf("API key auth failed for provider %s", providerID), err)

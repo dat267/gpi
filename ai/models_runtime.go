@@ -340,6 +340,19 @@ func LazyStream(model *Model, setup func() (eventSource, error)) *AssistantMessa
 // AsEventSource adapts an AssistantMessageEventStream for LazyStream setups.
 func AsEventSource(s *AssistantMessageEventStream) eventSource { return streamSource{inner: s} }
 
+// LazyStreamFunc builds a stream whose source is created on first consumption
+// (upstream lazyStream with an async factory). The factory returns a stream that
+// is forwarded into the outer stream.
+func LazyStreamFunc(model *Model, create func() (*AssistantMessageEventStream, error)) *AssistantMessageEventStream {
+	return LazyStream(model, func() (eventSource, error) {
+		inner, err := create()
+		if err != nil {
+			return nil, err
+		}
+		return AsEventSource(inner), nil
+	})
+}
+
 // ErrorStreamForModel builds a lazy stream that terminates with a typed
 // provider error (used when no implementation can serve a model).
 func ErrorStreamForModel(model *Model, code string, message string) *AssistantMessageEventStream {
