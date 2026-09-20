@@ -152,12 +152,24 @@ type KeybindingsManager struct {
 // TUIKeybindings order when the definitions map is the built-in one
 // (divergence D60).
 func NewKeybindingsManager(definitions map[Keybinding]KeybindingDefinition, userBindings map[string][]string) *KeybindingsManager {
+	return NewKeybindingsManagerOrdered(definitions, canonicalBindingOrder(definitions), userBindings)
+}
+
+// NewKeybindingsManagerOrdered creates a manager with an explicit key order
+// (used by the coding-agent keybinding table, which extends the TUI one).
+func NewKeybindingsManagerOrdered(definitions map[Keybinding]KeybindingDefinition, order []Keybinding, userBindings map[string][]string) *KeybindingsManager {
 	manager := &KeybindingsManager{
 		definitions:  definitions,
 		userBindings: userBindings,
 		keysByID:     map[Keybinding][]string{},
 	}
-	manager.order = canonicalBindingOrder(definitions)
+	filtered := make([]Keybinding, 0, len(order))
+	for _, key := range order {
+		if _, ok := definitions[key]; ok {
+			filtered = append(filtered, key)
+		}
+	}
+	manager.order = filtered
 	manager.rebuild()
 	return manager
 }
