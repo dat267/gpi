@@ -310,11 +310,13 @@ func (o *localShellOperations) Exec(ctx context.Context, command, cwd string, ex
 	// distinguish a quiet inherited handle from one still being written.
 	streamWG := &sync.WaitGroup{}
 	activity := make(chan struct{}, 1)
+	started := make(chan struct{}, 2)
 	stream := func(reader interface{ Read([]byte) (int, error) }) {
 		streamWG.Add(1)
 		go func() {
 			defer streamWG.Done()
 			buffer := make([]byte, 32*1024)
+			started <- struct{}{}
 			for {
 				read, err := reader.Read(buffer)
 				if read > 0 {
@@ -361,7 +363,7 @@ func (o *localShellOperations) Exec(ctx context.Context, command, cwd string, ex
 	// Wait for the pipes to fall idle rather than hanging on a detached
 	// descendant that inherited them; the grace timer re-arms on every chunk
 	// (port of waitForChildProcess).
-	waitForPipeDrain(streamWG, activity)
+	waitForPipeDrain(streamWG, activity, started)
 	close(stopAbort)
 	if timeoutTimer != nil {
 		timeoutTimer.Stop()
@@ -444,13 +446,30 @@ const exitStdioGraceMS = 100
 
 // waitForPipeDrain waits for the output pipes to finish, but gives up after a
 // short idle grace so an inherited handle held open by a detached descendant
-// cannot hang the caller (port of waitForChildProcess).
-func waitForPipeDrain(streams *sync.WaitGroup, activity <-chan struct{}) {
+// cannot hang the caller (port of waitForChildProcess). The idle window only
+// starts once both readers have actually read, so a slow schedule cannot
+// discard output that is already buffered.
+func waitForPipeDrain(streams *sync.WaitGroup, activity <-chan struct{}, started <-chan struct{}) {
 	done := make(chan struct{})
 	go func() {
 		streams.Wait()
 		close(done)
 	}()
+	// Wait for the readers to start (bounded by the same grace), then arm the
+	// idle window.
+	armTimer := time.NewTimer(exitStdioGraceMS * time.Millisecond)
+	defer armTimer.Stop()
+	starts := 0
+	for starts < 2 {
+		select {
+		case <-started:
+			starts++
+		case <-armTimer.C:
+			starts = 2
+		case <-done:
+			return
+		}
+	}
 	timer := time.NewTimer(exitStdioGraceMS * time.Millisecond)
 	defer timer.Stop()
 	for {

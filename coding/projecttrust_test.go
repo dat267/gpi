@@ -392,7 +392,7 @@ func TestWaitForPipeDrain(t *testing.T) {
 	done := make(chan struct{})
 	close(done)
 	start := timeNowMS()
-	waitForPipeDrain(&finished.WaitGroup, done)
+	waitForPipeDrain(&finished.WaitGroup, done, done)
 	if timeNowMS()-start > 50 {
 		t.Fatal("finished streams must not wait")
 	}
@@ -402,6 +402,9 @@ func TestWaitForPipeDrain(t *testing.T) {
 	var active syncWaitGroup
 	active.Add(1)
 	activity := make(chan struct{}, 1)
+	startedCh := make(chan struct{}, 2)
+	startedCh <- struct{}{}
+	startedCh <- struct{}{}
 	go func() {
 		for index := 0; index < 5; index++ {
 			activity <- struct{}{}
@@ -410,16 +413,19 @@ func TestWaitForPipeDrain(t *testing.T) {
 		active.Done()
 	}()
 	start = timeNowMS()
-	waitForPipeDrain(&active.WaitGroup, activity)
+	waitForPipeDrain(&active.WaitGroup, activity, startedCh)
 	if elapsed := timeNowMS() - start; elapsed < 80 {
 		t.Fatalf("drain returned early: %dms", elapsed)
 	}
 
 	// A quiet inherited handle releases after the grace window.
 	var stuck syncWaitGroup
+	alreadyStarted := make(chan struct{}, 2)
+	alreadyStarted <- struct{}{}
+	alreadyStarted <- struct{}{}
 	stuck.Add(1)
 	start = timeNowMS()
-	waitForPipeDrain(&stuck.WaitGroup, make(chan struct{}))
+	waitForPipeDrain(&stuck.WaitGroup, make(chan struct{}), alreadyStarted)
 	elapsed := timeNowMS() - start
 	if elapsed < exitStdioGraceMS || elapsed > exitStdioGraceMS+200 {
 		t.Fatalf("grace elapsed = %dms", elapsed)

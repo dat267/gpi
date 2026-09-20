@@ -106,6 +106,7 @@ func (s *AgentSession) Prompt(ctx context.Context, text string, options *PromptO
 	}
 
 	// Flush deferred messages before the new turn.
+	s.FlushPendingBashMessages()
 	s.FlushPendingCustomMessages()
 
 	if !s.HasModel() {
@@ -191,6 +192,7 @@ func (s *AgentSession) runAgentPrompt(ctx context.Context, messages []ai.Message
 	state.mu.Lock()
 	state.runActive = false
 	state.mu.Unlock()
+	s.FlushPendingBashMessages()
 	s.FlushPendingCustomMessages()
 	s.resolveIdleWaitIfIdle()
 	return err
@@ -207,26 +209,10 @@ func (s *AgentSession) findLastAssistantMessage() *ai.AssistantMessage {
 	return nil
 }
 
-// checkCompaction compacts when the context threshold is crossed.
-func (s *AgentSession) checkCompaction(ctx context.Context, message *ai.AssistantMessage, skipThreshold bool) error {
-	if !s.AutoCompactionEnabled() {
-		return nil
-	}
-	if !skipThreshold {
-		model := s.Model()
-		if model == nil || model.ContextWindow <= 0 {
-			return nil
-		}
-		contextTokens := ai.CalculateContextTokens(message.Usage)
-		if !ShouldCompact(int64(contextTokens), model.ContextWindow, s.Settings.Compaction) {
-			return nil
-		}
-	}
-	if s.streamFn == nil {
-		// Nothing to summarize with; the host wires the stream function.
-		return nil
-	}
-	_, err := s.runCompaction(ctx, CompactionThreshold, s.streamFn)
+// checkCompaction runs the automatic compaction decision (upstream
+// _checkCompaction; skipAbortedCheck=false is the pre-prompt check).
+func (s *AgentSession) checkCompaction(ctx context.Context, message *ai.AssistantMessage, skipAbortedCheck bool) error {
+	_, err := s.CheckCompaction(ctx, message, skipAbortedCheck)
 	return err
 }
 

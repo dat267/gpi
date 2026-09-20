@@ -83,6 +83,7 @@ const (
 	SessionThinkingLevelChanged SessionEventType = "thinking_level_changed"
 	SessionAutoRetryStart       SessionEventType = "auto_retry_start"
 	SessionAutoRetryEnd         SessionEventType = "auto_retry_end"
+	SessionBashExecutionUpdate  SessionEventType = "bash_execution_update"
 )
 
 // SessionEvent extends the core agent events with session-level payloads.
@@ -107,6 +108,9 @@ type SessionEvent struct {
 	MaxAttempts int
 	DelayMS     int64
 	Success     bool
+	// bash_execution_update
+	ID    string
+	Delta string
 }
 
 // SessionEventListener receives session events.
@@ -159,6 +163,11 @@ type AgentSession struct {
 	compactionCancel context.CancelFunc
 	compactionActive bool
 	overflowRecovery overflowRecoveryState
+
+	bashMu              sync.Mutex
+	bashNextID          int
+	bashCancels         map[int]context.CancelFunc
+	pendingBashMessages []*ai.CustomMessage
 
 	// System prompt options for section diffing on tool changes.
 	SystemPromptOptions *BuildSystemPromptOptions
@@ -415,31 +424,94 @@ func (s *AgentSession) WaitForIdle(ctx context.Context) error {
 // Compaction
 // ---------------------------------------------------------------------------
 
-// CompactSession runs a manual compaction over the current leaf path.
-func (s *AgentSession) CompactSession(ctx context.Context, streamFn agent.StreamFn) (*CompactionResult, error) {
-	return s.runCompaction(ctx, CompactionManual, streamFn)
-}
+// CompactSession runs a manual compaction over the current leaf path
+// (upstream compact(customInstructions?)): aborts any active run, emits the
+// compaction events, resolves summarization auth, and distinguishes
+// "Already compacted" from "Nothing to compact (session too small)".
+func (s *AgentSession) CompactSession(ctx context.Context, customInstructions string) (*CompactionResult, error) {
+	s.Abort(ctx)
 
-// runCompaction ports _runAutoCompaction: prepare → summarize → append the
-// compaction entry.
-func (s *AgentSession) runCompaction(ctx context.Context, reason CompactionReason, streamFn agent.StreamFn) (*CompactionResult, error) {
-	pathEntries := s.Sessions.GetEntries()
-	preparation := PrepareCompaction(pathEntries, s.Settings.Compaction)
+	compactionCtx, cancel := context.WithCancel(ctx)
+	s.mu.Lock()
+	s.compactionCancel = cancel
+	s.compactionActive = true
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.compactionActive = false
+		s.compactionCancel = nil
+		s.mu.Unlock()
+		cancel()
+	}()
+
+	s.emit(&SessionEvent{Type: SessionCompactionStart, Reason: CompactionManual})
+
+	model := s.Model()
+	if !s.HasModel() || model == nil {
+		return nil, fmt.Errorf("%s", FormatNoModelSelectedMessage())
+	}
+	settings, _ := s.compactionSettings()
+
+	pathEntries := s.Sessions.GetBranch("")
+	preparation := PrepareCompaction(pathEntries, settings)
 	if preparation == nil {
-		return nil, fmt.Errorf("Nothing to compact")
+		// Distinguish why compaction is impossible.
+		lastEntry := pathEntries[len(pathEntries)-1]
+		if lastEntry.Type == "compaction" {
+			return nil, fmt.Errorf("Already compacted")
+		}
+		return nil, fmt.Errorf("Nothing to compact (session too small)")
 	}
 
-	s.emit(&SessionEvent{Type: SessionCompactionStart, Reason: reason})
+	options := CompactionOptions{
+		Model: model, Ctx: compactionCtx, CustomInstructions: customInstructions,
+		StreamFn: s.compactionStreamFn(), Retry: s.retrySettings(),
+		SessionID: s.Sessions.GetSessionID(),
+	}
+	if s.control != nil && s.control.ModelRuntime != nil {
+		resolution, err := s.control.ModelRuntime.GetAuthForModel(model, nil)
+		if err == nil && resolution != nil {
+			options.APIKey = resolution.Auth.APIKey
+			options.Headers = headersToStrings(resolution.Auth.Headers)
+			options.Env = resolution.Env
+			if resolution.Auth.BaseURL != "" {
+				copied := *model
+				copied.BaseURL = resolution.Auth.BaseURL
+				options.Model = &copied
+			}
+		}
+	}
 
-	result, err := Compact(preparation, CompactionOptions{
-		Model: s.Agent.State().Model, Ctx: ctx, StreamFn: adaptStreamFn(streamFn),
-	})
+	result, err := Compact(preparation, options)
 	if err != nil {
-		s.emit(&SessionEvent{Type: SessionCompactionEnd, Reason: reason, Aborted: ctxErrOf(ctx) != nil, ErrorMessage: err.Error()})
+		aborted := compactionCtx.Err() != nil
+		errorMessage := ""
+		if !aborted {
+			errorMessage = "Compaction failed: " + err.Error()
+		}
+		s.emit(&SessionEvent{
+			Type: SessionCompactionEnd, Reason: CompactionManual, Aborted: aborted,
+			ErrorMessage: errorMessage,
+		})
 		return nil, err
 	}
+	if compactionCtx.Err() != nil {
+		s.emit(&SessionEvent{Type: SessionCompactionEnd, Reason: CompactionManual, Aborted: true})
+		return nil, fmt.Errorf("Compaction cancelled")
+	}
+
 	s.Sessions.AppendCompaction(result.Summary, result.FirstKeptEntryID, result.TokensBefore, result.Details, false, result.Usage)
-	s.emit(&SessionEvent{Type: SessionCompactionEnd, Reason: reason, Result: result})
+	sessionContext := s.Sessions.BuildSessionContext()
+	s.Agent.SetMessages(sessionContext.Messages)
+
+	// compaction_end listeners may submit queued prompts, so expose idle state
+	// before notifying them.
+	s.mu.Lock()
+	s.compactionActive = false
+	s.compactionCancel = nil
+	s.mu.Unlock()
+	cancel()
+	s.emit(&SessionEvent{Type: SessionCompactionEnd, Reason: CompactionManual, Result: result})
 	return result, nil
 }
 

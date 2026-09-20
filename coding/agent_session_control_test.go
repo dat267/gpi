@@ -326,36 +326,48 @@ func TestSessionAutoTogglesAndBash(t *testing.T) {
 		t.Fatal("abort retry")
 	}
 
-	// Bash state and recording.
-	if session.IsBashRunning() || session.HasPendingBashMessages() {
-		t.Fatal("no bash yet")
-	}
-	session.SetBashRunning(true)
-	if !session.IsBashRunning() {
-		t.Fatal("bash running")
-	}
-	session.AbortBash()
-	if !session.BashAborted() {
-		t.Fatal("bash abort")
-	}
+	// Bash recording: a result recorded while idle lands in agent state and
+	// session history as a message entry.
 	exitCode := 1
 	session.RecordBashResult("echo hi", BashResult{Output: "hi", ExitCode: &exitCode, Truncated: true, FullOutputPath: "/tmp/full"}, false)
-	if !session.HasPendingBashMessages() {
-		t.Fatal("pending bash")
+	if session.HasPendingBashMessages() {
+		t.Fatal("idle results are not deferred")
 	}
 	entries := session.Sessions.GetEntries()
 	last := entries[len(entries)-1]
-	if last.Type != "custom_message" || last.CustomType != RoleBashExecution {
+	if last.Type != "message" || !strings.Contains(string(last.Message), "bashExecution") ||
+		!strings.Contains(string(last.Message), "echo hi") {
 		t.Fatalf("entry = %+v", last)
 	}
-	if !strings.Contains(string(last.Content), "echo hi") {
-		t.Fatalf("payload = %s", last.Content)
+	foundBash := false
+	for _, message := range session.Messages() {
+		if custom, ok := message.(*ai.CustomMessage); ok && custom.Role == RoleBashExecution {
+			foundBash = true
+		}
 	}
-	// Excluded results do not count as pending.
-	before := session.control.pendingBash
-	session.RecordBashResult("echo x", BashResult{Output: "x"}, true)
-	if session.control.pendingBash != before {
-		t.Fatalf("pending = %d", session.control.pendingBash)
+	if !foundBash {
+		t.Fatal("bash message missing from agent state")
+	}
+
+	// While streaming the result is deferred until the flush.
+	session.prompt().mu.Lock()
+	session.prompt().runActive = true
+	session.prompt().mu.Unlock()
+	session.RecordBashResult("echo deferred", BashResult{Output: "deferred"}, false)
+	if !session.HasPendingBashMessages() {
+		t.Fatal("streaming results are deferred")
+	}
+	session.prompt().mu.Lock()
+	session.prompt().runActive = false
+	session.prompt().mu.Unlock()
+	session.FlushPendingBashMessages()
+	if session.HasPendingBashMessages() {
+		t.Fatal("flush must clear pending")
+	}
+	entries = session.Sessions.GetEntries()
+	last = entries[len(entries)-1]
+	if !strings.Contains(string(last.Message), "echo deferred") {
+		t.Fatalf("flushed entry = %+v", last)
 	}
 }
 
@@ -478,8 +490,8 @@ func TestSessionDefaultsWithoutControl(t *testing.T) {
 	session.SetActiveToolsByName([]string{"read"})
 	session.RecordBashResult("cmd", BashResult{}, false)
 	session.AbortBash()
-	if session.HasPendingBashMessages() || session.BashAborted() {
-		t.Fatal("bash state requires the control block")
+	if session.HasPendingBashMessages() || session.IsBashRunning() {
+		t.Fatal("no bash runs without execution")
 	}
 }
 
