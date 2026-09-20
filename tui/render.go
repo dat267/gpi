@@ -145,6 +145,13 @@ type Renderer struct {
 	fullRedrawCount          int
 	stopped                  bool
 
+	// terminal color queries (port of the TuiBase query surface)
+	pendingOSC11Replies  int
+	pendingOSC11Queries  []*pendingOSC11Query
+	colorSchemeListeners []colorSchemeListener
+	colorSchemeNotifyOn  bool
+	nextColorSchemeID    int
+
 	overlayStack           []*overlayEntry
 	renderedOverlayLayouts []renderedOverlayLayout
 	focusOrderCounter      int
@@ -261,7 +268,12 @@ func (t *Renderer) Stop(options TuiStopOptions) {
 	t.mu.Lock()
 	t.stopped = true
 	t.cancelRenderTimerLocked()
+	disableColorSchemeNotifications := t.colorSchemeNotifyOn
+	t.colorSchemeNotifyOn = false
 	t.mu.Unlock()
+	if disableColorSchemeNotifications {
+		t.Terminal.Write("[?2031l")
+	}
 	if t.OnBeforeTerminalStop != nil {
 		t.OnBeforeTerminalStop(options)
 	}
@@ -434,7 +446,174 @@ func (t *Renderer) doRender() {
 
 // HandleTerminalInput routes input: listeners first, then the focused
 // component. Keyboard input preempts the throttled render path.
+// pendingOSC11Query is one in-flight OSC 11 query.
+type pendingOSC11Query struct {
+	settled bool
+	result  chan osc11Result
+}
+
+type osc11Result struct {
+	color RgbColor
+	ok    bool
+}
+
+type colorSchemeListener struct {
+	id       int
+	listener func(TerminalColorScheme)
+}
+
+// OnTerminalColorSchemeChange subscribes to terminal color-scheme reports.
+func (t *Renderer) OnTerminalColorSchemeChange(listener func(TerminalColorScheme)) func() {
+	t.mu.Lock()
+	t.nextColorSchemeID++
+	id := t.nextColorSchemeID
+	t.colorSchemeListeners = append(t.colorSchemeListeners, colorSchemeListener{id: id, listener: listener})
+	t.mu.Unlock()
+	return func() {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		filtered := t.colorSchemeListeners[:0]
+		for _, entry := range t.colorSchemeListeners {
+			if entry.id != id {
+				filtered = append(filtered, entry)
+			}
+		}
+		t.colorSchemeListeners = filtered
+	}
+}
+
+// SetTerminalColorSchemeNotifications enables the `CSI ? 2031` notifications.
+func (t *Renderer) SetTerminalColorSchemeNotifications(enabled bool) {
+	t.mu.Lock()
+	if t.colorSchemeNotifyOn == enabled {
+		t.mu.Unlock()
+		return
+	}
+	t.colorSchemeNotifyOn = enabled
+	stopped := t.stopped
+	terminal := t.Terminal
+	t.mu.Unlock()
+	if !stopped && terminal != nil {
+		if enabled {
+			terminal.Write("[?2031h")
+		} else {
+			terminal.Write("[?2031l")
+		}
+	}
+}
+
+// QueryTerminalBackgroundColor queries the terminal's background color with
+// OSC 11. It returns ok=false on timeout or an unparsable reply.
+func (t *Renderer) QueryTerminalBackgroundColor(timeoutMS int) (RgbColor, bool) {
+	query := &pendingOSC11Query{result: make(chan osc11Result, 1)}
+	t.mu.Lock()
+	t.pendingOSC11Queries = append(t.pendingOSC11Queries, query)
+	t.pendingOSC11Replies++
+	terminal := t.Terminal
+	t.mu.Unlock()
+
+	if terminal == nil {
+		return RgbColor{}, false
+	}
+	terminal.Write("]11;?")
+
+	timer := time.NewTimer(time.Duration(timeoutMS) * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case result := <-query.result:
+		return result.color, result.ok
+	case <-timer.C:
+		t.mu.Lock()
+		if !query.settled {
+			query.settled = true
+		}
+		t.mu.Unlock()
+		return RgbColor{}, false
+	}
+}
+
+// QueryTerminalColorScheme queries the terminal's color-scheme preference with
+// DSR (`CSI ? 996 n`).
+func (t *Renderer) QueryTerminalColorScheme(timeoutMS int) (TerminalColorScheme, bool) {
+	results := make(chan TerminalColorScheme, 1)
+	unsubscribe := t.OnTerminalColorSchemeChange(func(scheme TerminalColorScheme) {
+		select {
+		case results <- scheme:
+		default:
+		}
+	})
+	defer unsubscribe()
+	t.mu.Lock()
+	terminal := t.Terminal
+	t.mu.Unlock()
+	if terminal == nil {
+		return "", false
+	}
+	terminal.Write("[?996n")
+
+	timer := time.NewTimer(time.Duration(timeoutMS) * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case scheme := <-results:
+		return scheme, true
+	case <-timer.C:
+		return "", false
+	}
+}
+
+// consumeOSC11BackgroundResponse resolves the oldest pending OSC 11 query.
+func (t *Renderer) consumeOSC11BackgroundResponse(data string) bool {
+	t.mu.Lock()
+	if t.pendingOSC11Replies <= 0 {
+		t.mu.Unlock()
+		return false
+	}
+	t.mu.Unlock()
+	if !IsOsc11BackgroundColorResponse(data) {
+		return false
+	}
+	color, ok := ParseOsc11BackgroundColor(data)
+
+	t.mu.Lock()
+	t.pendingOSC11Replies--
+	var query *pendingOSC11Query
+	if len(t.pendingOSC11Queries) > 0 {
+		query = t.pendingOSC11Queries[0]
+		t.pendingOSC11Queries = t.pendingOSC11Queries[1:]
+	}
+	if query != nil && !query.settled {
+		query.settled = true
+		select {
+		case query.result <- osc11Result{color: color, ok: ok}:
+		default:
+		}
+	}
+	t.mu.Unlock()
+	return true
+}
+
+// consumeTerminalColorSchemeReport notifies the color-scheme listeners.
+func (t *Renderer) consumeTerminalColorSchemeReport(data string) bool {
+	scheme, ok := ParseTerminalColorSchemeReport(data)
+	if !ok {
+		return false
+	}
+	t.mu.Lock()
+	listeners := append([]colorSchemeListener{}, t.colorSchemeListeners...)
+	t.mu.Unlock()
+	for _, entry := range listeners {
+		entry.listener(scheme)
+	}
+	return true
+}
+
 func (t *Renderer) HandleTerminalInput(data string) {
+	if t.consumeOSC11BackgroundResponse(data) {
+		return
+	}
+	if t.consumeTerminalColorSchemeReport(data) {
+		return
+	}
 	// Listeners are user code and may call back into the renderer; run them
 	// from a snapshot without the lock.
 	t.mu.Lock()

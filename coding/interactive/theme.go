@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/dat267/gpi/tui"
 )
 
 // Port of src/modes/interactive/theme/theme.ts: the color palettes, the Theme
@@ -649,11 +651,13 @@ func stripBOM(data []byte) []byte {
 // ---- Terminal theme detection ----
 
 // TerminalTheme is the terminal's light/dark classification.
-type TerminalTheme string
+// TerminalTheme is the terminal's light/dark preference (alias so the renderer
+// query surface satisfies the theme interfaces).
+type TerminalTheme = tui.TerminalColorScheme
 
 const (
-	TerminalThemeDark  TerminalTheme = "dark"
-	TerminalThemeLight TerminalTheme = "light"
+	TerminalThemeDark  TerminalTheme = tui.TerminalColorSchemeDark
+	TerminalThemeLight TerminalTheme = tui.TerminalColorSchemeLight
 )
 
 // ParseAutoThemeSetting parses a "light/dark" auto theme setting.

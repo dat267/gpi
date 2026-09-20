@@ -416,7 +416,7 @@ func (m *SessionManager) AppendCustomEntry(customType string, data json.RawMessa
 	defer m.mu.Unlock()
 	entry := m.nextEntry("custom")
 	entry.CustomType = customType
-	entry.Details = data
+	entry.Data = data
 	return m.appendEntry(&entry)
 }
 

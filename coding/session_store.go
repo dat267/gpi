@@ -72,6 +72,8 @@ type SessionEntry struct {
 
 	// custom
 	CustomType string `json:"customType,omitempty"`
+	// Data is the custom entry payload (upstream CustomEntry.data; D129).
+	Data json.RawMessage `json:"data,omitempty"`
 
 	// custom_message
 	Content json.RawMessage `json:"content,omitempty"`

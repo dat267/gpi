@@ -23,18 +23,33 @@ func SerializeSessionBranch(sessionManager *SessionManager, createTrailingEntrie
 		Timestamp: timestamp,
 		Cwd:       sessionManager.GetCwd(),
 	}
-	lines := []string{string(mustMarshalJSON(header))}
+	// MarshalFileEntry writes the `type` discriminator (the header has no
+	// `type` struct field, so marshalling it directly would produce an invalid
+	// session file; D130).
+	headerLine, err := MarshalFileEntry(FileEntry{Header: &header})
+	if err != nil {
+		return ""
+	}
+	lines := []string{strings.TrimRight(headerLine, "\n")}
 	var parentID *string
 	for _, entry := range sessionManager.GetBranch("") {
 		// A fresh pointer per entry: they all re-chain to the previous entry.
 		current := parentID
 		entry.ParentID = current
-		lines = append(lines, string(mustMarshalJSON(&entry)))
+		line, err := MarshalFileEntry(FileEntry{Entry: &entry})
+		if err != nil {
+			return ""
+		}
+		lines = append(lines, strings.TrimRight(line, "\n"))
 		parentID = &entry.ID
 	}
 	if createTrailingEntries != nil {
 		for _, entry := range createTrailingEntries(parentID, timestamp) {
-			lines = append(lines, string(mustMarshalJSON(entry)))
+			line, err := MarshalFileEntry(FileEntry{Entry: entry})
+			if err != nil {
+				return ""
+			}
+			lines = append(lines, strings.TrimRight(line, "\n"))
 		}
 	}
 	return strings.Join(lines, "\n") + "\n"

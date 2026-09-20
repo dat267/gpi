@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -9,13 +10,47 @@ import (
 type fakeTerminal struct {
 	width  int
 	height int
+	// mu guards writes: queries and render timers write from other goroutines.
+	mu     sync.Mutex
 	writes []string
+}
+
+func (f *fakeTerminal) appendWrite(data string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.writes = append(f.writes, data)
+}
+
+// hasWrite reports whether any recorded write contains the substring.
+func (f *fakeTerminal) hasWrite(substring string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, write := range f.writes {
+		if strings.Contains(write, substring) {
+			return true
+		}
+	}
+	return false
+}
+
+// writeCount returns the number of recorded writes.
+func (f *fakeTerminal) writeCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.writes)
+}
+
+// joinedWrites returns all recorded writes concatenated.
+func (f *fakeTerminal) joinedWrites() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return strings.Join(f.writes, "")
 }
 
 func (f *fakeTerminal) Start(onInput func(string), onResize func()) {}
 func (f *fakeTerminal) Stop()                                       {}
 func (f *fakeTerminal) DrainInput(maxMs int, idleMs int) error      { return nil }
-func (f *fakeTerminal) Write(data string)                           { f.writes = append(f.writes, data) }
+func (f *fakeTerminal) Write(data string)                           { f.appendWrite(data) }
 func (f *fakeTerminal) Columns() int                                { return f.width }
 func (f *fakeTerminal) Rows() int                                   { return f.height }
 func (f *fakeTerminal) KittyProtocolActive() bool                   { return false }
