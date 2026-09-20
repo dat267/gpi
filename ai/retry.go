@@ -23,6 +23,10 @@ type ProviderError struct {
 	Message string
 	// Body carries the raw response body for error classification.
 	Body string
+	// Code carries a provider-specific error code when one is known (for
+	// example an AWS modeled exception name such as "ThrottlingException",
+	// which upstream reads from the SDK error's `name`).
+	Code string
 }
 
 func (e *ProviderError) Error() string { return e.Message }
