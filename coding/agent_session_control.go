@@ -759,3 +759,14 @@ func (s *AgentSession) Dispose() {
 	s.listeners = nil
 	s.listenerMu.Unlock()
 }
+
+// SessionManager returns the session manager backing this session.
+func (s *AgentSession) SessionManager() *SessionManager { return s.Sessions }
+
+// IsUsingSubscription reports whether a provider is subscription-backed.
+func (s *AgentSession) IsUsingSubscription(providerID string) bool {
+	if s.control == nil || s.control.ModelRuntime == nil {
+		return false
+	}
+	return s.control.ModelRuntime.IsUsingSubscription(providerID)
+}
