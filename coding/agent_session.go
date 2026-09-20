@@ -127,6 +127,13 @@ type AgentSession struct {
 	Settings SessionSettings
 	Cwd      string
 
+	// mu guards retry state and the control block.
+	mu sync.Mutex
+
+	// control holds the optional collaborators and mutation state ported from
+	// the upstream session's state/control surface.
+	control *AgentSessionControl
+
 	listenerMu sync.Mutex
 	listeners  []*sessionListenerKey
 
@@ -348,12 +355,6 @@ func (s *AgentSession) FollowUp(message ai.Message) {
 		s.followUpMessages = append(s.followUpMessages, user.Content.Text)
 	}
 	s.emitQueueUpdate()
-}
-
-// SetThinkingLevel updates the level and emits the change event.
-func (s *AgentSession) SetThinkingLevel(level ai.ThinkingLevel) {
-	s.Agent.SetThinkingLevel(level)
-	s.emit(&SessionEvent{Type: SessionThinkingLevelChanged, Level: level})
 }
 
 // PromptText runs a prompt from text.
