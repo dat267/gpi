@@ -284,6 +284,9 @@ func GitHubCopilotProvider() *ai.Provider {
 	})
 }
 
+// AmazonBedrockProvider builds the built-in Bedrock provider.
+func AmazonBedrockProvider() *ai.Provider { return ai.AmazonBedrockProvider() }
+
 // OpenRouterImagesProvider builds the built-in OpenRouter image provider.
 func OpenRouterImagesProvider() *ai.ImagesProvider { return ai.OpenRouterImagesProvider() }
 
@@ -314,7 +317,7 @@ var BuiltinProviderIDs = []string{
 // UnportedBuiltinProviderIDs are built-in providers whose API adapters are not
 // ported yet; BuiltinProviders skips them.
 var UnportedBuiltinProviderIDs = []string{
-	"amazon-bedrock", "openai-codex",
+	"openai-codex",
 }
 
 // BuiltinProviders returns every built-in provider whose adapter is ported, in
@@ -340,6 +343,8 @@ func builtinProvider(id string) *ai.Provider {
 	switch id {
 	case "radius":
 		return RadiusProvider("")
+	case "amazon-bedrock":
+		return AmazonBedrockProvider()
 	case "anthropic":
 		return AnthropicProvider(anthropicMessagesStreams{})
 	case "google":

@@ -117,6 +117,7 @@ func SignAWSRequest(request *http.Request, body []byte, credentials AWSCredentia
 	authorization := fmt.Sprintf(
 		"AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
 		credentials.AccessKeyID, scope, signedHeaders, signature)
+	request.Header.Set("Authorization", authorization)
 
 	return &AWSSignatureResult{
 		Authorization: authorization,

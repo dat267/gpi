@@ -343,7 +343,15 @@ func TestMapBedrockStopReason(t *testing.T) {
 
 // buildAWSEventStreamMessage encodes a test frame.
 func buildAWSEventStreamMessage(t *testing.T, headers map[string]any, payload []byte) []byte {
-	t.Helper()
+	if t != nil {
+		t.Helper()
+	}
+	return buildAWSEventStreamMessageFor(t, headers, payload)
+}
+
+// buildAWSEventStreamMessageFor encodes a frame; t may be nil when the caller
+// only passes supported header values.
+func buildAWSEventStreamMessageFor(t *testing.T, headers map[string]any, payload []byte) []byte {
 	var headerBlock []byte
 	for name, value := range headers {
 		headerBlock = append(headerBlock, awsVarint(uint64(len(name)))...)
@@ -365,7 +373,10 @@ func buildAWSEventStreamMessage(t *testing.T, headers map[string]any, payload []
 				headerBlock = append(headerBlock, awsHeaderBoolFalse)
 			}
 		default:
-			t.Fatalf("unsupported header value %T", value)
+			if t != nil {
+				t.Fatalf("unsupported header value %T", value)
+			}
+			panic("unsupported header value")
 		}
 	}
 	totalLength := awsEventStreamPreludeLength + len(headerBlock) + len(payload) + 4
