@@ -4,11 +4,30 @@ import (
 	ctxpkg "context"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/dat267/gpi/ai"
 )
+
+// waitForBashEvent polls for a bash-execution-update event with the id.
+func waitForBashEvent(mu *sync.Mutex, events *[]*SessionEvent, id string, timeoutMS int) bool {
+	deadline := time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		for _, event := range *events {
+			if event.Type == SessionBashExecutionUpdate && event.ID == id {
+				mu.Unlock()
+				return true
+			}
+		}
+		mu.Unlock()
+		time.Sleep(time.Millisecond)
+	}
+	return false
+}
 
 type atomicInt64 = atomic.Int64
 
@@ -27,8 +46,11 @@ func TestSessionExecuteBash(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var deltasMu sync.Mutex
 	var deltas []string
 	result, err := session.ExecuteBash(ctxpkg.Background(), "printf hello", func(chunk string) {
+		deltasMu.Lock()
+		defer deltasMu.Unlock()
 		deltas = append(deltas, chunk)
 	}, nil)
 	if err != nil {
@@ -46,20 +68,36 @@ func TestSessionExecuteBash(t *testing.T) {
 	if last.Type != "message" || !strings.Contains(string(last.Message), "printf hello") {
 		t.Fatalf("entry = %+v", last)
 	}
-	// The update events fired with the execution id.
-	events := []*SessionEvent{}
-	session.Subscribe(func(event *SessionEvent) { events = append(events, event) })
+	// The update events fired with the execution id. Events are emitted from
+	// the chunk reader goroutine, so the collector is mutex-guarded.
+	var eventsMu sync.Mutex
+	var events []*SessionEvent
+	session.Subscribe(func(event *SessionEvent) {
+		eventsMu.Lock()
+		defer eventsMu.Unlock()
+		events = append(events, event)
+	})
 	if _, err := session.ExecuteBash(ctxpkg.Background(), "echo run-two", nil, &ExecuteBashOptions{ID: "run-2"}); err != nil {
 		t.Fatal(err)
 	}
 	found := false
-	for _, event := range events {
-		if event.Type == SessionBashExecutionUpdate && event.ID == "run-2" {
-			found = true
+	for {
+		eventsMu.Lock()
+		for _, event := range events {
+			if event.Type == SessionBashExecutionUpdate && event.ID == "run-2" {
+				found = true
+			}
 		}
-	}
-	if !found {
-		t.Fatalf("events = %+v", events)
+		eventsMu.Unlock()
+		if found {
+			break
+		}
+		// The chunk reader may deliver the last events just after the call
+		// returns; give it a moment before failing.
+		if !waitForBashEvent(&eventsMu, &events, "run-2", 50) {
+			eventsMu.Lock()
+			t.Fatalf("events = %+v", events)
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // Port of core/system-prompt.ts: system prompt construction and project
@@ -52,14 +53,30 @@ type SystemPromptSections map[string]string
 // Go port uses PI_PACKAGE_DIR when set, else the module root discovered at
 // build time is unavailable — docs paths resolve relative to PI_PACKAGE_DIR
 // only (upstream resolves its npm layout).
-var packageDir string
+var (
+	packageDirMu sync.Mutex
+	packageDir   string
+)
 
 // SetPackageDir sets the docs root (host wiring).
-func SetPackageDir(dir string) { packageDir = dir }
+func SetPackageDir(dir string) {
+	packageDirMu.Lock()
+	defer packageDirMu.Unlock()
+	packageDir = dir
+}
 
-func GetReadmePath() string   { return resolveIn(packageDir, "README.md") }
-func GetDocsPath() string     { return resolveIn(packageDir, "docs") }
-func GetExamplesPath() string { return resolveIn(packageDir, "examples") }
+func currentPackageDir() string {
+	packageDirMu.Lock()
+	defer packageDirMu.Unlock()
+	return packageDir
+}
+
+func GetReadmePath() string   { return resolveIn(currentPackageDir(), "README.md") }
+func GetDocsPath() string     { return resolveIn(currentPackageDir(), "docs") }
+func GetExamplesPath() string { return resolveIn(currentPackageDir(), "examples") }
+
+// GetChangelogPath is the CHANGELOG.md path.
+func GetChangelogPath() string { return resolveIn(currentPackageDir(), "CHANGELOG.md") }
 
 func resolveIn(base, name string) string {
 	if base == "" {
