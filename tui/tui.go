@@ -31,6 +31,7 @@ type TUI interface {
 	ShowOverlay(component Component, options *OverlayOptions) OverlayHandle
 	HideOverlay()
 	HasOverlay() bool
+	HasOverlayEntries() bool
 	AddChild(component Component)
 	RemoveChild(component Component)
 	Clear()
@@ -115,6 +116,9 @@ func (r *TuiReference) HideOverlay() { r.get().HideOverlay() }
 
 // HasOverlay reports whether an overlay is shown.
 func (r *TuiReference) HasOverlay() bool { return r.get().HasOverlay() }
+
+// HasOverlayEntries reports whether any overlay entry exists.
+func (r *TuiReference) HasOverlayEntries() bool { return r.get().HasOverlayEntries() }
 
 // AddChild adds a child component.
 func (r *TuiReference) AddChild(component Component) { r.get().AddChild(component) }
