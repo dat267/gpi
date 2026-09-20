@@ -19,6 +19,10 @@ type OpenAIResponsesOptions struct {
 	ReasoningSummary string          `json:"-"` // "auto" | "detailed" | "concise" | ""
 	ServiceTier      string          `json:"-"` // "flex" | "priority" | ...
 	ToolChoice       json.RawMessage `json:"-"`
+	// ResolveServiceTier lets a dialect adjust the tier precedence between the
+	// request and the response (Codex prefers an explicit flex/priority
+	// request over the response's "default"). Nil keeps the response tier.
+	ResolveServiceTier func(responseTier *string, requestTier string) string
 }
 
 // toolCallProviders accept the `call_id|item_id` tool-call id form.

@@ -284,6 +284,9 @@ func GitHubCopilotProvider() *ai.Provider {
 	})
 }
 
+// OpenAICodexProvider builds the built-in Codex provider.
+func OpenAICodexProvider() *ai.Provider { return ai.OpenAICodexProvider() }
+
 // AmazonBedrockProvider builds the built-in Bedrock provider.
 func AmazonBedrockProvider() *ai.Provider { return ai.AmazonBedrockProvider() }
 
@@ -316,9 +319,10 @@ var BuiltinProviderIDs = []string{
 
 // UnportedBuiltinProviderIDs are built-in providers whose API adapters are not
 // ported yet; BuiltinProviders skips them.
-var UnportedBuiltinProviderIDs = []string{
-	"openai-codex",
-}
+// UnportedBuiltinProviderIDs lists built-in providers whose factories are not
+// ported. Every upstream provider is now ported, so the list is empty; it stays
+// so later gaps are recorded explicitly instead of silently.
+var UnportedBuiltinProviderIDs = []string{}
 
 // BuiltinProviders returns every built-in provider whose adapter is ported, in
 // upstream order and freshly constructed (upstream builtinProviders).
@@ -345,6 +349,8 @@ func builtinProvider(id string) *ai.Provider {
 		return RadiusProvider("")
 	case "amazon-bedrock":
 		return AmazonBedrockProvider()
+	case "openai-codex":
+		return OpenAICodexProvider()
 	case "anthropic":
 		return AnthropicProvider(anthropicMessagesStreams{})
 	case "google":

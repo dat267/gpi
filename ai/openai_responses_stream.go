@@ -232,7 +232,10 @@ func (p *OpenAIResponsesParams) MarshalJSON() ([]byte, error) {
 
 // responsesStreamEvent is one Responses SSE event (subset pi consumes).
 type responsesStreamEvent struct {
-	Type        string          `json:"type"`
+	Type string `json:"type"`
+	// Raw is the decoded event JSON, kept so dialects can rewrite it without
+	// losing fields the typed subset does not model.
+	Raw         json.RawMessage `json:"-"`
 	Delta       string          `json:"delta,omitempty"`
 	Arguments   string          `json:"arguments,omitempty"`
 	Input       string          `json:"input,omitempty"`
@@ -526,6 +529,9 @@ func ProcessResponsesStream(
 			if response.ServiceTier != nil {
 				serviceTier = *response.ServiceTier
 			}
+			if options.ResolveServiceTier != nil {
+				serviceTier = options.ResolveServiceTier(response.ServiceTier, options.ServiceTier)
+			}
 			applyServiceTierPricing(&output.Usage, serviceTier, model)
 		}
 		status := response.Status
@@ -777,6 +783,7 @@ func iterateResponsesEvents(ctx context.Context, body io.Reader, emit func(event
 			if jsonUnmarshalStrict(json.RawMessage(data), &parsed) != nil {
 				continue
 			}
+			parsed.Raw = json.RawMessage(data)
 			emit(&parsed)
 		}
 	}
@@ -788,6 +795,7 @@ func iterateResponsesEvents(ctx context.Context, body io.Reader, emit func(event
 		if data != "" && data != "[DONE]" {
 			var parsed responsesStreamEvent
 			if jsonUnmarshalStrict(json.RawMessage(data), &parsed) == nil {
+				parsed.Raw = json.RawMessage(data)
 				emit(&parsed)
 			}
 		}
