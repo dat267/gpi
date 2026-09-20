@@ -100,7 +100,9 @@ type ModelRuntime struct {
 	network    bool
 	config     *ModelConfig
 
-	mu                 sync.Mutex
+	mu sync.Mutex
+	// refreshMu serializes the state-mutating part of Refresh (D121).
+	refreshMu          sync.Mutex
 	snapshot           ModelRuntimeSnapshot
 	availabilitySeq    int
 	availabilityErrSeq int
@@ -1033,7 +1035,13 @@ type ModelsRefreshCallOptions struct {
 }
 
 // Refresh reloads models.json and provider catalogs.
+//
+// D121: upstream's single-threaded event loop serializes refreshes; the Go
+// port can receive concurrent refreshes (the interactive mode fires them from
+// background goroutines), so the state-mutating part is serialized here.
 func (r *ModelRuntime) Refresh(ctx context.Context, options *ModelsRefreshCallOptions) (ai.ModelsRefreshResult, error) {
+	r.refreshMu.Lock()
+	defer r.refreshMu.Unlock()
 	if ctx == nil {
 		ctx = context.Background()
 	}

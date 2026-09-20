@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -30,19 +31,42 @@ type mainScreenSpec struct {
 type recordingTerminal struct {
 	width  int
 	height int
+	// mu guards writes: the renderer's timer-driven renders write from other
+	// goroutines.
+	mu     sync.Mutex
 	writes []string
+}
+
+func (t *recordingTerminal) appendWrite(data string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.writes = append(t.writes, data)
+}
+
+func (t *recordingTerminal) takeWrites() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	joined := strings.Join(t.writes, "")
+	t.writes = nil
+	return joined
+}
+
+func (t *recordingTerminal) resetWrites() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.writes = nil
 }
 
 func (t *recordingTerminal) Start(onInput func(string), onResize func()) {}
 func (t *recordingTerminal) Stop()                                       {}
 func (t *recordingTerminal) DrainInput(maxMs int, idleMs int) error      { return nil }
-func (t *recordingTerminal) Write(data string)                           { t.writes = append(t.writes, data) }
+func (t *recordingTerminal) Write(data string)                           { t.appendWrite(data) }
 func (t *recordingTerminal) Columns() int                                { return t.width }
 func (t *recordingTerminal) Rows() int                                   { return t.height }
 func (t *recordingTerminal) KittyProtocolActive() bool                   { return false }
 func (t *recordingTerminal) MoveBy(lines int)                            {}
-func (t *recordingTerminal) HideCursor()                                 { t.writes = append(t.writes, "<HIDE>") }
-func (t *recordingTerminal) ShowCursor()                                 { t.writes = append(t.writes, "<SHOW>") }
+func (t *recordingTerminal) HideCursor()                                 { t.appendWrite("<HIDE>") }
+func (t *recordingTerminal) ShowCursor()                                 { t.appendWrite("<SHOW>") }
 func (t *recordingTerminal) ClearLine()                                  {}
 func (t *recordingTerminal) ClearFromCursor()                            {}
 func (t *recordingTerminal) ClearScreen()                                {}
@@ -109,9 +133,9 @@ func TestMainScreenAgainstUpstreamGolden(t *testing.T) {
 			if step.HideCursor != nil {
 				screen.SetShowHardwareCursor(*step.HideCursor)
 			}
-			terminal.writes = nil
+			terminal.resetWrites()
 			screen.RenderNow(step.Force)
-			steps = append(steps, strings.Join(terminal.writes, ""))
+			steps = append(steps, terminal.takeWrites())
 		}
 
 		want, ok := golden[label]
@@ -199,13 +223,13 @@ func TestMainScreenCapacity(t *testing.T) {
 	component := &scriptedComponent{lines: []string{"1", "2", "3", "4", "5"}}
 	screen.AddChild(component)
 	screen.RenderNow(false)
-	first := strings.Join(terminal.writes, "")
-	terminal.writes = nil
+	first := terminal.takeWrites()
+	terminal.resetWrites()
 
 	// Shrinking to one line clears the extra lines without a full redraw.
 	component.lines = []string{"1"}
 	screen.RenderNow(false)
-	second := strings.Join(terminal.writes, "")
+	second := terminal.takeWrites()
 	if !strings.Contains(second, "\x1b[2K") || strings.Contains(second, "\x1b[2J") {
 		t.Fatalf("shrink did not clear lines: %q", second)
 	}
@@ -216,18 +240,18 @@ func TestMainScreenCapacity(t *testing.T) {
 	tallComponent := &scriptedComponent{lines: []string{"1", "2", "3", "4", "5"}}
 	tallScreen.AddChild(tallComponent)
 	tallScreen.RenderNow(false)
-	tall.writes = nil
+	tall.resetWrites()
 	tallComponent.lines = []string{"1"}
 	tallScreen.RenderNow(false)
-	if got := strings.Join(tall.writes, ""); !strings.Contains(got, "\x1b[2J") {
+	if got := tall.takeWrites(); !strings.Contains(got, "\x1b[2J") {
 		t.Fatalf("scrolled shrink did not full redraw: %q", got)
 	}
 
 	// Grow back and verify a full redraw resets the state.
 	component.lines = []string{"1", "2", "3", "4", "5", "6"}
-	terminal.writes = nil
+	terminal.resetWrites()
 	screen.RenderNow(true)
-	third := strings.Join(terminal.writes, "")
+	third := terminal.takeWrites()
 	if !strings.HasPrefix(third, "\x1b[?2026h\x1b[2J\x1b[H\x1b[3J") {
 		t.Fatalf("forced render did not clear: %q", third)
 	}
