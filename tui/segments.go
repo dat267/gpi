@@ -138,3 +138,26 @@ func done(currentCol int, beforeEnd int, afterEnd int, afterLen int) bool {
 	}
 	return currentCol >= afterEnd
 }
+
+// ---- Kitty image helpers (out of scope: the transport) ----
+
+// KittyImageMetadata describes a placed kitty image.
+type KittyImageMetadata struct {
+	ImageID  int
+	Columns  int
+	Rows     int
+	WidthPx  int
+	HeightPx int
+}
+
+// GetKittyImageMetadata reports the metadata for an image line. The kitty
+// image registry belongs to the out-of-scope transport (divergence D57), so
+// the Go port never reports metadata and the image painting branches stay
+// inert.
+func GetKittyImageMetadata(line string) (KittyImageMetadata, bool) {
+	return KittyImageMetadata{}, false
+}
+
+// CropKittyImageLine crops a placed image to a row window. Identity while the
+// transport is out of scope (divergence D57).
+func CropKittyImageLine(line string, hiddenRows int, visibleRows int) string { return line }

@@ -1,0 +1,41 @@
+frame leaf => ["abc  ","",""]
+boxes leaf => []
+frame vstack => ["aa  ","bb  ","cc  ","","",""]
+boxes vstack => [{"x":0,"y":0,"w":4,"h":1},{"x":0,"y":1,"w":4,"h":1},{"x":0,"y":2,"w":4,"h":1}]
+frame vstack-gap => ["aa  ","","bb  ","",""]
+boxes vstack-gap => [{"x":0,"y":0,"w":4,"h":1},{"x":0,"y":2,"w":4,"h":1}]
+frame hstack => ["\u001b[0m\u001b]8;;\u0007ab\u001b[0m\u001b]8;;\u0007cd  \u001b[0m\u001b]8;;\u0007",""]
+boxes hstack => [{"x":0,"y":0,"w":2,"h":2},{"x":2,"y":0,"w":4,"h":2}]
+frame text => [" hello  "," world  ","",""]
+boxes text => []
+frame clamp => ["1  ","2  "]
+boxes clamp => []
+frame cursor => ["x\u001b_p"]
+boxes cursor => []
+frame scroll-follow-end => ["L6    ","L7    ","L8    "]
+boxes scroll-follow-end => [{"x":0,"y":-5,"w":6,"h":8}]
+scrollTop scroll-follow-end => 5 following=true viewport=3
+primary scroll-follow-end => true
+frame scroll-always => ["\u001b[0m\u001b]8;;\u0007L1   \u001b[0m\u001b]8;;\u0007\u001b[37m┃\u001b[39m","\u001b[0m\u001b]8;;\u0007L2   \u001b[0m\u001b]8;;\u0007\u001b[37m┃\u001b[39m","\u001b[0m\u001b]8;;\u0007L3   \u001b[0m\u001b]8;;\u0007\u001b[90m│\u001b[39m"]
+boxes scroll-always => [{"x":0,"y":0,"w":5,"h":8}]
+scrollTop scroll-always => 0
+frame scroll-always-scrolled => ["\u001b[0m\u001b]8;;\u0007L4   \u001b[0m\u001b]8;;\u0007\u001b[90m│\u001b[39m","\u001b[0m\u001b]8;;\u0007L5   \u001b[0m\u001b]8;;\u0007\u001b[37m┃\u001b[39m","\u001b[0m\u001b]8;;\u0007L6   \u001b[0m\u001b]8;;\u0007\u001b[37m┃\u001b[39m"]
+geometry scroll-always => {"column":5,"trackTop":0,"trackHeight":3,"thumbTop":1,"thumbHeight":2,"maxScrollTop":5}
+geometry-hidden scroll-always => {"column":5,"trackTop":0,"trackHeight":3,"thumbTop":1,"thumbHeight":2,"maxScrollTop":5}
+frame scroll-auto-active => ["L1   \u001b[0m\u001b]8;;\u0007\u001b[37m█\u001b[39m","L2   \u001b[0m\u001b]8;;\u0007\u001b[37m█\u001b[39m","L3   \u001b[0m\u001b]8;;\u0007\u001b[90m│\u001b[39m"]
+auto visible => visible=true active=true
+scrollBy2 => 2 consumed=97 scrollTopAfter=5
+frame nested => ["A       ","B       ","C       ","D       ","E       "]
+boxes nested => [{"x":0,"y":0,"w":8,"h":5},{"x":0,"y":5,"w":8,"h":0}]
+primary nested => true
+boxesAt 0,0 => [0,0]
+boxesAt 0,2 => [2,0]
+boxesAt 0,9 => 0
+scrollViewsAt 0,0 => 1
+scrollViewBox => true
+follow scrollTop => 3 following=true
+after start => 0 following=false
+after to1 => 1 following=false
+after end => 3 following=true
+after disableFollow => 3 following=false
+after by-2 => 1 following=false consumed=-99 top=0
