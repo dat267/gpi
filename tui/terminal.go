@@ -217,15 +217,24 @@ func (t *ProcessTerminal) Start(onInput func(data string), onResize func()) {
 func (t *ProcessTerminal) setupStdinBufferLocked() {
 	t.stdinBuffer = NewStdinBuffer(StdinBufferOptions{EscapeTimeout: ResolveEscapeTimeoutMs(os.Getenv)})
 	t.stdinBuffer.OnData = func(sequence string) {
-		negotiationSequence := t.readKeyboardProtocolNegotiationSequence(sequence)
+		t.mu.Lock()
+		negotiationSequence, pendingInput := t.readKeyboardProtocolNegotiationSequenceLocked(sequence)
 		if negotiationSequence.kind == "pending" {
-			t.scheduleKeyboardProtocolNegotiationBufferFlush()
+			t.scheduleKeyboardProtocolNegotiationBufferFlushLocked()
+			t.mu.Unlock()
 			return // Wait briefly for the rest of a split Kitty response.
 		}
-		if t.handleKeyboardProtocolNegotiationSequence(negotiationSequence) {
+		handled := t.handleKeyboardProtocolNegotiationSequenceLocked(negotiationSequence)
+		handler := t.inputHandler
+		t.mu.Unlock()
+		if handled {
 			return
 		}
-		t.forwardInputSequence(sequence)
+		// Deliver outside the terminal lock: the handler (the renderer) may
+		// write to the terminal, and the render path holds the alt-screen lock
+		// while writing, so holding t.mu here would invert the lock order (D138).
+		deliverInput(handler, pendingInput)
+		deliverInput(handler, sequence)
 	}
 	// Re-wrap paste content with bracketed paste markers for the editor.
 	t.stdinBuffer.OnPaste = func(content string) {
@@ -281,7 +290,7 @@ func (t *ProcessTerminal) queryAndEnableKittyProtocol() {
 	t.mu.Unlock()
 }
 
-func (t *ProcessTerminal) handleKeyboardProtocolNegotiationSequence(negotiationSequence negotiationResult) bool {
+func (t *ProcessTerminal) handleKeyboardProtocolNegotiationSequenceLocked(negotiationSequence negotiationResult) bool {
 	if negotiationSequence.kind == "none" || negotiationSequence.kind == "pending" {
 		return false
 	}
@@ -313,28 +322,36 @@ type negotiationResult struct {
 
 var negotiationPending = negotiationResult{kind: "pending"}
 
-func (t *ProcessTerminal) readKeyboardProtocolNegotiationSequence(sequence string) negotiationResult {
+func (t *ProcessTerminal) readKeyboardProtocolNegotiationSequenceLocked(sequence string) (negotiationResult, string) {
 	if t.keyboardProtocolNegotiationBuffer != "" {
 		bufferedSequence := t.keyboardProtocolNegotiationBuffer + sequence
 		if parsed := ParseKeyboardProtocolNegotiationSequence(bufferedSequence); parsed != nil {
 			t.clearKeyboardProtocolNegotiationBufferLocked()
-			return negotiationResult{kind: "sequence", parsed: parsed}
+			return negotiationResult{kind: "sequence", parsed: parsed}, ""
 		}
 		if isKeyboardProtocolNegotiationSequencePrefix(bufferedSequence) {
 			t.setKeyboardProtocolNegotiationBufferLocked(bufferedSequence)
-			return negotiationPending
+			return negotiationPending, ""
 		}
-		t.flushKeyboardProtocolNegotiationBufferAsInputLocked()
+		pending := t.takeKeyboardProtocolNegotiationBufferLocked()
+		if parsed := ParseKeyboardProtocolNegotiationSequence(sequence); parsed != nil {
+			return negotiationResult{kind: "sequence", parsed: parsed}, pending
+		}
+		if isKeyboardProtocolNegotiationSequencePrefix(sequence) {
+			t.setKeyboardProtocolNegotiationBufferLocked(sequence)
+			return negotiationPending, pending
+		}
+		return negotiationResult{kind: "none"}, pending
 	}
 
 	if parsed := ParseKeyboardProtocolNegotiationSequence(sequence); parsed != nil {
-		return negotiationResult{kind: "sequence", parsed: parsed}
+		return negotiationResult{kind: "sequence", parsed: parsed}, ""
 	}
 	if isKeyboardProtocolNegotiationSequencePrefix(sequence) {
 		t.setKeyboardProtocolNegotiationBufferLocked(sequence)
-		return negotiationPending
+		return negotiationPending, ""
 	}
-	return negotiationResult{kind: "none"}
+	return negotiationResult{kind: "none"}, ""
 }
 
 func (t *ProcessTerminal) setKeyboardProtocolNegotiationBufferLocked(sequence string) {
@@ -347,26 +364,26 @@ func (t *ProcessTerminal) clearKeyboardProtocolNegotiationBufferLocked() {
 	t.keyboardProtocolNegotiationBuffer = ""
 }
 
-func (t *ProcessTerminal) flushKeyboardProtocolNegotiationBufferAsInputLocked() {
+func (t *ProcessTerminal) takeKeyboardProtocolNegotiationBufferLocked() string {
 	if t.keyboardProtocolNegotiationBuffer == "" {
-		return
+		return ""
 	}
 	sequence := t.keyboardProtocolNegotiationBuffer
 	t.clearKeyboardProtocolNegotiationBufferLocked()
-	t.forwardInputSequenceLocked(sequence)
+	return sequence
 }
 
-func (t *ProcessTerminal) scheduleKeyboardProtocolNegotiationBufferFlush() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+func (t *ProcessTerminal) scheduleKeyboardProtocolNegotiationBufferFlushLocked() {
 	if t.keyboardProtocolNegotiationBuffer == "" || t.keyboardProtocolBufferFlushTimer != nil {
 		return
 	}
 	t.keyboardProtocolBufferFlushTimer = time.AfterFunc(keyboardProtocolResponseFragmentTimeoutMS*time.Millisecond, func() {
 		t.mu.Lock()
 		t.keyboardProtocolBufferFlushTimer = nil
-		t.flushKeyboardProtocolNegotiationBufferAsInputLocked()
+		sequence := t.takeKeyboardProtocolNegotiationBufferLocked()
+		handler := t.inputHandler
 		t.mu.Unlock()
+		deliverInput(handler, sequence)
 	})
 }
 
@@ -380,18 +397,21 @@ func (t *ProcessTerminal) clearKeyboardProtocolNegotiationBufferFlushTimerLocked
 
 func (t *ProcessTerminal) forwardInputSequence(sequence string) {
 	t.mu.Lock()
-	t.forwardInputSequenceLocked(sequence)
+	handler := t.inputHandler
 	t.mu.Unlock()
+	deliverInput(handler, sequence)
 }
 
-func (t *ProcessTerminal) forwardInputSequenceLocked(sequence string) {
-	if t.inputHandler == nil {
+// deliverInput normalizes a sequence and hands it to the input handler without
+// holding the terminal lock (D138).
+func deliverInput(handler func(string), sequence string) {
+	if handler == nil || sequence == "" {
 		return
 	}
 	shouldDetectNativeShiftEnter := sequence == "\r" && (IsAppleTerminalSession() || isWindows())
 	input := NormalizeNativeShiftEnterInput(sequence, shouldDetectNativeShiftEnter,
 		shouldDetectNativeShiftEnter && nativeShiftPressed())
-	t.inputHandler(input)
+	handler(input)
 }
 
 func (t *ProcessTerminal) enableModifyOtherKeysLocked() {
