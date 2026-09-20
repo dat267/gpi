@@ -744,6 +744,12 @@ func (s *AgentSession) Dispose() {
 	s.AbortRetry()
 	s.AbortBash()
 	s.Agent.Abort()
+	// The session's resources (temp files, watchers) are released with the
+	// session id, like upstream's cleanupSessionResources(this.sessionId).
+	if err := CleanupSessionResources(s.SessionID()); err != nil {
+		// Cleanup is best-effort; the remaining dispose steps still run.
+		_ = err
+	}
 	if s.control != nil {
 		s.control.stateMu.Lock()
 		s.control.disposed = true
