@@ -437,3 +437,23 @@ func TestKittyProtocolGlobals(t *testing.T) {
 		t.Fatal("expected inactive after reset")
 	}
 }
+
+// TestStdinBufferCallbackReentrancy guards D139: OnData runs outside the buffer
+// lock, so a handler that destroys the buffer (the shutdown path) must not
+// deadlock.
+func TestStdinBufferCallbackReentrancy(t *testing.T) {
+	buffer := NewStdinBuffer(StdinBufferOptions{})
+	done := make(chan struct{})
+	buffer.OnData = func(sequence string) {
+		buffer.Destroy()
+	}
+	go func() {
+		defer close(done)
+		buffer.Process([]byte("a"))
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnData deadlocked while destroying the buffer")
+	}
+}

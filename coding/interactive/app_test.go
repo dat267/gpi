@@ -59,12 +59,12 @@ func TestAppEndToEndLoop(t *testing.T) {
 		app.Run(ctx)
 	}()
 
-	waitForCondition(t, func() bool { return app.Lifecycle.IsInitialized() })
+	waitForConditionWithin(t, func() bool { return app.Lifecycle.IsInitialized() }, 6*time.Second)
 	app.Startup.QueueUserInput("hello from the smoke test")
 
 	// The loop forwards the input to the session; with no model the prompt
 	// errors, but the user message is recorded before the model call.
-	waitForCondition(t, func() bool {
+	waitForConditionWithin(t, func() bool {
 		var sawUser, sawAssistant bool
 		for _, message := range app.Session.Messages() {
 			switch typed := message.(type) {
@@ -79,7 +79,7 @@ func TestAppEndToEndLoop(t *testing.T) {
 			}
 		}
 		return sawUser && sawAssistant
-	})
+	}, 6*time.Second)
 
 	cancel()
 	select {
@@ -172,6 +172,21 @@ func newTestApp(t *testing.T) (*App, func()) {
 		tui.SetKeybindings(previous)
 	}
 	return app, cleanup
+}
+
+// waitForConditionWithin polls until the condition holds or the deadline
+// passes (a longer deadline than the shared helper for the end-to-end loop,
+// which runs under heavy suite load).
+func waitForConditionWithin(t *testing.T, condition func() bool, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("condition not met before timeout")
 }
 
 func renderAppChat(app *App) string {

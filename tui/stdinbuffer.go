@@ -228,6 +228,16 @@ type StdinBuffer struct {
 	pasteBuffer                    string
 	pendingKittyPrintableCodepoint int
 	hasPendingCodepoint            bool
+	// emissions collects the sequences produced while the lock is held so the
+	// callbacks run outside it (D139): the handler can trigger a shutdown that
+	// calls Destroy, which re-locks mu.
+	emissions []stdinEmission
+}
+
+// stdinEmission is one buffered callback invocation.
+type stdinEmission struct {
+	sequence string
+	paste    bool
 }
 
 // StdinBufferOptions configures a StdinBuffer.
@@ -257,15 +267,44 @@ func NewStdinBuffer(options StdinBufferOptions) *StdinBuffer {
 // Process feeds input data through the buffer.
 func (b *StdinBuffer) Process(data []byte) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	b.processLocked(string(data))
+	emissions := b.drainEmissionsLocked()
+	b.mu.Unlock()
+	b.deliver(emissions)
 }
 
 // ProcessString feeds string input through the buffer.
 func (b *StdinBuffer) ProcessString(data string) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	b.processLocked(data)
+	emissions := b.drainEmissionsLocked()
+	b.mu.Unlock()
+	b.deliver(emissions)
+}
+
+// drainEmissionsLocked returns and clears the pending emissions.
+func (b *StdinBuffer) drainEmissionsLocked() []stdinEmission {
+	if len(b.emissions) == 0 {
+		return nil
+	}
+	emissions := b.emissions
+	b.emissions = nil
+	return emissions
+}
+
+// deliver runs the buffered callbacks outside the lock (D139).
+func (b *StdinBuffer) deliver(emissions []stdinEmission) {
+	for _, emission := range emissions {
+		if emission.paste {
+			if b.OnPaste != nil {
+				b.OnPaste(emission.sequence)
+			}
+			continue
+		}
+		if b.OnData != nil {
+			b.OnData(emission.sequence)
+		}
+	}
 }
 
 func (b *StdinBuffer) processLocked(str string) {
@@ -359,10 +398,14 @@ func (b *StdinBuffer) processLocked(str string) {
 			b.mu.Lock()
 			b.timeout = nil
 			flushed := b.flushLocked()
+			emissions := b.drainEmissionsLocked()
 			b.mu.Unlock()
 			for _, sequence := range flushed {
-				b.emit(sequence)
+				if b.OnData != nil {
+					b.OnData(sequence)
+				}
 			}
+			b.deliver(emissions)
 		})
 	}
 }
@@ -391,15 +434,11 @@ func (b *StdinBuffer) emitDataSequenceLocked(sequence string) {
 }
 
 func (b *StdinBuffer) emit(sequence string) {
-	if b.OnData != nil {
-		b.OnData(sequence)
-	}
+	b.emissions = append(b.emissions, stdinEmission{sequence: sequence})
 }
 
 func (b *StdinBuffer) emitPasteLocked(content string) {
-	if b.OnPaste != nil {
-		b.OnPaste(content)
-	}
+	b.emissions = append(b.emissions, stdinEmission{sequence: content, paste: true})
 }
 
 // Flush returns the buffered incomplete sequence, if any.
