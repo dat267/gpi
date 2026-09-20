@@ -94,6 +94,7 @@ Update the pin whenever upstream source is re-read for a port.
 | `chord/services` (replicated state) | `services/{state,state-internals,instances}.ts` — host-owned mutable state (deep-clone initial publication, diff-based publish, op-batch source listeners, hydrate-then-update deliveries), the cold consumer replica (base-batch-only hydration, sequence-gap clearing, listener-failure reporting), the internals lookup, and the keyed instance directory (generation identity, readiness gating, cancellable per-instance observation tasks, reset/dispose) | ported |
 | `chord` | `packages/chord` — root state container (host-owned state, ops, facets), delta ops with the wire tuples, services (provider/consumer/state/instances), and facets | ported |
 | `chord` (node bundler) | esbuild/rolldown JS facet bundling — JavaScript-runtime specific | out of scope |
+| `tui` (foundation) | `@earendil-works/pi-tui` src/utils.ts — grapheme-cluster segmentation (combining marks, ZWJ sequences, skin tones, regional-indicator flags, indic virama joining), terminal-cell width (CJK/fullwidth double via the Unicode east-asian-width tables, emoji presentation, tab = 3, ambiguous = 1), terminal-sequence extraction (CSI/OSC/APC with BEL and ST terminators) and stripping, and the width cache | ported |
 
 ## Final scope assessment
 
