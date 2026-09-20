@@ -58,6 +58,9 @@ func NewCustomEditor(host tui.EditorHost, theme tui.EditorTheme, keybindings *Ap
 // EmbedWorkingStatusValue reports the embed option (WorkingStatusEditor).
 func (c *CustomEditor) EmbedWorkingStatusValue() bool { return c.EmbedWorkingStatus }
 
+// WorkingBorderColor returns the editor's border color (WorkingStatusEditor).
+func (c *CustomEditor) WorkingBorderColor() func(string) string { return c.BorderColor }
+
 // SetWorkingStatusIndicator sets the embedded status indicator.
 func (c *CustomEditor) SetWorkingStatusIndicator(indicator *StatusIndicator) {
 	c.workingStatusIndicator = indicator

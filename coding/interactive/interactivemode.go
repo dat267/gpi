@@ -23,6 +23,8 @@ type WorkingStatusEditor interface {
 	tui.Component
 	EmbedWorkingStatusValue() bool
 	SetWorkingStatusIndicator(indicator *StatusIndicator)
+	// WorkingBorderColor returns the editor's border color, if any.
+	WorkingBorderColor() func(string) string
 }
 
 // IsWorkingStatusEditor reports whether a component is a working-status editor.
