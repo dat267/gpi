@@ -359,11 +359,13 @@ func (o *localShellOperations) Exec(ctx context.Context, command, cwd string, ex
 		})
 	}
 
-	waitErr := cmd.Wait()
-	// Wait for the pipes to fall idle rather than hanging on a detached
-	// descendant that inherited them; the grace timer re-arms on every chunk
-	// (port of waitForChildProcess).
+	// Drain the output pipes before Wait: os/exec closes the pipes it created
+	// when Wait reaps the process, which can truncate unread data. The process
+	// exit already closes the write ends, so the readers see EOF here (D127).
+	// The grace timer re-arms on every chunk so a detached descendant that
+	// inherited the pipes cannot hang the drain (port of waitForChildProcess).
 	waitForPipeDrain(streamWG, activity, started)
+	waitErr := cmd.Wait()
 	close(stopAbort)
 	if timeoutTimer != nil {
 		timeoutTimer.Stop()

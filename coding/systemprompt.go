@@ -2,6 +2,7 @@ package coding
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -77,6 +78,9 @@ func GetExamplesPath() string { return resolveIn(currentPackageDir(), "examples"
 
 // GetChangelogPath is the CHANGELOG.md path.
 func GetChangelogPath() string { return resolveIn(currentPackageDir(), "CHANGELOG.md") }
+
+// GetDebugLogPath is the interactive debug log path.
+func GetDebugLogPath() string { return filepath.Join(GetAgentDir(), AppName+"-debug.log") }
 
 func resolveIn(base, name string) string {
 	if base == "" {

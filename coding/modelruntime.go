@@ -1102,3 +1102,16 @@ func uniqueStrings(values []string) []string {
 	}
 	return out
 }
+
+// GetCachePrice implements ModelPriceSource using the model catalogue's
+// cache-read price (dollars per million tokens).
+func (r *ModelRuntime) GetCachePrice(provider string, modelID string) *ModelCachePrice {
+	model := r.GetModel(provider, modelID)
+	if model == nil {
+		return nil
+	}
+	if model.Cost.CacheRead <= 0 {
+		return nil
+	}
+	return &ModelCachePrice{CacheRead: model.Cost.CacheRead}
+}

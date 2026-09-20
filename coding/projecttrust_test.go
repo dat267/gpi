@@ -430,6 +430,7 @@ func TestWaitForPipeDrain(t *testing.T) {
 	if elapsed < exitStdioGraceMS || elapsed > exitStdioGraceMS+200 {
 		t.Fatalf("grace elapsed = %dms", elapsed)
 	}
+
 }
 
 // syncWaitGroup wraps sync.WaitGroup so the drain helper can be exercised.
