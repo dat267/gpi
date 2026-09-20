@@ -1000,3 +1000,69 @@ func CustomThemesDir() string {
 	defer customThemesDirState.mu.Unlock()
 	return customThemesDirState.dir
 }
+
+// ---- Terminal queries (src/modes/interactive/theme/theme.ts) ----
+
+// TerminalBackgroundDetector queries the terminal's background color.
+type TerminalBackgroundDetector interface {
+	QueryTerminalBackgroundColor(timeoutMs int) (RgbColor, bool)
+}
+
+// TerminalAutoThemeDetector additionally queries the terminal color scheme.
+type TerminalAutoThemeDetector interface {
+	TerminalBackgroundDetector
+	QueryTerminalColorScheme(timeoutMs int) (TerminalTheme, bool)
+}
+
+// DetectTerminalBackgroundTheme queries the terminal background and falls back
+// to environment detection.
+//
+// Upstream runs the color-scheme and background queries concurrently; the Go
+// port queries them in sequence (D76).
+func DetectTerminalBackgroundTheme(ui TerminalBackgroundDetector, timeoutMs int, env func(string) string) TerminalThemeDetection {
+	if ui != nil {
+		if rgb, ok := ui.QueryTerminalBackgroundColor(timeoutMs); ok {
+			theme := GetThemeForRgbColor(rgb)
+			return TerminalThemeDetection{
+				Theme:      theme,
+				Source:     "terminal background",
+				Detail:     "OSC 11 background rgb(" + itoa(rgb.R) + ", " + itoa(rgb.G) + ", " + itoa(rgb.B) + ")",
+				Confidence: "high",
+			}
+		}
+	}
+	return DetectTerminalBackgroundFromEnv(env)
+}
+
+// DetectTerminalThemeForAuto prefers the terminal color-scheme report and
+// falls back to the background detection.
+func DetectTerminalThemeForAuto(ui TerminalAutoThemeDetector, timeoutMs int, env func(string) string) TerminalTheme {
+	if ui != nil {
+		if scheme, ok := ui.QueryTerminalColorScheme(timeoutMs); ok {
+			return scheme
+		}
+	}
+	return DetectTerminalBackgroundTheme(ui, timeoutMs, env).Theme
+}
+
+func itoa(value int) string {
+	if value == 0 {
+		return "0"
+	}
+	negative := value < 0
+	if negative {
+		value = -value
+	}
+	var digits [20]byte
+	index := len(digits)
+	for value > 0 {
+		index--
+		digits[index] = byte('0' + value%10)
+		value /= 10
+	}
+	if negative {
+		index--
+		digits[index] = '-'
+	}
+	return string(digits[index:])
+}
