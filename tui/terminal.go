@@ -147,6 +147,12 @@ type ProcessTerminal struct {
 // NewProcessTerminal creates a terminal over the given files (os.Stdin and
 // os.Stdout in production).
 func NewProcessTerminal(stdin *os.File, stdout *os.File) *ProcessTerminal {
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	if stdout == nil {
+		stdout = os.Stdout
+	}
 	return &ProcessTerminal{stdin: stdin, stdout: stdout, writeLogPath: resolveWriteLogPath()}
 }
 

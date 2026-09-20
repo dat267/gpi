@@ -1,0 +1,128 @@
+package tui
+
+// Port of the renderer surface from src/tui.ts: the TUI interface shared by
+// MainScreen and AltScreen plus the swappable reference.
+//
+// Divergences: upstream's TUI is a class interface with mutable properties
+// (children, terminal, onDebug) and createInteractiveTuiReference returns an
+// ES Proxy that forwards property reads/writes. Go has no proxies, so the
+// reference forwards the method set and exposes the few field-backed values
+// through accessors (D105).
+
+// TUI is the renderer surface shared by MainScreen and AltScreen.
+type TUI interface {
+	Component
+
+	FullRedraws() int
+	GetFocusedComponent() Component
+	GetShowHardwareCursor() bool
+	SetShowHardwareCursor(enabled bool)
+	GetClearOnShrink() bool
+	SetClearOnShrink(enabled bool)
+	GetMountedRoots() []Component
+	GetTerminal() Terminal
+	Start()
+	Stop(options TuiStopOptions)
+	AddInputListener(listener TuiInputListener) func()
+	RemoveInputListener(listener TuiInputListener)
+	RenderNow(force bool)
+	RequestRender(force bool)
+	SetFocus(component Component)
+	ShowOverlay(component Component, options *OverlayOptions) OverlayHandle
+	HideOverlay()
+	HasOverlay() bool
+	AddChild(component Component)
+	RemoveChild(component Component)
+	Clear()
+}
+
+// GetTerminal returns the renderer's terminal.
+func (t *Renderer) GetTerminal() Terminal { return t.Terminal }
+
+// TuiReference is a stable handle that always forwards to the currently active
+// renderer (upstream createInteractiveTuiReference).
+type TuiReference struct {
+	get func() TUI
+}
+
+// NewTuiReference creates a reference to the renderer returned by get.
+func NewTuiReference(get func() TUI) *TuiReference {
+	return &TuiReference{get: get}
+}
+
+// Render renders through the active renderer.
+func (r *TuiReference) Render(width int) []string { return r.get().Render(width) }
+
+// Invalidate invalidates through the active renderer.
+func (r *TuiReference) Invalidate() { r.get().Invalidate() }
+
+// FullRedraws returns the active renderer's full redraw count.
+func (r *TuiReference) FullRedraws() int { return r.get().FullRedraws() }
+
+// GetFocusedComponent returns the focused component.
+func (r *TuiReference) GetFocusedComponent() Component { return r.get().GetFocusedComponent() }
+
+// GetShowHardwareCursor reports the hardware-cursor state.
+func (r *TuiReference) GetShowHardwareCursor() bool { return r.get().GetShowHardwareCursor() }
+
+// SetShowHardwareCursor updates the hardware-cursor state.
+func (r *TuiReference) SetShowHardwareCursor(enabled bool) { r.get().SetShowHardwareCursor(enabled) }
+
+// GetClearOnShrink reports the clear-on-shrink state.
+func (r *TuiReference) GetClearOnShrink() bool { return r.get().GetClearOnShrink() }
+
+// SetClearOnShrink updates the clear-on-shrink state.
+func (r *TuiReference) SetClearOnShrink(enabled bool) { r.get().SetClearOnShrink(enabled) }
+
+// GetMountedRoots returns the mounted roots.
+func (r *TuiReference) GetMountedRoots() []Component { return r.get().GetMountedRoots() }
+
+// GetTerminal returns the active terminal.
+func (r *TuiReference) GetTerminal() Terminal { return r.get().GetTerminal() }
+
+// Start starts the active renderer.
+func (r *TuiReference) Start() { r.get().Start() }
+
+// Stop stops the active renderer.
+func (r *TuiReference) Stop(options TuiStopOptions) { r.get().Stop(options) }
+
+// AddInputListener registers an input listener.
+func (r *TuiReference) AddInputListener(listener TuiInputListener) func() {
+	return r.get().AddInputListener(listener)
+}
+
+// RemoveInputListener removes an input listener.
+func (r *TuiReference) RemoveInputListener(listener TuiInputListener) {
+	r.get().RemoveInputListener(listener)
+}
+
+// RenderNow renders immediately.
+func (r *TuiReference) RenderNow(force bool) { r.get().RenderNow(force) }
+
+// RequestRender requests a render.
+func (r *TuiReference) RequestRender(force bool) { r.get().RequestRender(force) }
+
+// SetFocus sets the focused component.
+func (r *TuiReference) SetFocus(component Component) { r.get().SetFocus(component) }
+
+// ShowOverlay shows an overlay.
+func (r *TuiReference) ShowOverlay(component Component, options *OverlayOptions) OverlayHandle {
+	return r.get().ShowOverlay(component, options)
+}
+
+// HideOverlay hides the top overlay.
+func (r *TuiReference) HideOverlay() { r.get().HideOverlay() }
+
+// HasOverlay reports whether an overlay is shown.
+func (r *TuiReference) HasOverlay() bool { return r.get().HasOverlay() }
+
+// AddChild adds a child component.
+func (r *TuiReference) AddChild(component Component) { r.get().AddChild(component) }
+
+// RemoveChild removes a child component.
+func (r *TuiReference) RemoveChild(component Component) { r.get().RemoveChild(component) }
+
+// Clear clears the children.
+func (r *TuiReference) Clear() { r.get().Clear() }
+
+var _ TUI = (*TuiReference)(nil)
