@@ -134,6 +134,34 @@ type ThinkingSelectorComponent struct {
 	focused              bool
 }
 
+// Select invokes the selection callback (test seam).
+func (c *ThinkingSelectorComponent) Select(level string) {
+	if c.onSelect != nil {
+		c.onSelect(level)
+	}
+}
+
+// SelectAsDefault invokes the save-as-default callback (test seam).
+func (c *ThinkingSelectorComponent) SelectAsDefault(level string) {
+	if c.onSelectAsDefault != nil {
+		c.onSelectAsDefault(level)
+	}
+}
+
+// Select invokes the fork callback (test seam).
+func (c *UserMessageSelectorComponent) Select(entryID string) {
+	if c.messageList != nil && c.messageList.OnSelect != nil {
+		c.messageList.OnSelect(entryID)
+	}
+}
+
+// Select invokes the trust callback (test seam).
+func (c *TrustSelectorComponent) Select(selection TrustSelection) {
+	if c.onSelect != nil {
+		c.onSelect(selection)
+	}
+}
+
 // NewThinkingSelectorComponent creates the selector.
 func NewThinkingSelectorComponent(currentLevel string, availableLevels []string, onSelect func(string), onCancel func(), onSelectAsDefault func(string), defaultThinkingLevel string) *ThinkingSelectorComponent {
 	theme := ActiveTheme()
