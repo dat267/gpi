@@ -1,6 +1,7 @@
 package coding
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -35,6 +36,23 @@ func CanonicalizePath(path string) string {
 		return resolved
 	}
 	return path
+}
+
+// GetFileRevision returns an opaque file revision string used to detect
+// changes without reading the file (port of getFileRevision). It returns
+// ("", false) when the file cannot be stat'ed.
+//
+// dev/ino come from the platform stat structure; on platforms that do not
+// expose them (Windows) they are zero, and the size/timestamps still make the
+// revision change-detecting.
+func GetFileRevision(path string) (string, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", false
+	}
+	dev, ino := statDeviceInode(info)
+	return fmt.Sprintf("%d:%d:%d:%d:%d", dev, ino, info.Size(),
+		info.ModTime().UnixNano(), statChangeTimeNano(info)), true
 }
 
 // PathExists reports whether the path is accessible.
