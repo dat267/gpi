@@ -59,7 +59,7 @@ func NewFooterDataProvider(cwd string, options FooterDataProviderOptions) *Foote
 		if interval > 0 {
 			provider.stopWatch = make(chan struct{})
 			provider.watchDone = make(chan struct{})
-			go provider.watchLoop(interval)
+			go provider.watchLoop(provider.stopWatch, interval)
 		}
 	}
 	return provider
@@ -212,14 +212,14 @@ func (f *FooterDataProvider) Refresh() {
 	}
 }
 
-func (f *FooterDataProvider) watchLoop(interval time.Duration) {
+func (f *FooterDataProvider) watchLoop(stopWatch chan struct{}, interval time.Duration) {
 	defer close(f.watchDone)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	lastHead := f.readHeadContent()
 	for {
 		select {
-		case <-f.stopWatch:
+		case <-stopWatch:
 			return
 		case <-ticker.C:
 			current := f.readHeadContent()

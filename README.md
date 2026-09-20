@@ -146,14 +146,15 @@ Update the pin whenever upstream source is re-read for a port.
 | `tui` (keys) | src/keys.ts — the `KeyId`/`Key` identifier surface, the legacy sequence tables (ANSI/SS3/PC-style function keys, shift/ctrl variants, alt+arrow), `matchesKey` for specials, arrows, function keys, and letter/digit/symbol keys across the legacy, Kitty CSI-u, and modifyOtherKeys encodings (base-layout-key fallback for non-Latin layouts with the remap guard, the raw-0x08 Windows Terminal heuristic, mode-aware `\x1b\r`/`\n` mappings), `parseKey` formatting (`formatParsedKey` with functional-codepoint normalization, shifted-letter identity, and lock-mask handling), `decodeKittyPrintable`/`decodePrintableKey` for plain/Shift CSI-u and modifyOtherKeys input, the key-event type tracking, and the Kitty protocol global state; verified against an upstream-generated golden matrix (169 inputs x 2 protocol states x 85 key ids plus parse/decode results) | ported |
 | `tui` (terminal + stdin) | src/terminal.ts + src/stdin-buffer.ts — `StdinBuffer` (complete-sequence extraction for CSI/OSC/DCS/APC/SS3/meta with the SGR-mouse shape check, old-style ESC[M 6-byte events, the WezTerm ESC+ESC+CSI split, the escape vs sequence timeout, bracketed-paste re-wrapping, and the Kitty printable raw-echo dedup), `ProcessTerminal` (raw mode via x/term, bracketed paste on/off, SIGWINCH resize watcher, columns/rows with COLUMNS/LINES fallbacks, cursor/clear/title/OSC 9;4 progress with keepalive, drainInput idle protocol, the PI_TUI_WRITE_LOG output log), the Kitty keyboard protocol negotiation (flags request with the DA sentinel, modifyOtherKeys fallback, split-response buffering with the 150 ms flush timer), `resolveEscapeTimeoutMs` (PI_TUI_ESC_TIMEOUT / SSH), and the keyboard-protocol globals from keys.ts | ported |
 | `tui` (renderer core) | src/tui.ts — Component model with the optional-method interfaces (InputHandler/MouseHandler/KeyReleaseWanter/Focusable), mouse event normalization with `dispatchMouseEvent`/`retargetMouseEvent`, `Container` (render + mouse-layout hit testing), the overlay stack (anchors/percent/margin layout, focus-order stacking, capture/non-capturing modes, handles with hide/setHidden/focus/unfocus/bounds, focus-restore state machine), `compositeTuiLine`/`compositeOverlays` (screen-relative compositing with segment resets), `applyLineResets`, cursor-marker extraction, and the render scheduler (16 ms throttle, immediate-render preemption of queued throttled frames); src/keys.ts `isKeyRelease`/`isKeyRepeat` | ported (terminal.ts, tui-main-screen/tui-alt-screen doRender, and the terminal query protocols pending) |
+| `cmd/pi` (CLI + composition) | `main.ts`'s boot plus the `InteractiveMode` constructor — `coding/interactive/app.go` composes the ported wirings (renderer/theme, containers, editor, footer, transcript, event dispatcher, queue, selector slot, key/submit handlers, lifecycle, startup/run, selectors/settings/models/session/auth/commands/trust/autocomplete) into a runnable `App`, and `cmd/pi` boots settings/auth/model-runtime/agent-session from the CLI flags (`--help`, `--version`, `-r`/`-c`, `-m`, `--offline`, `--tui-mode`, prompts) and runs it | ported (D132: branch summarization is tracked as compaction and can be aborted; D133: the app returns no extension tool renderers; D134: the app takes a pre-booted session and no-ops the grammar load/package check/extension rebind; D135: lifecycle flags are mutex-guarded and the footer watcher captures its stop channel) |
 
 ## Final scope assessment
 
 Every upstream runtime package is accounted for: `ai` (all ten wire APIs, all provider factories, the seven OAuth flows, image generation, the api/images registries, overflow detection), `agent` (the loop), `coding-agent` (the complete core: session, tools, compaction, branch summarization, retry, cache warming, model runtime/registry/composer, stores, exports, bug report, crash log, trust, utilities, and the createAgentSession assembly), `protocol`, `client`, `chord` (+delta/services/facets), `server` (+unix/testing), `telemetry`, and `durable`.
 
-The TUI port is in progress: the width foundation, line primitives, and renderer core are ported; terminal.ts, the screen renderers, layout, and components follow.
+The `pi-tui` library and the interactive coding-agent mode are ported (`tui/*` and `coding/interactive/*`), including the theme, every component, and the interactive-mode method groups; `cmd/pi` composes them into a runnable CLI. The remaining items are the documented out-of-scope set below.
 
-Deliberately out of scope, with divergences recorded in code (D1-D41): the interactive TUI and its support modules (keybindings, output guard, footer data, exportToHtml's theme chain), the extension mechanics (resource loader, sdk extension surface, agent-session services/runtime, package and tools managers), the node-specific chord bundler, the bug-report upload transport, and the optional `session-backends` sqlite driver (a host-provided storage backend imported by no runtime package) plus the `evals` Docker harness (a development tool).
+Deliberately out of scope, with divergences recorded in code: the extension mechanics (resource loader, sdk extension surface, agent-session services/runtime, package and tools managers), the native clipboard, the kitty/iterm image transport internals, the node-specific chord bundler, the bug-report upload transport, and the optional `session-backends` sqlite driver (a host-provided storage backend imported by no runtime package) plus the `evals` Docker harness (a development tool).
 
 ## Build & test
 
@@ -161,3 +162,13 @@ Deliberately out of scope, with divergences recorded in code (D1-D41): the inter
 go build ./...
 go test -race ./...
 ```
+
+## Install the CLI
+
+```bash
+cd /home/dat/repos/gpi
+go build -o /tmp/pi-go ./cmd/pi
+install -m755 /tmp/pi-go ~/.local/bin/pi-go
+```
+
+Then run `pi-go` (or symlink it to `pi`). `pi-go --help` lists the flags; `pi-go --version` prints the version. The CLI supports the interactive mode, resume (`-r`/`-c`, `--session`, `--session-id`), model selection (`-m`, `-p`), `--offline`, `--tui-mode` and initial prompts. The print/json/rpc modes, package manager, extensions and migrations are not wired.

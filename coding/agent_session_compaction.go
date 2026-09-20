@@ -245,6 +245,20 @@ func (s *AgentSession) AbortCompaction() {
 	}
 }
 
+// AbortBranchSummary cancels an in-flight branch summarization (upstream
+// abortBranchSummary; D132).
+func (s *AgentSession) AbortBranchSummary() {
+	if s.control == nil {
+		return
+	}
+	s.control.stateMu.Lock()
+	cancel := s.control.branchSummaryCancel
+	s.control.stateMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
 // summarizationRetryCallbacksForCompaction builds the compaction callbacks
 // (the attempt-start event carries the compaction reason).
 func (s *AgentSession) summarizationRetryCallbacksForCompaction(reason CompactionReason) *SummarizationCallbacks {

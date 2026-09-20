@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -95,6 +96,9 @@ type LifecycleOptions struct {
 type Lifecycle struct {
 	options LifecycleOptions
 
+	// mu guards the cross-goroutine state flags (the run loop reads them while
+	// the signal/shutdown handlers write them; D135).
+	mu                sync.Mutex
 	initialized       bool
 	shuttingDown      bool
 	shutdownRequested bool
@@ -138,13 +142,33 @@ func NewLifecycle(options LifecycleOptions) *Lifecycle {
 func (l *Lifecycle) Now() func() time.Time { return l.now }
 
 // IsInitialized reports the init state.
-func (l *Lifecycle) IsInitialized() bool { return l.initialized }
+func (l *Lifecycle) IsInitialized() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.initialized
+}
 
 // IsShuttingDown reports the shutdown state.
-func (l *Lifecycle) IsShuttingDown() bool { return l.shuttingDown }
+func (l *Lifecycle) IsShuttingDown() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.shuttingDown
+}
 
 // RequestShutdown marks a pending shutdown (the agent_settled hook).
-func (l *Lifecycle) RequestShutdown() { l.shutdownRequested = true }
+func (l *Lifecycle) RequestShutdown() {
+	l.mu.Lock()
+	l.shutdownRequested = true
+	l.mu.Unlock()
+}
+
+// MarkInitialized records that init completed (upstream sets isInitialized at
+// the end of init).
+func (l *Lifecycle) MarkInitialized() {
+	l.mu.Lock()
+	l.initialized = true
+	l.mu.Unlock()
+}
 
 // MountInteractiveTui mounts the shared component tree on a renderer.
 func (l *Lifecycle) MountInteractiveTui(renderer tui.TUI, components []tui.Component, layoutRoot tui.Component) {
@@ -278,10 +302,13 @@ func (l *Lifecycle) HandleCtrlZ(showStatus func(string), suspend func()) {
 
 // Shutdown gracefully stops the mode.
 func (l *Lifecycle) Shutdown(fromSignal bool) {
+	l.mu.Lock()
 	if l.shuttingDown {
+		l.mu.Unlock()
 		return
 	}
 	l.shuttingDown = true
+	l.mu.Unlock()
 
 	if fromSignal {
 		// Emit the extension cleanup before touching the terminal.
@@ -332,7 +359,9 @@ func (l *Lifecycle) Stop() {
 
 // EmergencyTerminalExit exits when the terminal is gone.
 func (l *Lifecycle) EmergencyTerminalExit() {
+	l.mu.Lock()
 	l.shuttingDown = true
+	l.mu.Unlock()
 	l.UnregisterSignalHandlers()
 	if l.options.KillDetachedChildren != nil {
 		l.options.KillDetachedChildren()
@@ -342,11 +371,14 @@ func (l *Lifecycle) EmergencyTerminalExit() {
 
 // UncaughtCrash restores the terminal and exits after an uncaught exception.
 func (l *Lifecycle) UncaughtCrash(err error) {
+	l.mu.Lock()
 	if l.shuttingDown {
+		l.mu.Unlock()
 		l.options.Exit(1)
 		return
 	}
 	l.shuttingDown = true
+	l.mu.Unlock()
 	l.UnregisterSignalHandlers()
 	if l.options.KillDetachedChildren != nil {
 		l.options.KillDetachedChildren()
@@ -368,7 +400,10 @@ func (l *Lifecycle) UncaughtCrash(err error) {
 
 // CheckShutdownRequested shuts down when a shutdown was requested.
 func (l *Lifecycle) CheckShutdownRequested() {
-	if !l.shutdownRequested {
+	l.mu.Lock()
+	requested := l.shutdownRequested
+	l.mu.Unlock()
+	if !requested {
 		return
 	}
 	l.Shutdown(false)

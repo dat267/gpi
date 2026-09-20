@@ -477,3 +477,64 @@ func newTestSessionManager(t *testing.T) *SessionManager {
 	tempAgentDir(t)
 	return NewSessionManager(t.TempDir(), nil)
 }
+
+// TestNavigateTreeAbortBranchSummary covers the branch-summary abort
+// controller: navigation reports IsCompacting and AbortBranchSummary cancels
+// the in-flight summary (D132).
+func TestNavigateTreeAbortBranchSummary(t *testing.T) {
+	manager := sessionWithBranch(t)
+	entries := manager.GetEntries()
+	rootID := entries[0].ID
+
+	session, err := NewAgentSession(&SessionConfig{
+		Cwd: t.TempDir(), Sessions: manager,
+		Model:    &ai.Model{ID: "m", API: ai.APIAnthropicMessages, Provider: "anthropic", ContextWindow: 100000, MaxTokens: 8192},
+		StreamFn: stubStreamFn,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.control = &AgentSessionControl{}
+
+	started := make(chan struct{})
+	session.CompactionStreamFn = func(model *ai.Model, context ai.TranscriptContext, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		stream := ai.NewAssistantMessageEventStream()
+		close(started)
+		go func() {
+			<-options.Ctx.Done()
+			message := &ai.AssistantMessage{
+				API: ai.APIAnthropicMessages, Provider: "anthropic", Model: model.ID,
+				StopReason: ai.StopAborted,
+			}
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: ai.StopAborted, Message: message})
+		}()
+		return stream
+	}
+
+	type outcome struct {
+		result *NavigateTreeResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := session.NavigateTree(ctxpkg.Background(), rootID, NavigateTreeOptions{Summarize: true})
+		done <- outcome{result, err}
+	}()
+
+	<-started
+	if !session.IsCompacting() {
+		t.Fatal("navigation must report as compacting")
+	}
+	session.AbortBranchSummary()
+
+	got := <-done
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if got.result == nil || !got.result.Aborted || !got.result.Cancelled {
+		t.Fatalf("result = %+v", got.result)
+	}
+	if session.IsCompacting() {
+		t.Fatal("still compacting after navigation finished")
+	}
+}

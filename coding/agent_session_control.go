@@ -69,18 +69,19 @@ type AgentSessionControl struct {
 	// PromptTemplates are the file-based prompt templates (resource loader).
 	PromptTemplates []PromptTemplate
 
-	stateMu           sync.Mutex
-	scopedModels      []ScopedModel
-	autoCompaction    bool
-	autoRetry         bool
-	retryAborted      bool
-	compactionActive  bool
-	branchSummaryOpen bool
-	bashActive        bool
-	pendingBash       int
-	bashAborted       bool
-	lastAssistant     *ai.AssistantMessage
-	disposed          bool
+	stateMu             sync.Mutex
+	scopedModels        []ScopedModel
+	autoCompaction      bool
+	autoRetry           bool
+	retryAborted        bool
+	compactionActive    bool
+	branchSummaryOpen   bool
+	branchSummaryCancel context.CancelFunc
+	bashActive          bool
+	pendingBash         int
+	bashAborted         bool
+	lastAssistant       *ai.AssistantMessage
+	disposed            bool
 }
 
 // AgentToolDefinition is a registered tool plus its source metadata.
@@ -97,6 +98,37 @@ func (s *AgentSession) State() agent.AgentState { return s.Agent.State() }
 
 // Model returns the current model.
 func (s *AgentSession) Model() *ai.Model { return s.Agent.State().Model }
+
+// ModelRuntime returns the model runtime backing the session (nil when the
+// session was created without one).
+func (s *AgentSession) ModelRuntime() *ModelRuntime {
+	if s.control == nil {
+		return nil
+	}
+	return s.control.ModelRuntime
+}
+
+// GetAvailableModels returns the runtime's available-model snapshot (the
+// settings selector's per-model list; upstream reads the same snapshot).
+func (s *AgentSession) GetAvailableModels() []*ai.Model {
+	runtime := s.ModelRuntime()
+	if runtime == nil {
+		return nil
+	}
+	return runtime.GetAvailableSnapshot()
+}
+
+// GetRetryAttempt is the transcript's accessor name for RetryAttempt.
+func (s *AgentSession) GetRetryAttempt() int { return s.RetryAttempt() }
+
+// GetModelPriceSource returns the runtime as the cache-price source.
+func (s *AgentSession) GetModelPriceSource() ModelPriceSource {
+	runtime := s.ModelRuntime()
+	if runtime == nil {
+		return nil
+	}
+	return runtime
+}
 
 // HasModel reports whether a real model is selected. The agent keeps a
 // placeholder model when none was configured, which upstream represents as an

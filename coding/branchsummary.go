@@ -321,6 +321,11 @@ func GenerateBranchSummary(entries []SessionEntry, options GenerateBranchSummary
 
 	response, err := CompleteSummarization(options.Model, transcript, requestOptions, options.StreamFn, options.Retry, options.Callbacks)
 	if err != nil {
+		// A cancelled context is an abort, not a failure (upstream's abort signal
+		// surfaces as result.aborted; D132).
+		if options.Ctx != nil && options.Ctx.Err() != nil {
+			return &BranchSummaryResult{Aborted: true}, nil
+		}
 		return nil, err
 	}
 	if response.StopReason == ai.StopAborted {
@@ -391,6 +396,21 @@ func (s *AgentSession) NavigateTree(ctx context.Context, targetID string, option
 		return nil, fmt.Errorf("Entry %s not found", targetID)
 	}
 
+	// Set up the branch-summary abort controller (upstream sets it for the whole
+	// navigation, so isCompacting reports the navigation as busy; D132).
+	summaryCtx, cancel := context.WithCancel(ctx)
+	s.control.stateMu.Lock()
+	s.control.branchSummaryOpen = true
+	s.control.branchSummaryCancel = cancel
+	s.control.stateMu.Unlock()
+	defer func() {
+		s.control.stateMu.Lock()
+		s.control.branchSummaryOpen = false
+		s.control.branchSummaryCancel = nil
+		s.control.stateMu.Unlock()
+		cancel()
+	}()
+
 	collection := CollectEntriesForBranchSummary(s.Sessions, oldLeafID, targetID)
 
 	var summaryText string
@@ -421,7 +441,7 @@ func (s *AgentSession) NavigateTree(ctx context.Context, targetID string, option
 		}
 		result, err := GenerateBranchSummary(collection.Entries, GenerateBranchSummaryOptions{
 			Model: request.Model, APIKey: request.APIKey, Headers: request.Headers, Env: request.Env,
-			Ctx: ctx, CustomInstructions: options.CustomInstructions,
+			Ctx: summaryCtx, CustomInstructions: options.CustomInstructions,
 			ReplaceInstructions: options.ReplaceInstructions, ReserveTokens: reserveTokens,
 			StreamFn:  s.compactionStreamFn(),
 			Callbacks: s.summarizationRetryCallbacks("branchSummary"),
