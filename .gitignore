@@ -2,3 +2,4 @@
 *.test
 /pi
 /cmd/pi/pi
+/bin/

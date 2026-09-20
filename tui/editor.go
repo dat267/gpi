@@ -113,6 +113,10 @@ type Editor struct {
 
 	OnSubmit func(text string)
 	OnChange func(text string)
+	// pendingSubmit defers OnSubmit until after the editor lock is released
+	// (D136): the submit handler calls back into the editor (SetText,
+	// AddToHistory), which would deadlock a non-reentrant mutex.
+	pendingSubmit *string
 	// TopBorder overrides the top border rendering (see renderTopBorder).
 	TopBorder     func(width int, hiddenLineCount int) string
 	DisableSubmit bool
@@ -536,8 +540,14 @@ func (e *Editor) HandleMouse(event TuiMouseEvent) *TuiMouseDispatchResult {
 // HandleInput processes a key/input chunk.
 func (e *Editor) HandleInput(data string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.handleInputLocked(data)
+	pending := e.pendingSubmit
+	e.pendingSubmit = nil
+	e.mu.Unlock()
+	// Invoke the submit handler outside the lock (D136).
+	if pending != nil && e.OnSubmit != nil {
+		e.OnSubmit(*pending)
+	}
 }
 
 func (e *Editor) handleInputLocked(data string) {
@@ -1123,7 +1133,8 @@ func (e *Editor) submitValueLocked() {
 		e.OnChange("")
 	}
 	if e.OnSubmit != nil {
-		e.OnSubmit(result)
+		value := result
+		e.pendingSubmit = &value
 	}
 }
 
