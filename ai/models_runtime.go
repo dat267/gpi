@@ -380,17 +380,16 @@ func timeNowMS() int64 { return time.Now().UnixMilli() }
 func bgCtx() context.Context { return context.Background() }
 func nowUnixMilli() int64    { return time.Now().UnixMilli() }
 
-// ModelsStreamOptions adds the Models-only request transforms to stream options.
+// ModelsStreamOptions is the Models-level stream request options; the header
+// transform rides on the shared StreamOptions (upstream
+// ModelsRequestTransforms).
 type ModelsStreamOptions struct {
 	StreamOptions
-	// TransformHeaders runs last over the merged header set.
-	TransformHeaders func(headers ProviderHeaders) ProviderHeaders
 }
 
 // ModelsSimpleStreamOptions is the SimpleStreamOptions variant.
 type ModelsSimpleStreamOptions struct {
 	SimpleStreamOptions
-	TransformHeaders func(headers ProviderHeaders) ProviderHeaders
 }
 
 // Models is the runtime collection of providers plus auth application and
@@ -1021,7 +1020,7 @@ func (m *Models) StreamSimple(model *Model, context Context, options *ModelsSimp
 		if err != nil {
 			return nil, err
 		}
-		merged := &ModelsStreamOptions{StreamOptions: options.StreamOptions, TransformHeaders: options.TransformHeaders}
+		merged := &ModelsStreamOptions{StreamOptions: options.StreamOptions}
 		requestModel, requestOptions, err := m.applyAuth(model, merged)
 		if err != nil {
 			return nil, err

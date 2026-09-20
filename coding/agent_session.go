@@ -194,6 +194,17 @@ type SessionConfig struct {
 	Skills          []Skill
 	ContextFiles    []ContextFile
 	InitialMessages []ai.Message
+	// ConvertToLlm transforms messages before provider calls (the block-images
+	// filter).
+	ConvertToLlm func(messages []ai.Message) []ai.Message
+	// SessionID is forwarded to providers for cache-aware backends.
+	SessionID string
+	// Agent-level request wiring from settings.
+	SteeringMode    QueueMode
+	FollowUpMode    QueueMode
+	Transport       ai.Transport
+	ThinkingBudgets *ai.ThinkingBudgets
+	MaxRetryDelayMS *int
 }
 
 // NewAgentSession builds the wired session.
@@ -219,8 +230,15 @@ func NewAgentSession(config *SessionConfig) (*AgentSession, error) {
 		Messages:      config.InitialMessages,
 	}
 	a, err := agent.NewAgent(&agent.AgentOptions{
-		InitialState: initialState,
-		StreamFn:     config.StreamFn,
+		InitialState:    initialState,
+		StreamFn:        config.StreamFn,
+		ConvertToLlm:    config.ConvertToLlm,
+		SessionID:       config.SessionID,
+		SteeringMode:    config.SteeringMode,
+		FollowUpMode:    config.FollowUpMode,
+		Transport:       config.Transport,
+		ThinkingBudgets: config.ThinkingBudgets,
+		MaxRetryDelayMS: config.MaxRetryDelayMS,
 	})
 	if err != nil {
 		return nil, err

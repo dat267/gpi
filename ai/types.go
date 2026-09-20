@@ -152,6 +152,10 @@ type StreamOptions struct {
 	MaxRetryDelayMs           *int
 	Metadata                  map[string]json.RawMessage
 	WebsocketConnectTimeoutMs *int
+	// TransformHeaders runs over the merged auth/request header set before the
+	// request (upstream ModelsRequestTransforms.transformHeaders, which rides on
+	// request options through every layer).
+	TransformHeaders func(headers ProviderHeaders) ProviderHeaders
 	// OnPayload inspects or replaces provider payloads before sending.
 	// Return nil to keep the payload unchanged.
 	OnPayload func(payload json.RawMessage, model *Model) json.RawMessage
