@@ -128,7 +128,7 @@ func NewModelSelectorComponent(host tui.RenderRequester, currentModel *ai.Model,
 	}
 	component.searchInput.OnSubmit = func(string) {
 		if component.selectedIndex >= 0 && component.selectedIndex < len(component.filteredModels) {
-			component.handleSelect(component.filteredModels[component.selectedIndex].model)
+			component.selectModel(component.filteredModels[component.selectedIndex].model)
 		}
 	}
 	component.AddChild(component.searchInput)
@@ -283,6 +283,12 @@ func (c *ModelSelectorComponent) SelectModelAsDefault(model *ai.Model) {
 func (c *ModelSelectorComponent) Dispose() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.disposeLocked()
+}
+
+// disposeLocked stops the background refresh for callers that already hold the
+// state mutex (the input handler; D137).
+func (c *ModelSelectorComponent) disposeLocked() {
 	if c.closed {
 		return
 	}
@@ -474,8 +480,12 @@ func (c *ModelSelectorComponent) updateList() {
 // HandleInput processes input.
 func (c *ModelSelectorComponent) HandleInput(data string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	kb := tui.GetKeybindings()
+	var (
+		selectModel   *ai.Model
+		selectDefault *ai.Model
+		cancelled     bool
+	)
 	switch {
 	case kb.Matches(data, "tui.input.tab"):
 		if len(c.scopedItems) > 0 {
@@ -490,7 +500,7 @@ func (c *ModelSelectorComponent) HandleInput(data string) {
 		}
 	case kb.Matches(data, "tui.select.up"):
 		if len(c.filteredModels) == 0 {
-			return
+			break
 		}
 		if c.selectedIndex == 0 {
 			c.selectedIndex = len(c.filteredModels) - 1
@@ -500,7 +510,7 @@ func (c *ModelSelectorComponent) HandleInput(data string) {
 		c.updateList()
 	case kb.Matches(data, "tui.select.down"):
 		if len(c.filteredModels) == 0 {
-			return
+			break
 		}
 		if c.selectedIndex == len(c.filteredModels)-1 {
 			c.selectedIndex = 0
@@ -510,26 +520,42 @@ func (c *ModelSelectorComponent) HandleInput(data string) {
 		c.updateList()
 	case kb.Matches(data, "tui.select.confirm"):
 		if c.selectedIndex >= 0 && c.selectedIndex < len(c.filteredModels) {
-			c.handleSelect(c.filteredModels[c.selectedIndex].model)
+			c.disposeLocked()
+			selectModel = c.filteredModels[c.selectedIndex].model
 		}
 	case kb.Matches(data, "tui.select.cancel"):
-		c.Dispose()
-		if c.onCancel != nil {
-			c.onCancel()
-		}
+		c.disposeLocked()
+		cancelled = true
 	case kb.Matches(data, "app.models.save") && c.onSelectAsDefault != nil:
 		if c.selectedIndex >= 0 && c.selectedIndex < len(c.filteredModels) {
-			c.Dispose()
-			c.onSelectAsDefault(c.filteredModels[c.selectedIndex].model)
+			c.disposeLocked()
+			selectDefault = c.filteredModels[c.selectedIndex].model
 		}
 	default:
 		c.searchInput.HandleInput(data)
 		c.filterModelsLocked(c.searchInput.Value())
 	}
+	c.mu.Unlock()
+
+	// Invoke callbacks outside the state mutex (D137): they mutate the session
+	// and request renders, which can otherwise invert with the renderer lock.
+	if selectModel != nil && c.onSelect != nil {
+		c.onSelect(selectModel)
+	}
+	if selectDefault != nil && c.onSelectAsDefault != nil {
+		c.onSelectAsDefault(selectDefault)
+	}
+	if cancelled && c.onCancel != nil {
+		c.onCancel()
+	}
 }
 
-func (c *ModelSelectorComponent) handleSelect(model *ai.Model) {
-	c.Dispose()
+// selectModel disposes the selector and reports the selection (callers must
+// not hold the state mutex).
+func (c *ModelSelectorComponent) selectModel(model *ai.Model) {
+	c.mu.Lock()
+	c.disposeLocked()
+	c.mu.Unlock()
 	if c.onSelect != nil {
 		c.onSelect(model)
 	}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dat267/gpi/ai"
 	"github.com/dat267/gpi/coding"
@@ -213,5 +214,46 @@ func TestEnabledIDHelpers(t *testing.T) {
 	}
 	if got := getSortedIDs(EnabledIds{IDs: []string{"c"}}, all); strings.Join(got, ",") != "c,a,b" {
 		t.Fatalf("sorted = %v", got)
+	}
+}
+
+// TestModelSelectorSelectNoDeadlock guards D137: selecting a model must not
+// deadlock on the component's state mutex (Dispose re-locks) and the onSelect
+// callback runs outside the lock.
+func TestModelSelectorSelectNoDeadlock(t *testing.T) {
+	SetCustomThemesDir(t.TempDir())
+	SetRegisteredThemes(nil)
+	SetTrueColorSupport(true)
+	SetStyleColorsEnabled(true)
+	InitTheme("dark", false)
+
+	models := testModels()
+	runtime := &fakeModelRuntime{models: models}
+	selected := make(chan *ai.Model, 1)
+	var component *ModelSelectorComponent
+	component = NewModelSelectorComponent(nil, models[0], runtime, nil, func(model *ai.Model) {
+		// Callbacks may touch the component (render/dispose) without deadlocking.
+		component.Dispose()
+		_ = component.Render(80)
+		selected <- model
+	}, func() {}, "", nil, nil)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		component.HandleInput("\r")
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HandleInput deadlocked while selecting a model")
+	}
+	select {
+	case model := <-selected:
+		if model == nil || model.ID != models[0].ID {
+			t.Fatalf("selected = %+v", model)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("onSelect not called")
 	}
 }
