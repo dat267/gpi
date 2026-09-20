@@ -35,19 +35,12 @@ func cjkPunctuation(r rune) bool {
 	return false
 }
 
-// isWhitespaceRune reports a space rune.
-func isWhitespaceRune(r rune) bool { return r == ' ' }
+// isSpaceRune reports a plain space (the wrap tokenizer only splits on the
+// space character).
+func isSpaceRune(r rune) bool { return r == ' ' }
 
 // isPunctuationRune reports ASCII punctuation.
-func isPunctuationRune(r rune) bool {
-	switch r {
-	case '(', ')', '{', '}', '[', ']', '<', '>', '.', ',', ';', ':', '\'',
-		'"', '!', '?', '+', '-', '=', '*', '/', '\\', '|', '&', '%', '^',
-		'$', '#', '@', '~', '`':
-		return true
-	}
-	return false
-}
+func isPunctuationRune(r rune) bool { return punctuationChars[r] }
 
 // splitIntoTokensWithAnsi splits into word/space tokens, keeping ANSI codes
 // attached to the following visible content. CJK characters break anywhere.
@@ -83,7 +76,7 @@ func splitIntoTokensWithAnsi(text string) []string {
 
 		for _, segment := range segmentGraphemes(text[index:end]) {
 			runes := []rune(segment)
-			segmentIsSpace := isWhitespaceRune(runes[0]) && len(runes) == 1
+			segmentIsSpace := isSpaceRune(runes[0]) && len(runes) == 1
 			if !segmentIsSpace && (cjkBreak(runes[0]) || cjkPunctuation(runes[0])) {
 				flushCurrent()
 				tokens = append(tokens, pendingAnsi+segment)
@@ -222,7 +215,7 @@ func wrapSingleLine(line string, width int) []string {
 	for _, token := range tokens {
 		tokenVisibleLength := VisibleWidth(token)
 		tokenRunes := []rune(StripTerminalSequences(token))
-		isWhitespace := len(tokenRunes) > 0 && isWhitespaceRune(tokenRunes[0]) &&
+		isWhitespace := len(tokenRunes) > 0 && isSpaceRune(tokenRunes[0]) &&
 			strings.TrimSpace(StripTerminalSequences(token)) == ""
 
 		// A token longer than the width breaks character by character.

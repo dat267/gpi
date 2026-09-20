@@ -8,6 +8,7 @@ package tui
 import (
 	"strings"
 	"sync"
+	"unicode"
 
 	"golang.org/x/text/width"
 )
@@ -569,3 +570,38 @@ func ExtractANSICode(text string, pos int) (string, int) {
 	}
 	return "", 0
 }
+
+// ---- character classification helpers (src/utils.ts) ----
+
+// isWhitespaceRune mirrors JS /\s/ for the practical set.
+func isWhitespaceRune(r rune) bool {
+	switch r {
+	case ' ', '\t', '\n', '\v', '\f', '\r', 0x00A0, 0x1680, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF:
+		return true
+	}
+	return r >= 0x2000 && r <= 0x200A
+}
+
+// IsWhitespaceChar reports whether a string is entirely whitespace.
+func IsWhitespaceChar(char string) bool {
+	for _, r := range char {
+		if !isWhitespaceRune(r) {
+			return false
+		}
+	}
+	return len(char) > 0
+}
+
+// IsPunctuationChar reports whether a character is ASCII punctuation.
+func IsPunctuationChar(char string) bool {
+	for _, r := range char {
+		return punctuationChars[r]
+	}
+	return false
+}
+
+func isLetterRune(r rune) bool { return unicode.IsLetter(r) }
+
+func isDigitRune(r rune) bool { return unicode.IsDigit(r) }
+
+func isMarkRune(r rune) bool { return unicode.IsMark(r) }

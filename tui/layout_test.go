@@ -2,7 +2,6 @@ package tui
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -90,11 +89,7 @@ func renderGoldenValue(value any) string {
 	case int:
 		return fmt.Sprintf("%d", typed)
 	default:
-		encoded, err := json.Marshal(value)
-		if err != nil {
-			panic(err)
-		}
-		return string(encoded)
+		return mustJSON(value)
 	}
 }
 
