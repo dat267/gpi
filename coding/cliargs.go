@@ -339,18 +339,24 @@ func validThinkingLevelStrings() []string {
 //
 // Extension CLI flags are out of scope, so the extension flag section is
 // omitted. The extension-related options and help lines are kept verbatim.
-func PrintHelp() string {
+func PrintHelp() string { return PrintHelpNamed(AppName) }
+
+// PrintHelpNamed renders the help text with the invoked binary name.
+func PrintHelpNamed(appName string) string {
+	if appName == "" {
+		appName = AppName
+	}
 	var builder strings.Builder
-	builder.WriteString(AppName + " - AI coding assistant with read, bash, edit, write tools\n\n")
-	builder.WriteString("Usage:\n  " + AppName + " [options] [--] [@files...] [messages...]\n\n")
+	builder.WriteString(appName + " - AI coding assistant with read, bash, edit, write tools\n\n")
+	builder.WriteString("Usage:\n  " + appName + " [options] [--] [@files...] [messages...]\n\n")
 	builder.WriteString("Commands:\n")
-	builder.WriteString("  " + AppName + " install <source> [-l]     Install extension source and add to settings\n")
-	builder.WriteString("  " + AppName + " remove <source> [-l]      Remove extension source from settings\n")
-	builder.WriteString("  " + AppName + " uninstall <source> [-l]   Alias for remove\n")
-	builder.WriteString("  " + AppName + " update [source|self|pi]   Update pi, extensions, or model catalogs\n")
-	builder.WriteString("  " + AppName + " list                      List installed extensions from settings\n")
-	builder.WriteString("  " + AppName + " config [-l]               Open TUI to enable/disable package resources (Tab switches scope)\n")
-	builder.WriteString("  " + AppName + " auth <command>            Print credentials or check provider readiness\n\n")
+	builder.WriteString("  " + appName + " install <source> [-l]     Install extension source and add to settings\n")
+	builder.WriteString("  " + appName + " remove <source> [-l]      Remove extension source from settings\n")
+	builder.WriteString("  " + appName + " uninstall <source> [-l]   Alias for remove\n")
+	builder.WriteString("  " + appName + " update [source|self|pi]   Update pi, extensions, or model catalogs\n")
+	builder.WriteString("  " + appName + " list                      List installed extensions from settings\n")
+	builder.WriteString("  " + appName + " config [-l]               Open TUI to enable/disable package resources (Tab switches scope)\n")
+	builder.WriteString("  " + appName + " auth <command>            Print credentials or check provider readiness\n\n")
 	builder.WriteString("Options:\n")
 	for _, line := range helpOptionLines() {
 		builder.WriteString(line + "\n")

@@ -1,5 +1,4 @@
 /gpi
 *.test
-/pi
-/cmd/pi/pi
 /bin/
+/cmd/gpi/gpi

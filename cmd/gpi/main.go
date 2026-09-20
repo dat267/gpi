@@ -1,4 +1,4 @@
-// Command pi is the Go port's interactive coding-agent CLI.
+// Command gpi is the Go port's interactive coding-agent CLI.
 //
 // It is a pragmatic entrypoint: it boots the ported session/services (settings,
 // auth, model runtime, agent session) and runs the ported interactive mode
@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/dat267/gpi/ai"
@@ -18,11 +20,22 @@ import (
 	"github.com/dat267/gpi/coding/interactive"
 )
 
+// executableName returns the invoked binary name (without the .exe suffix),
+// falling back to the upstream product name.
+func executableName() string {
+	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		return coding.AppName
+	}
+	return name
+}
+
 func main() {
+	appName := executableName()
 	args := coding.ParseArgs(os.Args[1:])
 
 	if args.Help {
-		fmt.Print(coding.PrintHelp())
+		fmt.Print(coding.PrintHelpNamed(appName))
 		return
 	}
 	if args.Version {
@@ -30,17 +43,17 @@ func main() {
 		return
 	}
 	if args.Print || args.Mode == coding.CLIModeJSON || args.Mode == coding.CLIModeRPC {
-		fmt.Fprintln(os.Stderr, "pi: print, json and rpc modes are not supported by this build")
+		fmt.Fprintln(os.Stderr, appName+": print, json and rpc modes are not supported by this build")
 		os.Exit(1)
 	}
 
-	if err := run(args); err != nil {
-		fmt.Fprintln(os.Stderr, "pi: "+err.Error())
+	if err := run(appName, args); err != nil {
+		fmt.Fprintln(os.Stderr, appName+": "+err.Error())
 		os.Exit(1)
 	}
 }
 
-func run(args *coding.Args) error {
+func run(appName string, args *coding.Args) error {
 	ctx := context.Background()
 
 	cwd, err := os.Getwd()
@@ -141,7 +154,7 @@ func run(args *coding.Args) error {
 		AgentDir:        agentDir,
 		TuiMode:         tuiMode,
 		Version:         coding.Version,
-		AppName:         coding.AppName,
+		AppName:         appName,
 		QuietStartup:    settings.GetQuietStartup(),
 		Verbose:         args.Verbose,
 		Settings:        settings,
