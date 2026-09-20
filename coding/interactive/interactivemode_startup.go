@@ -124,6 +124,12 @@ func (w *StartupWiring) GetUserInput(ctx context.Context) (string, bool) {
 	case text := <-results:
 		return text, true
 	case <-ctx.Done():
+		// Prefer a delivered input over cancellation (both may be ready).
+		select {
+		case text := <-results:
+			return text, true
+		default:
+		}
 		w.mu.Lock()
 		w.onInputCallback = nil
 		w.mu.Unlock()
