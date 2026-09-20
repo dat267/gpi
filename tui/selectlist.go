@@ -468,9 +468,9 @@ func NewLoader(requestRender RenderRequester, spinnerColor func(string) string, 
 	if loader.messageColor == nil {
 		loader.messageColor = func(text string) string { return text }
 	}
-	if loader.message == "" {
-		loader.message = "Loading..."
-	}
+	// Upstream's "Loading..." is a parameter default: an explicit empty message
+	// stays empty (D110). Callers that want the default pass
+	// DefaultLoaderMessage.
 	loader.SetIndicator(indicator)
 	return loader
 }
@@ -606,6 +606,9 @@ func (l *Loader) updateDisplay() {
 }
 
 // ---- CancellableLoader ----
+
+// DefaultLoaderMessage is upstream's default loader message.
+const DefaultLoaderMessage = "Loading..."
 
 // CancellableLoader is a loader that can be cancelled with Escape.
 type CancellableLoader struct {

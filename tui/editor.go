@@ -111,8 +111,10 @@ type Editor struct {
 
 	undoStack UndoStack[editorSnapshot]
 
-	OnSubmit      func(text string)
-	OnChange      func(text string)
+	OnSubmit func(text string)
+	OnChange func(text string)
+	// TopBorder overrides the top border rendering (see renderTopBorder).
+	TopBorder     func(width int, hiddenLineCount int) string
 	DisableSubmit bool
 }
 
@@ -322,7 +324,18 @@ func (e *Editor) setTextInternal(text string, placement string) {
 	}
 }
 
+// TopBorder overrides the top border rendering when set (upstream's protected
+// renderTopBorder override, D109). Implementations that want the default
+// rendering call DefaultRenderTopBorder.
 func (e *Editor) renderTopBorder(width int, hiddenLineCount int) string {
+	if e.TopBorder != nil {
+		return e.TopBorder(width, hiddenLineCount)
+	}
+	return e.DefaultRenderTopBorder(width, hiddenLineCount)
+}
+
+// DefaultRenderTopBorder is the built-in top border rendering.
+func (e *Editor) DefaultRenderTopBorder(width int, hiddenLineCount int) string {
 	border := strings.Repeat("─", maxInt(0, width))
 	if hiddenLineCount > 0 {
 		border = createScrollBorder("↑", hiddenLineCount, width)

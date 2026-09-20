@@ -967,3 +967,9 @@ func (m *SessionManager) getEntriesLocked() []SessionEntry {
 	}
 	return out
 }
+
+// UsesDefaultSessionDir reports whether the session uses the default per-cwd
+// directory.
+func (m *SessionManager) UsesDefaultSessionDir() bool {
+	return m.sessionDir == DefaultSessionDir(m.cwd, "")
+}
