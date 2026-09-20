@@ -109,6 +109,9 @@ func (s *ScrollView) ViewportHeight() int {
 	return s.currentViewportHeight
 }
 
+// FollowEnd reports whether the view follows the content end.
+func (s *ScrollView) FollowEnd() bool { return s.followEnd }
+
 // Primary reports whether this is the primary scroll view (layout interface).
 func (s *ScrollView) Primary() bool { return s.primary }
 

@@ -122,6 +122,9 @@ type Renderer struct {
 	OnBeforeTerminalStop  func(options TuiStopOptions)
 	OnAfterTerminalStop   func(options TuiStopOptions)
 	OnResetRenderState    func()
+	// MountedRoots overrides the roots used by mount checks and Invalidate
+	// (upstream's getMountedRoots override).
+	MountedRoots func() []Component
 	// MatchesDebugKey matches the global debug key (Shift+Ctrl+D). Nil leaves
 	// the debug key disabled; the keys.ts port supplies it.
 	MatchesDebugKey func(data string) bool
@@ -135,6 +138,7 @@ type Renderer struct {
 	inputListeners   []TuiInputListener
 
 	renderRequested          bool
+	autoRenderDisabled       bool
 	immediateRenderScheduled bool
 	renderTimer              *time.Timer
 	lastRenderAt             time.Time
@@ -147,6 +151,11 @@ type Renderer struct {
 	overlayFocusRestore    overlayFocusRestoreState
 
 	clock func() time.Time
+
+	// renderMu serializes component rendering against focused-component input
+	// handling: Go's timer-driven renders run on other goroutines, while
+	// upstream's event loop is single-threaded (divergence D84).
+	renderMu sync.Mutex
 
 	// mu guards the render scheduling, focus, overlay, and listener state.
 	// Upstream is single-threaded (Node's event loop); the Go port drives the
@@ -224,7 +233,12 @@ func (t *Renderer) Invalidate() {
 
 // GetMountedRoots returns the mounted root components. It is a plain field
 // access; callers that race with rendering hold the renderer lock.
-func (t *Renderer) GetMountedRoots() []Component { return t.Children }
+func (t *Renderer) GetMountedRoots() []Component {
+	if t.MountedRoots != nil {
+		return t.MountedRoots()
+	}
+	return t.Children
+}
 
 // Start starts the terminal and requests the first render.
 func (t *Renderer) Start() {
@@ -310,8 +324,20 @@ func (t *Renderer) RequestRender(force bool) {
 	t.requestRenderLocked(force)
 }
 
+// DisableAutoRender turns RequestRender into a no-op so tests can drive
+// rendering deterministically with RenderNow (the Go renderer schedules real
+// timers, unlike upstream's injectable seam: divergence D83).
+func (t *Renderer) DisableAutoRender() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.autoRenderDisabled = true
+}
+
 // requestRenderLocked is RequestRender for callers that hold the lock.
 func (t *Renderer) requestRenderLocked(force bool) {
+	if t.autoRenderDisabled {
+		return
+	}
 	if force {
 		t.resetRenderState()
 		t.requestImmediateRenderLocked()
@@ -396,6 +422,8 @@ func (t *Renderer) resetRenderState() {
 }
 
 func (t *Renderer) doRender() {
+	t.renderMu.Lock()
+	defer t.renderMu.Unlock()
 	if t.DoRender != nil {
 		t.DoRender()
 	}
@@ -472,10 +500,13 @@ func (t *Renderer) HandleTerminalInput(data string) {
 				return
 			}
 		}
-		// The component handler runs without the lock (it may call back into
-		// the renderer, e.g. requestRender or setFocus).
+		// The component handler runs without the renderer lock (it may call
+		// back into the renderer, e.g. requestRender or setFocus) but under
+		// the render lock so it cannot race a timer-driven render (D84).
 		t.mu.Unlock()
+		t.renderMu.Lock()
 		handler.HandleInput(data)
+		t.renderMu.Unlock()
 		t.mu.Lock()
 		// Keyboard input is latency-sensitive: avoid the throttled path.
 		t.requestImmediateRenderLocked()
@@ -892,6 +923,49 @@ func (t *Renderer) getTopmostVisibleOverlay() *overlayEntry {
 		}
 	}
 	return topmost
+}
+
+// DispatchMouseToOverlay dispatches to the visually topmost overlay under the
+// pointer, reporting whether an overlay captured the point.
+func (t *Renderer) DispatchMouseToOverlay(event TuiMouseEvent) (bool, *TuiMouseDispatchResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for index := len(t.renderedOverlayLayouts) - 1; index >= 0; index-- {
+		layout := t.renderedOverlayLayouts[index]
+		if event.ScreenX < layout.col || event.ScreenX >= layout.col+layout.width ||
+			event.ScreenY < layout.row || event.ScreenY >= layout.row+layout.height {
+			continue
+		}
+		childEvent := event
+		childEvent.X = event.ScreenX - layout.col
+		childEvent.Y = event.ScreenY - layout.row
+		childEvent.Width = layout.width
+		childEvent.Height = layout.height
+		result := DispatchMouseEvent(layout.entry.component, childEvent)
+		if result == nil {
+			return true, nil
+		}
+		if result.Focus {
+			result.FocusTarget = layout.entry.component
+			result.HasFocus = true
+		}
+		return true, result
+	}
+	return false, nil
+}
+
+// ResolveMouseFocusTarget keeps overlay containers as keyboard focus owners
+// when a nested control is clicked.
+func (t *Renderer) ResolveMouseFocusTarget(component Component) Component {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for index := len(t.overlayStack) - 1; index >= 0; index-- {
+		overlay := t.overlayStack[index]
+		if t.isOverlayVisible(overlay) && t.containsComponent(overlay.component, component) {
+			return overlay.component
+		}
+	}
+	return component
 }
 
 // CompositeOverlays composites all overlays into content lines (sorted by

@@ -18,6 +18,9 @@ import (
 type TerminalCapabilities struct {
 	Hyperlinks bool
 	TrueColor  bool
+	// Images is the inline-image protocol ("" | "kitty" | "iterm2"); the
+	// transport itself is out of scope (D57/D81).
+	Images string
 }
 
 var terminalCapabilitiesState struct {
