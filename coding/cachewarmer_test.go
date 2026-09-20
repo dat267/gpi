@@ -95,7 +95,7 @@ func TestIsCacheWarmingReplayable(t *testing.T) {
 
 func newTestWarmer(t *testing.T, model *ai.Model, mode CacheWarmingMode) (*CacheWarmer, *SessionManager, *atomic.Int64) {
 	t.Helper()
-	manager := NewSessionManager(t.TempDir(), nil)
+	manager := newTestSessionManager(t)
 	var runs atomic.Int64
 	streamFn := func(streamModel *ai.Model, context ai.TranscriptContext, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
 		runs.Add(1)

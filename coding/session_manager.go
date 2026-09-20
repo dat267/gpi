@@ -63,6 +63,12 @@ func NewSessionManager(cwd string, options *SessionManagerOptions) *SessionManag
 		labelsByID:      map[string]string{},
 		labelTimestamps: map[string]string{},
 	}
+	// Without an explicit directory, persisted sessions live under the agent
+	// dir's per-cwd sessions path (upstream create -> getDefaultSessionDir);
+	// in-memory sessions (persist=false) keep no directory.
+	if persist && m.sessionDir == "" {
+		m.sessionDir = DefaultSessionDir(cwd, "")
+	}
 	if persist && m.sessionDir != "" {
 		if _, err := os.Stat(m.sessionDir); err != nil {
 			_ = os.MkdirAll(m.sessionDir, 0o755)

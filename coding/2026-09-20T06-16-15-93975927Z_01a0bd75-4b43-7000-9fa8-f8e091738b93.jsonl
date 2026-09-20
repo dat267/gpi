@@ -1,3 +1,0 @@
-{"type":"session","version":3,"id":"01a0bd75-4b43-7000-9fa8-f8e091738b93","timestamp":"2026-09-20T06:16:15.93975927Z","cwd":"/tmp/TestRedactDbg2447117623/001"}
-{"type":"message","id":"01a0bd75","parentId":null,"timestamp":"2026-09-20T06:16:15.939838944Z","message":{"content":"hello","role":"user","timestamp":0}}
-{"type":"message","id":"01a0bd754b4370008ad97d8c8f78b453","parentId":"01a0bd75","timestamp":"2026-09-20T06:16:15.939975999Z","message":{"api":"anthropic-messages","content":[{"type":"text","text":"hi"}],"model":"m","provider":"a","role":"assistant","stopReason":"stop","timestamp":0,"usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}}}}

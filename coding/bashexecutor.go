@@ -455,17 +455,14 @@ func waitForPipeDrain(streams *sync.WaitGroup, activity <-chan struct{}, started
 		streams.Wait()
 		close(done)
 	}()
-	// Wait for the readers to start (bounded by the same grace), then arm the
-	// idle window.
-	armTimer := time.NewTimer(exitStdioGraceMS * time.Millisecond)
-	defer armTimer.Stop()
+	// Wait for both readers to start. They signal before their first Read, so
+	// this cannot hang: it only waits out goroutine scheduling. The idle window
+	// below then measures silence from the pipes themselves.
 	starts := 0
 	for starts < 2 {
 		select {
 		case <-started:
 			starts++
-		case <-armTimer.C:
-			starts = 2
 		case <-done:
 			return
 		}

@@ -17,7 +17,7 @@ import (
 // metadata/diagnostics/bundle, and the model-written bug summary.
 
 func TestSerializeSessionBranch(t *testing.T) {
-	manager := NewSessionManager(t.TempDir(), nil)
+	manager := newTestSessionManager(t)
 	first := manager.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "hello"}})
 	manager.AppendMessage(&ai.AssistantMessage{
 		API: ai.APIAnthropicMessages, Provider: "anthropic", Model: "m",
@@ -61,7 +61,7 @@ func TestSerializeSessionBranch(t *testing.T) {
 }
 
 func TestExportSessionToJsonl(t *testing.T) {
-	manager := NewSessionManager(t.TempDir(), nil)
+	manager := newTestSessionManager(t)
 	manager.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "hello"}})
 
 	// A relative path resolves against the process cwd.
@@ -207,7 +207,7 @@ func TestCollectBugReportMetadata(t *testing.T) {
 }
 
 func TestCollectBugReportDiagnostics(t *testing.T) {
-	manager := NewSessionManager(t.TempDir(), nil)
+	manager := newTestSessionManager(t)
 	manager.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "hi"}})
 	errorText := "boom"
 	manager.AppendMessage(&ai.AssistantMessage{

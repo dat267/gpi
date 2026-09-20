@@ -52,7 +52,7 @@ func mustJSONMessage(message ai.Message) json.RawMessage {
 
 func sessionWithBranch(t *testing.T) *SessionManager {
 	t.Helper()
-	manager := NewSessionManager(t.TempDir(), nil)
+	manager := newTestSessionManager(t)
 	parent := "root"
 	manager.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "start"}})
 	rootID := manager.GetEntries()[0].ID
@@ -82,7 +82,7 @@ func sessionWithBranch(t *testing.T) *SessionManager {
 }
 
 func TestCollectEntriesForBranchSummary(t *testing.T) {
-	manager := NewSessionManager(t.TempDir(), nil)
+	manager := newTestSessionManager(t)
 	first := manager.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "root"}})
 	second := manager.AppendMessage(&ai.AssistantMessage{
 		API: ai.APIAnthropicMessages, Provider: "anthropic", Model: "m",
@@ -427,7 +427,7 @@ func TestNavigateTreeWithSummary(t *testing.T) {
 }
 
 func TestRestoreToolsFromTranscript(t *testing.T) {
-	manager := NewSessionManager(t.TempDir(), nil)
+	manager := newTestSessionManager(t)
 	session, err := NewAgentSession(&SessionConfig{
 		Cwd: t.TempDir(), Sessions: manager,
 		Model:    &ai.Model{ID: "m", API: ai.APIAnthropicMessages, Provider: "anthropic"},
@@ -452,7 +452,7 @@ func TestRestoreToolsFromTranscript(t *testing.T) {
 	}
 
 	// With no system message in the transcript nothing changes.
-	empty := NewSessionManager(t.TempDir(), nil)
+	empty := newTestSessionManager(t)
 	session2, err := NewAgentSession(&SessionConfig{Cwd: t.TempDir(), Sessions: empty, Model: session.Model(), StreamFn: stubStreamFn})
 	if err != nil {
 		t.Fatal(err)
@@ -463,4 +463,17 @@ func TestRestoreToolsFromTranscript(t *testing.T) {
 	if names := session2.GetActiveToolNames(); len(names) != 1 {
 		t.Fatalf("active = %v", names)
 	}
+}
+
+// tempAgentDir points the agent dir at a temp directory for the test, so
+// persisted session files never land in the repository or home.
+func tempAgentDir(t *testing.T) {
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+}
+
+// newTestSessionManager builds a persisted session manager in a temp cwd.
+func newTestSessionManager(t *testing.T) *SessionManager {
+	t.Helper()
+	tempAgentDir(t)
+	return NewSessionManager(t.TempDir(), nil)
 }
