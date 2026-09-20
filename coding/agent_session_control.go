@@ -109,8 +109,19 @@ func (s *AgentSession) HasModel() bool {
 // ThinkingLevel returns the current thinking level.
 func (s *AgentSession) ThinkingLevel() ai.ThinkingLevel { return s.Agent.State().ThinkingLevel }
 
-// IsStreaming reports whether an agent run is active.
-func (s *AgentSession) IsStreaming() bool { return s.Agent.State().IsStreaming }
+// IsStreaming reports whether an agent run is active (upstream's
+// _isAgentRunActive, which spans prompt, compaction continuation, and retry).
+func (s *AgentSession) IsStreaming() bool {
+	if s.Agent.State().IsStreaming {
+		return true
+	}
+	if s.promptState == nil {
+		return false
+	}
+	s.promptState.mu.Lock()
+	defer s.promptState.mu.Unlock()
+	return s.promptState.runActive
+}
 
 // IsCompacting reports whether compaction or branch summarization is running.
 func (s *AgentSession) IsCompacting() bool {

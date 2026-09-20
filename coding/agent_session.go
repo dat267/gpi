@@ -138,6 +138,12 @@ type AgentSession struct {
 	// summaries (upstream uses the agent's stream function).
 	CompactionStreamFn StreamFnFn
 
+	// promptState buffers custom and next-turn messages across a run.
+	promptState *promptState
+
+	// streamFn is the session's model stream function (compaction, summaries).
+	streamFn agent.StreamFn
+
 	listenerMu sync.Mutex
 	listeners  []*sessionListenerKey
 
@@ -207,6 +213,7 @@ func NewAgentSession(config *SessionConfig) (*AgentSession, error) {
 		Sessions: sessionManager,
 		Settings: settings,
 		Cwd:      config.Cwd,
+		streamFn: config.StreamFn,
 		SystemPromptOptions: &BuildSystemPromptOptions{
 			CustomPrompt: config.SystemPrompt, Cwd: config.Cwd,
 			Skills: config.Skills, ContextFiles: config.ContextFiles,
@@ -343,11 +350,14 @@ func (s *AgentSession) willRetryAfterAgentEnd(event *agent.AgentEvent) bool {
 	return false
 }
 
-// Steer queues a steering message (drained after the current turn).
+// Steer queues a steering message (drained after the current turn). The queue
+// records the message's text so it can be restored to the editor.
 func (s *AgentSession) Steer(message ai.Message) {
 	s.Agent.Steer(message)
-	if user, ok := message.(*ai.UserMessage); ok && user.Content.Text != "" {
-		s.steeringMessages = append(s.steeringMessages, user.Content.Text)
+	if user, ok := message.(*ai.UserMessage); ok {
+		if text := contentTextJoinedNoSep(user.Content); text != "" {
+			s.steeringMessages = append(s.steeringMessages, text)
+		}
 	}
 	s.emitQueueUpdate()
 }
@@ -355,8 +365,10 @@ func (s *AgentSession) Steer(message ai.Message) {
 // FollowUp queues a message to run after the agent would stop.
 func (s *AgentSession) FollowUp(message ai.Message) {
 	s.Agent.FollowUp(message)
-	if user, ok := message.(*ai.UserMessage); ok && user.Content.Text != "" {
-		s.followUpMessages = append(s.followUpMessages, user.Content.Text)
+	if user, ok := message.(*ai.UserMessage); ok {
+		if text := contentTextJoinedNoSep(user.Content); text != "" {
+			s.followUpMessages = append(s.followUpMessages, text)
+		}
 	}
 	s.emitQueueUpdate()
 }
@@ -373,7 +385,10 @@ func (s *AgentSession) PromptMessages(ctx context.Context, messages []ai.Message
 
 // WaitForIdle waits for the current run to settle.
 func (s *AgentSession) WaitForIdle(ctx context.Context) error {
-	return s.Agent.WaitForIdle(ctx)
+	if err := s.Agent.WaitForIdle(ctx); err != nil {
+		return err
+	}
+	return s.waitForSessionIdle(ctx)
 }
 
 // ---------------------------------------------------------------------------
