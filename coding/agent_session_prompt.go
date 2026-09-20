@@ -240,6 +240,10 @@ func (s *AgentSession) runAgentPrompt(ctx context.Context, messages []ai.Message
 	state.mu.Unlock()
 	s.FlushPendingBashMessages()
 	s.FlushPendingCustomMessages()
+	if s.CacheWarmer != nil {
+		s.CacheWarmer.OnAgentSettled()
+	}
+	s.emit(&SessionEvent{Type: SessionAgentSettled})
 	s.resolveIdleWaitIfIdle()
 	return err
 }

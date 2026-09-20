@@ -26,6 +26,16 @@ type StatusIndicator struct {
 	Kind StatusIndicatorKind
 }
 
+// IndicatorKind returns the indicator kind (StatusIndicatorLike).
+func (s *StatusIndicator) IndicatorKind() StatusIndicatorKind { return s.Kind }
+
+// StatusIndicatorLike is the indicator surface the UI state manages.
+type StatusIndicatorLike interface {
+	tui.Component
+	IndicatorKind() StatusIndicatorKind
+	Dispose()
+}
+
 // NewStatusIndicator creates the indicator.
 func NewStatusIndicator(kind StatusIndicatorKind, host tui.RenderRequester, spinnerColor func(string) string, messageColor func(string) string, message string, indicator *tui.LoaderIndicatorOptions) *StatusIndicator {
 	return &StatusIndicator{

@@ -423,7 +423,8 @@ func (s *AgentSession) NavigateTree(ctx context.Context, targetID string, option
 			Model: request.Model, APIKey: request.APIKey, Headers: request.Headers, Env: request.Env,
 			Ctx: ctx, CustomInstructions: options.CustomInstructions,
 			ReplaceInstructions: options.ReplaceInstructions, ReserveTokens: reserveTokens,
-			StreamFn: s.compactionStreamFn(),
+			StreamFn:  s.compactionStreamFn(),
+			Callbacks: s.summarizationRetryCallbacks("branchSummary"),
 		})
 		if err != nil {
 			return nil, err

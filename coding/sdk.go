@@ -367,6 +367,12 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 	}
 	session.SetScopedModels(options.ScopedModels)
 	session.CacheWarmer = cacheWarmer
+	if cacheWarmer != nil {
+		// Upstream wires the warmed usage entry into an entry_appended event.
+		cacheWarmer.OnWarmed = func(entry *SessionEntry) {
+			session.emit(&SessionEvent{Type: SessionEntryAppended, Entry: entry})
+		}
+	}
 
 	return &CreateAgentSessionResult{Session: session, ModelFallbackMessage: modelFallbackMessage}, nil
 }

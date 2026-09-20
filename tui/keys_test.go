@@ -221,8 +221,12 @@ func TestMatchesRawBackspaceWindowsTerminal(t *testing.T) {
 		t.Fatalf("ParseKey = %q,%v", key, ok)
 	}
 
-	// Windows Terminal uses raw 0x08 for Ctrl+Backspace.
+	// Windows Terminal uses raw 0x08 for Ctrl+Backspace. The SSH guards must
+	// be cleared so the simulation is hermetic.
 	t.Setenv("WT_SESSION", "abc")
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
 	if MatchesKey("\x08", "backspace") {
 		t.Fatal("0x08 must not be backspace with WT_SESSION")
 	}

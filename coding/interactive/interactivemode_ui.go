@@ -48,7 +48,7 @@ type InteractiveUIState struct {
 
 	ToolOutputExpanded bool
 
-	ActiveStatusIndicator *StatusIndicator
+	ActiveStatusIndicator StatusIndicatorLike
 
 	activeWorkingEmbedded bool
 	hiddenThinkingLabel   string
@@ -104,7 +104,7 @@ func (s *InteractiveUIState) SetEditorWorkingStatusIndicator(indicator *StatusIn
 
 // ShowStatusIndicator shows a status indicator (embedded in the editor border
 // when possible, otherwise in the status container).
-func (s *InteractiveUIState) ShowStatusIndicator(indicator *StatusIndicator) {
+func (s *InteractiveUIState) ShowStatusIndicator(indicator StatusIndicatorLike) {
 	if s.ActiveStatusIndicator != nil {
 		s.ActiveStatusIndicator.Dispose()
 	}
@@ -114,7 +114,7 @@ func (s *InteractiveUIState) ShowStatusIndicator(indicator *StatusIndicator) {
 		s.StatusContainer.Clear()
 	}
 	s.SetEditorWorkingStatusIndicator(nil)
-	if s.SetEditorWorkingStatusIndicator(indicator) {
+	if embedded, ok := indicator.(*StatusIndicator); ok && s.SetEditorWorkingStatusIndicator(embedded) {
 		s.activeWorkingEmbedded = true
 		return
 	}
@@ -126,7 +126,7 @@ func (s *InteractiveUIState) ShowStatusIndicator(indicator *StatusIndicator) {
 // ClearStatusIndicator clears the active indicator (optionally only when the
 // kind matches). In regular mode with clear-on-shrink an idle status is shown.
 func (s *InteractiveUIState) ClearStatusIndicator(kind StatusIndicatorKind, hasKind bool) {
-	if hasKind && (s.ActiveStatusIndicator == nil || s.ActiveStatusIndicator.Kind != kind) {
+	if hasKind && (s.ActiveStatusIndicator == nil || s.ActiveStatusIndicator.IndicatorKind() != kind) {
 		return
 	}
 	cleared := s.ActiveStatusIndicator
@@ -173,7 +173,7 @@ func (s *InteractiveUIState) SetWorkingVisible(visible bool, isStreaming bool) {
 		s.requestRender()
 		return
 	}
-	if isStreaming && (s.ActiveStatusIndicator == nil || s.ActiveStatusIndicator.Kind != StatusWorking) {
+	if isStreaming && (s.ActiveStatusIndicator == nil || s.ActiveStatusIndicator.IndicatorKind() != StatusWorking) {
 		s.ShowWorkingStatusIndicator("")
 	}
 	s.requestRender()
@@ -182,8 +182,10 @@ func (s *InteractiveUIState) SetWorkingVisible(visible bool, isStreaming bool) {
 // SetWorkingIndicator updates the animation options.
 func (s *InteractiveUIState) SetWorkingIndicator(options *tui.LoaderIndicatorOptions) {
 	s.WorkingIndicatorOptions = options
-	if s.ActiveStatusIndicator != nil && s.ActiveStatusIndicator.Kind == StatusWorking {
-		s.ActiveStatusIndicator.SetIndicator(options)
+	if s.ActiveStatusIndicator != nil && s.ActiveStatusIndicator.IndicatorKind() == StatusWorking {
+		if working, ok := s.ActiveStatusIndicator.(*StatusIndicator); ok {
+			working.SetIndicator(options)
+		}
 	}
 	s.requestRender()
 }
@@ -466,8 +468,10 @@ func (s *InteractiveUIState) ResetExtensionUI() {
 	s.WorkingMessage = ""
 	s.WorkingVisible = true
 	s.SetWorkingIndicator(nil)
-	if s.ActiveStatusIndicator != nil && s.ActiveStatusIndicator.Kind == StatusWorking {
-		s.ActiveStatusIndicator.SetMessage(s.DefaultWorkingMessage + " (" + KeyText("app.interrupt") + " to interrupt)")
+	if s.ActiveStatusIndicator != nil && s.ActiveStatusIndicator.IndicatorKind() == StatusWorking {
+		if working, ok := s.ActiveStatusIndicator.(*StatusIndicator); ok {
+			working.SetMessage(s.DefaultWorkingMessage + " (" + KeyText("app.interrupt") + " to interrupt)")
+		}
 	}
 	s.SetHiddenThinkingLabel(nil)
 }

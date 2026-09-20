@@ -184,6 +184,7 @@ func (s *AgentSession) RunAutoCompaction(ctx context.Context, reason CompactionR
 	options := CompactionOptions{
 		Model: model, Ctx: compactionCtx, StreamFn: s.compactionStreamFn(),
 		Retry: s.retrySettings(), SessionID: s.Sessions.GetSessionID(),
+		Callbacks: s.summarizationRetryCallbacksForCompaction(reason),
 	}
 	if s.control != nil && s.control.ModelRuntime != nil {
 		resolution, err := s.control.ModelRuntime.GetAuthForModel(model, nil)
@@ -241,5 +242,38 @@ func (s *AgentSession) AbortCompaction() {
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
+	}
+}
+
+// summarizationRetryCallbacksForCompaction builds the compaction callbacks
+// (the attempt-start event carries the compaction reason).
+func (s *AgentSession) summarizationRetryCallbacksForCompaction(reason CompactionReason) *SummarizationCallbacks {
+	callbacks := s.summarizationRetryCallbacks("compaction")
+	callbacks.OnRetryAttemptStart = func() error {
+		s.emit(&SessionEvent{Type: SessionSummarizationRetryAttemptStart, Source: "compaction", Reason: reason})
+		return nil
+	}
+	return callbacks
+}
+
+// summarizationRetryCallbacks builds the retry callbacks shared by compaction
+// and branch-summary summarization (upstream _summarizationRetryCallbacks).
+func (s *AgentSession) summarizationRetryCallbacks(source string) *SummarizationCallbacks {
+	return &SummarizationCallbacks{
+		OnRetryScheduled: func(attempt, maxAttempts int, delayMS int64, errorMessage string) error {
+			s.emit(&SessionEvent{
+				Type: SessionSummarizationRetryScheduled, Source: source,
+				Attempt: attempt, MaxAttempts: maxAttempts, DelayMS: delayMS, ErrorMessage: errorMessage,
+			})
+			return nil
+		},
+		OnRetryAttemptStart: func() error {
+			s.emit(&SessionEvent{Type: SessionSummarizationRetryAttemptStart, Source: source, Reason: source})
+			return nil
+		},
+		OnRetryFinished: func(success bool, attempt int, finalError string) error {
+			s.emit(&SessionEvent{Type: SessionSummarizationRetryFinished, Source: source})
+			return nil
+		},
 	}
 }

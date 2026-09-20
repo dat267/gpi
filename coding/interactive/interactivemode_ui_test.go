@@ -118,7 +118,7 @@ func TestUIStateStatus(t *testing.T) {
 
 	working := NewWorkingStatusIndicator(state.UI, "Working...", nil, nil)
 	state.ShowStatusIndicator(working)
-	if state.ActiveStatusIndicator != working {
+	if state.ActiveStatusIndicator != StatusIndicatorLike(working) {
 		t.Fatal("indicator not stored")
 	}
 	if !state.activeWorkingEmbedded {
@@ -185,7 +185,7 @@ func TestUIStateStatus(t *testing.T) {
 		t.Fatal("working indicator not cleared")
 	}
 	visibleState.SetWorkingVisible(true, true)
-	if visibleState.ActiveStatusIndicator == nil || visibleState.ActiveStatusIndicator.Kind != StatusWorking {
+	if visibleState.ActiveStatusIndicator == nil || visibleState.ActiveStatusIndicator.IndicatorKind() != StatusWorking {
 		t.Fatal("working indicator not restored while streaming")
 	}
 
@@ -284,7 +284,7 @@ func TestUIStateReset(t *testing.T) {
 	if state.WorkingVisible != true || state.WorkingMessage != "" {
 		t.Fatal("working state not reset")
 	}
-	if state.ActiveStatusIndicator == nil || state.ActiveStatusIndicator.Kind != StatusWorking {
+	if state.ActiveStatusIndicator == nil || state.ActiveStatusIndicator.IndicatorKind() != StatusWorking {
 		t.Fatal("working indicator lost")
 	}
 	if state.hiddenThinkingLabel != state.DefaultHiddenThinkingLabel {

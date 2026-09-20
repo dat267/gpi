@@ -66,24 +66,29 @@ const (
 type SessionEventType = string
 
 const (
-	SessionAgentStart           SessionEventType = "agent_start"
-	SessionAgentEnd             SessionEventType = "agent_end"
-	SessionTurnStart            SessionEventType = "turn_start"
-	SessionTurnEnd              SessionEventType = "turn_end"
-	SessionMessageStart         SessionEventType = "message_start"
-	SessionMessageUpdate        SessionEventType = "message_update"
-	SessionMessageEnd           SessionEventType = "message_end"
-	SessionToolExecutionStart   SessionEventType = "tool_execution_start"
-	SessionToolExecutionUpdate  SessionEventType = "tool_execution_update"
-	SessionToolExecutionEnd     SessionEventType = "tool_execution_end"
-	SessionQueueUpdate          SessionEventType = "queue_update"
-	SessionCompactionStart      SessionEventType = "compaction_start"
-	SessionCompactionEnd        SessionEventType = "compaction_end"
-	SessionInfoChanged          SessionEventType = "session_info_changed"
-	SessionThinkingLevelChanged SessionEventType = "thinking_level_changed"
-	SessionAutoRetryStart       SessionEventType = "auto_retry_start"
-	SessionAutoRetryEnd         SessionEventType = "auto_retry_end"
-	SessionBashExecutionUpdate  SessionEventType = "bash_execution_update"
+	SessionAgentStart                     SessionEventType = "agent_start"
+	SessionAgentEnd                       SessionEventType = "agent_end"
+	SessionTurnStart                      SessionEventType = "turn_start"
+	SessionTurnEnd                        SessionEventType = "turn_end"
+	SessionMessageStart                   SessionEventType = "message_start"
+	SessionMessageUpdate                  SessionEventType = "message_update"
+	SessionMessageEnd                     SessionEventType = "message_end"
+	SessionToolExecutionStart             SessionEventType = "tool_execution_start"
+	SessionToolExecutionUpdate            SessionEventType = "tool_execution_update"
+	SessionToolExecutionEnd               SessionEventType = "tool_execution_end"
+	SessionQueueUpdate                    SessionEventType = "queue_update"
+	SessionCompactionStart                SessionEventType = "compaction_start"
+	SessionCompactionEnd                  SessionEventType = "compaction_end"
+	SessionInfoChanged                    SessionEventType = "session_info_changed"
+	SessionThinkingLevelChanged           SessionEventType = "thinking_level_changed"
+	SessionAutoRetryStart                 SessionEventType = "auto_retry_start"
+	SessionAutoRetryEnd                   SessionEventType = "auto_retry_end"
+	SessionBashExecutionUpdate            SessionEventType = "bash_execution_update"
+	SessionEntryAppended                  SessionEventType = "entry_appended"
+	SessionSummarizationRetryScheduled    SessionEventType = "summarization_retry_scheduled"
+	SessionSummarizationRetryAttemptStart SessionEventType = "summarization_retry_attempt_start"
+	SessionSummarizationRetryFinished     SessionEventType = "summarization_retry_finished"
+	SessionAgentSettled                   SessionEventType = "agent_settled"
 )
 
 // SessionEvent extends the core agent events with session-level payloads.
@@ -111,6 +116,10 @@ type SessionEvent struct {
 	// bash_execution_update
 	ID    string
 	Delta string
+	// entry_appended
+	Entry *SessionEntry
+	// summarization_retry_attempt_start
+	Source string // "branchSummary" | "compaction"
 }
 
 // SessionEventListener receives session events.
@@ -150,6 +159,10 @@ type AgentSession struct {
 
 	// streamFn is the session's model stream function (compaction, summaries).
 	streamFn agent.StreamFn
+
+	// summarizationRetrySource is the source label for the in-flight
+	// summarization retry callbacks ("" when idle).
+	summarizationRetrySource string
 
 	listenerMu sync.Mutex
 	listeners  []*sessionListenerKey
