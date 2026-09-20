@@ -61,6 +61,7 @@ func newSettingsTestWiring(t *testing.T) (*SettingsWiring, *settingsTestSession,
 	InitTheme("dark", false)
 
 	screen := tui.NewMainScreen(&fakeRendererTerminal{width: 80, height: 24}, false, "")
+	screen.DisableAutoRender()
 	editorContainer := &tui.Container{}
 	editor := NewCustomEditor(editorTestHost{}, tui.EditorTheme{}, NewAppKeybindingsManager(nil, ""), CustomEditorOptions{})
 	editorContainer.AddChild(editor)

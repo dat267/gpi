@@ -45,6 +45,7 @@ func newShareTestContext(t *testing.T) (*ShareContext, *shareTestSession) {
 	manager.AppendMessage(ai.Message(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "hello"}}))
 	session := &shareTestSession{manager: manager}
 	screen := tui.NewMainScreen(&fakeRendererTerminal{width: 80, height: 24}, false, "")
+	screen.DisableAutoRender()
 	editorContainer := &tui.Container{}
 	editor := NewCustomEditor(editorTestHost{}, tui.EditorTheme{}, NewAppKeybindingsManager(nil, ""), CustomEditorOptions{})
 	editorContainer.AddChild(editor)

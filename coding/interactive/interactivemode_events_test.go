@@ -35,6 +35,7 @@ func newEventTestDispatcher(t *testing.T) (*EventDispatcher, *eventTestSession, 
 	chat := &tui.Container{}
 	transcript := NewTranscriptRenderer(chat, nil, settings, nil, nil)
 	screen := tui.NewMainScreen(&fakeRendererTerminal{width: 80, height: 24}, false, "")
+	screen.DisableAutoRender()
 	uiState := NewInteractiveUIState(screen)
 	uiState.StatusContainer = &tui.Container{}
 	session := &eventTestSession{}

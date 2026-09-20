@@ -312,7 +312,9 @@ func TestCommandClearDebugEggs(t *testing.T) {
 	}
 
 	// Debug log.
-	wiring.UI = tui.NewMainScreen(&fakeRendererTerminal{width: 40, height: 10}, false, "")
+	commandsScreen := tui.NewMainScreen(&fakeRendererTerminal{width: 40, height: 10}, false, "")
+	commandsScreen.DisableAutoRender()
+	wiring.UI = commandsScreen
 	written := ""
 	wiring.WriteDebugLog = func(content string) error { written = content; return nil }
 	wiring.HandleDebugCommand("2026-01-01T00:00:00Z")

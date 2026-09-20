@@ -43,6 +43,7 @@ func newLifecycleTest(t *testing.T) (*Lifecycle, *lifecycleTestSession, *[]int, 
 
 	terminal := &titleTerminal{fakeRendererTerminal: fakeRendererTerminal{width: 80, height: 24}}
 	screen := tui.NewMainScreen(terminal, false, "")
+	screen.DisableAutoRender()
 	session := &lifecycleTestSession{}
 	settings := coding.NewInMemorySettingsManager(nil, coding.SettingsManagerCreateOptions{})
 	exits := &[]int{}

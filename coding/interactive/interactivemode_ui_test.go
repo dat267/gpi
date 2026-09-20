@@ -16,6 +16,7 @@ func newUIStateTestState(t *testing.T, embedStatus bool) (*InteractiveUIState, *
 	InitTheme("dark", false)
 
 	screen := tui.NewMainScreen(&fakeRendererTerminal{width: 80, height: 24}, false, "")
+	screen.DisableAutoRender()
 	state := NewInteractiveUIState(screen)
 	state.StatusContainer = &tui.Container{}
 	state.ChatContainer = &tui.Container{}

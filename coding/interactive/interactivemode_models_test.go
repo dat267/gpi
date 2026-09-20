@@ -65,6 +65,7 @@ func newModelTestWiring(t *testing.T, runtime *modelTestRuntime) (*ModelWiring, 
 	InitTheme("dark", false)
 
 	screen := tui.NewMainScreen(&fakeRendererTerminal{width: 80, height: 24}, false, "")
+	screen.DisableAutoRender()
 	editorContainer := &tui.Container{}
 	editor := NewCustomEditor(editorTestHost{}, tui.EditorTheme{}, NewAppKeybindingsManager(nil, ""), CustomEditorOptions{})
 	editorContainer.AddChild(editor)
@@ -214,6 +215,7 @@ func TestSessionSelectorWiring(t *testing.T) {
 	InitTheme("dark", false)
 
 	screen := tui.NewMainScreen(&fakeRendererTerminal{width: 80, height: 24}, false, "")
+	screen.DisableAutoRender()
 	editorContainer := &tui.Container{}
 	editor := NewCustomEditor(editorTestHost{}, tui.EditorTheme{}, NewAppKeybindingsManager(nil, ""), CustomEditorOptions{})
 	editorContainer.AddChild(editor)
