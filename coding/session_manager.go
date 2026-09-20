@@ -973,3 +973,29 @@ func (m *SessionManager) getEntriesLocked() []SessionEntry {
 func (m *SessionManager) UsesDefaultSessionDir() bool {
 	return m.sessionDir == DefaultSessionDir(m.cwd, "")
 }
+
+// ListAllSessions lists sessions across every per-cwd directory (or one custom
+// directory) sorted by modification time (port of SessionManager.listAll).
+func ListAllSessions(sessionDir string) []SessionInfo {
+	if sessionDir != "" {
+		return ListSessions("", sessionDir)
+	}
+	sessionsDir := DefaultSessionsDir()
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		return nil
+	}
+	var sessions []SessionInfo
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		sessions = append(sessions, ListSessions("", filepath.Join(sessionsDir, entry.Name()))...)
+	}
+	for i := 1; i < len(sessions); i++ {
+		for j := i; j > 0 && sessions[j].Modified.After(sessions[j-1].Modified); j-- {
+			sessions[j], sessions[j-1] = sessions[j-1], sessions[j]
+		}
+	}
+	return sessions
+}

@@ -28,6 +28,9 @@ type ScrollViewOptions struct {
 	ScrollbarTrackStyle  func(text string) string
 	ScrollbarThumbStyle  func(text string) string
 	ScrollbarHideDelayMS int
+	// HasScrollbarHideDelay distinguishes an explicit 0 from the unset default
+	// (upstream's `?? 1000`).
+	HasScrollbarHideDelay bool
 }
 
 // ScrollView is a container with exactly one child.
@@ -82,7 +85,12 @@ func NewScrollView(component Component, options ScrollViewOptions) *ScrollView {
 	if view.thumbStyle == nil {
 		view.thumbStyle = func(text string) string { return "\x1b[37m" + text + "\x1b[39m" }
 	}
-	view.hideDelayMS = maxInt(0, options.ScrollbarHideDelayMS)
+	// Upstream defaults the transient scrollbar hide delay to 1000ms; an
+	// explicit 0 disables the timer (D119).
+	view.hideDelayMS = 1000
+	if options.HasScrollbarHideDelay {
+		view.hideDelayMS = maxInt(0, options.ScrollbarHideDelayMS)
+	}
 	view.followingEnd = view.followEnd
 	view.Container.Children = append(view.Container.Children, component)
 	return view

@@ -260,6 +260,25 @@ func firstErrorKey(errors map[string]error) string {
 	return keys[0]
 }
 
+// GetDefaultModelReference returns the default-model reference (test seam).
+func (c *ModelSelectorComponent) GetDefaultModelReference() *DefaultModelReference {
+	return c.defaultModel
+}
+
+// SelectModel invokes the selection callback (test seam).
+func (c *ModelSelectorComponent) SelectModel(model *ai.Model) {
+	if c.onSelect != nil {
+		c.onSelect(model)
+	}
+}
+
+// SelectModelAsDefault invokes the save-as-default callback (test seam).
+func (c *ModelSelectorComponent) SelectModelAsDefault(model *ai.Model) {
+	if c.onSelectAsDefault != nil {
+		c.onSelectAsDefault(model)
+	}
+}
+
 // Dispose stops the background refresh.
 func (c *ModelSelectorComponent) Dispose() {
 	c.mu.Lock()
