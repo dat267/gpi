@@ -145,6 +145,9 @@ type AgentSession struct {
 	// promptState buffers custom and next-turn messages across a run.
 	promptState *promptState
 
+	// CacheWarmer keeps the prompt cache entry of session requests warm.
+	CacheWarmer *CacheWarmer
+
 	// streamFn is the session's model stream function (compaction, summaries).
 	streamFn agent.StreamFn
 

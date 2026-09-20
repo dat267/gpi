@@ -228,6 +228,9 @@ func (c *ModelCompat) UnmarshalJSON(data []byte) error {
 	}
 }
 
+// ModelPromptCache holds prompt cache lifetimes per retention tier (seconds).
+type ModelPromptCache map[CacheRetention]int
+
 // Model is the unified model descriptor.
 type Model struct {
 	ID       string     `json:"id"`
@@ -249,4 +252,8 @@ type Model struct {
 	// Compat holds compatibility overrides. If not set, auto-detected from
 	// BaseURL.
 	Compat *ModelCompat `json:"compat,omitempty"`
+	// PromptCache holds the prompt-cache lifetimes per retention tier (seconds).
+	// Unset when the provider's cache behavior is unknown; a missing tier means
+	// the lifetime is unknown and pi does not warm such caches.
+	PromptCache ModelPromptCache `json:"promptCache,omitempty"`
 }

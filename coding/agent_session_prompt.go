@@ -30,6 +30,9 @@ type PromptOptions struct {
 	Images []ai.ImageContent
 	// Source labels the input origin ("interactive", "extension", "rpc").
 	Source string
+	// SessionID is the request's session id; warming restarts only from
+	// session requests (compaction and summaries use their own routing ids).
+	SessionID string
 	// PreflightResult observes whether the prompt was queued/executed (true) or
 	// dropped (false).
 	PreflightResult func(ok bool)
@@ -64,6 +67,39 @@ func (s *AgentSession) prompt() *promptState {
 		s.promptState = &promptState{}
 	}
 	return s.promptState
+}
+
+// cacheContextIsCurrent reports whether the live transcript still extends the
+// warmed request's prefix (upstream cacheContextIsCurrent; message identity is
+// approximated by comparing the transcript length and model).
+func (s *AgentSession) cacheContextIsCurrent() func() bool {
+	requestModel := s.Model()
+	messages := s.Agent.State().Messages
+	return func() bool {
+		currentModel := s.Model()
+		currentMessages := s.Agent.State().Messages
+		return ai.ModelsAreEqual(currentModel, requestModel) &&
+			len(messages) <= len(currentMessages)
+	}
+}
+
+// GetCacheWarmingStatus reports the warmer's state.
+func (s *AgentSession) GetCacheWarmingStatus() *CacheWarmingStatus {
+	if s.CacheWarmer == nil {
+		return nil
+	}
+	status := s.CacheWarmer.Status()
+	return &status
+}
+
+// SetCacheWarmingMode persists the warming mode and reconciles the warmer.
+func (s *AgentSession) SetCacheWarmingMode(mode CacheWarmingMode) {
+	if s.control != nil && s.control.Settings != nil {
+		s.control.Settings.SetCacheWarmingMode(mode)
+	}
+	if s.CacheWarmer != nil {
+		s.CacheWarmer.OnModeChanged()
+	}
 }
 
 // Prompt submits text to the session, expanding skill commands and prompt
@@ -135,6 +171,16 @@ func (s *AgentSession) Prompt(ctx context.Context, text string, options *PromptO
 	messages = append(messages, s.takePendingNextTurnMessages()...)
 
 	preflight(true)
+	if s.CacheWarmer != nil && options.SessionID != "" && options.SessionID == s.SessionID() {
+		requestOptions := &ai.SimpleStreamOptions{SessionID: options.SessionID}
+		if len(options.Images) > 0 {
+			// Images ride in the user message; the warm request replays the same
+			// context without them only when the model accepts it, so keep them.
+		}
+		s.CacheWarmer.Start(CacheWarmRequest{
+			Model: s.Model(), Context: ai.Context{Messages: messages}, Options: requestOptions,
+		}, s.cacheContextIsCurrent())
+	}
 	return s.runAgentPrompt(ctx, messages)
 }
 

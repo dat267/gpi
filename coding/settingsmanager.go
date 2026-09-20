@@ -188,6 +188,9 @@ type SettingsPackageSource struct {
 // pointers so absent settings stay absent in the persisted JSON.
 type Settings struct {
 	LastChangelogVersion *string `json:"lastChangelogVersion,omitempty"`
+	// CacheWarming is the prompt-cache warming mode; global only because each
+	// refresh costs money (default "streaming").
+	CacheWarming         *string `json:"cacheWarming,omitempty"`
 	DefaultProvider      *string `json:"defaultProvider,omitempty"`
 	DefaultModel         *string `json:"defaultModel,omitempty"`
 	DefaultThinkingLevel *string `json:"defaultThinkingLevel,omitempty"`
@@ -1066,6 +1069,37 @@ func (m *SettingsManager) GetLastChangelogVersion() *string {
 }
 
 // SetLastChangelogVersion records the last seen changelog version.
+// CacheWarmingMode selects how prompt caches are kept warm.
+type CacheWarmingMode = string
+
+const (
+	CacheWarmingOff       CacheWarmingMode = "off"
+	CacheWarmingStreaming CacheWarmingMode = "streaming"
+	CacheWarmingIdle      CacheWarmingMode = "idle"
+)
+
+// CacheWarmingModes are the offered modes.
+var CacheWarmingModes = []CacheWarmingMode{CacheWarmingOff, CacheWarmingStreaming, CacheWarmingIdle}
+
+// GetCacheWarmingMode returns the warming mode (default "streaming").
+func (m *SettingsManager) GetCacheWarmingMode() CacheWarmingMode {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.globalSettings.CacheWarming == nil {
+		return CacheWarmingStreaming
+	}
+	return *m.globalSettings.CacheWarming
+}
+
+// SetCacheWarmingMode persists the warming mode (global scope only).
+func (m *SettingsManager) SetCacheWarmingMode(mode CacheWarmingMode) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.globalSettings.CacheWarming = &mode
+	m.markModified("cacheWarming", "")
+	m.save()
+}
+
 func (m *SettingsManager) SetLastChangelogVersion(version string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

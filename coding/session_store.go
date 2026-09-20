@@ -84,6 +84,11 @@ type SessionEntry struct {
 	// session_info
 	Name *string `json:"name,omitempty"`
 
+	// usage: model-attributed usage that is not part of LLM context
+	Kind  string  `json:"kind,omitempty"`
+	Model string  `json:"model,omitempty"`
+	Note  *string `json:"note,omitempty"`
+
 	raw json.RawMessage
 }
 
@@ -617,3 +622,22 @@ func readSessionHeaderForDiscovery(filePath string) *SessionHeader {
 }
 
 var _ = sync.Mutex{}
+
+// AppendUsage records model-attributed usage that does not participate in LLM
+// context (upstream appendUsage; kind is a category such as "cache_warm").
+func (m *SessionManager) AppendUsage(kind, provider, model string, usage ai.Usage, note string) *SessionEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entry := m.nextEntry("usage")
+	entry.Kind = kind
+	entry.Provider = provider
+	entry.Model = model
+	copied := usage
+	entry.Usage = &copied
+	if note != "" {
+		noteCopy := note
+		entry.Note = &noteCopy
+	}
+	m.appendEntry(&entry)
+	return &entry
+}
