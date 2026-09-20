@@ -138,6 +138,10 @@ type CreateProviderOptions struct {
 	// Models is the static baseline model list (empty for purely dynamic
 	// providers).
 	Models []*Model
+	// ModelsGetter, when set, supplies the current model list on every read
+	// (upstream's getModels closure). It replaces Models as the baseline; the
+	// dynamic overlay is still merged on top.
+	ModelsGetter func() []*Model
 	// FetchModels fetches a dynamic model overlay. CreateProvider restores
 	// and publishes it transactionally.
 	FetchModels  func(context *RefreshModelsContext) ([]*Model, error)
@@ -152,10 +156,13 @@ type CreateProviderOptions struct {
 // models; a per-API map dispatches on Model.API, and a model whose api has
 // no entry produces a stream error.
 func CreateProvider(input CreateProviderOptions) *Provider {
-	baseline := input.Models
 	var dynamicMu sync.Mutex
 	var dynamicModels []*Model
 	currentModels := func() []*Model {
+		baseline := input.Models
+		if input.ModelsGetter != nil {
+			baseline = input.ModelsGetter()
+		}
 		dynamicMu.Lock()
 		defer dynamicMu.Unlock()
 		merged := append([]*Model{}, baseline...)
@@ -332,6 +339,14 @@ func LazyStream(model *Model, setup func() (eventSource, error)) *AssistantMessa
 
 // AsEventSource adapts an AssistantMessageEventStream for LazyStream setups.
 func AsEventSource(s *AssistantMessageEventStream) eventSource { return streamSource{inner: s} }
+
+// ErrorStreamForModel builds a lazy stream that terminates with a typed
+// provider error (used when no implementation can serve a model).
+func ErrorStreamForModel(model *Model, code string, message string) *AssistantMessageEventStream {
+	return LazyStream(model, func() (eventSource, error) {
+		return nil, NewModelsError(code, message, nil)
+	})
+}
 
 func createSetupErrorMessage(model *Model, err error) *AssistantMessage {
 	msg := err.Error()
