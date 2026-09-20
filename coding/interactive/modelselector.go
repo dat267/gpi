@@ -54,6 +54,10 @@ const (
 type ModelSelectorComponent struct {
 	*tui.Container
 
+	// mu serializes rendering, input handling, and the background refresh
+	// application (the Go port has no single-threaded event loop: D84/D96).
+	mu sync.Mutex
+
 	searchInput *tui.Input
 	focused     bool
 
@@ -81,7 +85,6 @@ type ModelSelectorComponent struct {
 	scopeText     *tui.Text
 	scopeHintText *tui.Text
 
-	mu     sync.Mutex
 	closed bool
 	cancel context.CancelFunc
 }
@@ -145,7 +148,7 @@ func NewModelSelectorComponent(host tui.RenderRequester, currentModel *ai.Model,
 	// Render the current snapshot immediately, then refresh in the background.
 	component.loadModelsFromSnapshot()
 	if initialSearchInput != "" {
-		component.filterModels(initialSearchInput)
+		component.filterModelsLocked(initialSearchInput)
 	} else {
 		component.updateList()
 	}
@@ -202,8 +205,8 @@ func (c *ModelSelectorComponent) startRefresh() {
 		defer cancel()
 		result, err := RefreshModelCatalogs(ctx, c.runtime)
 		c.mu.Lock()
+		defer c.mu.Unlock()
 		if c.closed {
-			c.mu.Unlock()
 			return
 		}
 		c.refreshStatusMessage = ""
@@ -235,10 +238,9 @@ func (c *ModelSelectorComponent) startRefresh() {
 				c.refreshStatusSuccess = true
 			}
 		}
-		c.mu.Unlock()
 
 		c.loadModelsFromSnapshot()
-		c.filterModels(c.searchInput.Value())
+		c.filterModelsLocked(c.searchInput.Value())
 		c.updateList()
 		if c.host != nil {
 			c.host.RequestRender(false)
@@ -317,6 +319,7 @@ func (c *ModelSelectorComponent) isDefaultSearch(query string) bool {
 	return normalized != "" && strings.HasPrefix("default", normalized)
 }
 
+// setScope is only called with the lock held.
 func (c *ModelSelectorComponent) setScope(scope modelScopeKind) {
 	if c.scope == scope {
 		return
@@ -333,13 +336,21 @@ func (c *ModelSelectorComponent) setScope(scope modelScopeKind) {
 			break
 		}
 	}
-	c.filterModels(c.searchInput.Value())
+	c.filterModelsLocked(c.searchInput.Value())
 	if c.scopeText != nil {
 		c.scopeText.SetText(c.getScopeText())
 	}
 }
 
-func (c *ModelSelectorComponent) filterModels(query string) {
+// Render renders the selector under the state lock.
+func (c *ModelSelectorComponent) Render(width int) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Container.Render(width)
+}
+
+// filterModels is the locked implementation of the filter+list update.
+func (c *ModelSelectorComponent) filterModelsLocked(query string) {
 	if query != "" {
 		filtered := tui.FuzzyFilter(c.activeModels, query, func(item modelItem) string {
 			defaultText := ""
@@ -443,6 +454,8 @@ func (c *ModelSelectorComponent) updateList() {
 
 // HandleInput processes input.
 func (c *ModelSelectorComponent) HandleInput(data string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	kb := tui.GetKeybindings()
 	switch {
 	case kb.Matches(data, "tui.input.tab"):
@@ -492,7 +505,7 @@ func (c *ModelSelectorComponent) HandleInput(data string) {
 		}
 	default:
 		c.searchInput.HandleInput(data)
-		c.filterModels(c.searchInput.Value())
+		c.filterModelsLocked(c.searchInput.Value())
 	}
 }
 
