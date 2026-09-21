@@ -5,6 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
+	"os"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +18,18 @@ import (
 
 // Port of core/compaction/compaction.ts and compaction/utils.ts: context
 // compaction for long sessions (pure functions; the session manager does I/O).
+//
+// D142: the summarizer follows the user's compaction extension
+// (~/.pi/agent/extensions/compaction, summary.ts + index.ts) instead of stock:
+// a 32k no-reasoning call with the pi-better-compact structured prompts, the
+// previous summary's generated file lists stripped before it is fed back,
+// regenerated file lists capped to the most recent entries, the
+// PI_COMPACT_MODEL override, and opencode routing headers. On any failure or
+// an unusable summary it falls back to the stock summarizer.
+
+// CompactModelEnv reads the environment for the compact-model override (test
+// seam; upstream reads process.env).
+var CompactModelEnv = os.Getenv
 
 // CompactionSettings tune automatic compaction.
 type CompactionSettings struct {
@@ -32,16 +49,43 @@ type CompactionDetails struct {
 	ModifiedFiles []string `json:"modifiedFiles"`
 }
 
-// FileOperations tracks file usage across the summarized span.
+// FileOperations tracks file usage across the summarized span. The Order
+// slices record first-seen order: Go maps lose insertion order, and the
+// capped file lists keep the most recently seen paths (extension summary.ts).
 type FileOperations struct {
 	Read    map[string]bool
 	Written map[string]bool
 	Edited  map[string]bool
+
+	ReadOrder    []string
+	WrittenOrder []string
+	EditedOrder  []string
 }
 
 // CreateFileOps builds an empty set.
 func CreateFileOps() *FileOperations {
 	return &FileOperations{Read: map[string]bool{}, Written: map[string]bool{}, Edited: map[string]bool{}}
+}
+
+func (f *FileOperations) markRead(path string) {
+	if !f.Read[path] {
+		f.Read[path] = true
+		f.ReadOrder = append(f.ReadOrder, path)
+	}
+}
+
+func (f *FileOperations) markWritten(path string) {
+	if !f.Written[path] {
+		f.Written[path] = true
+		f.WrittenOrder = append(f.WrittenOrder, path)
+	}
+}
+
+func (f *FileOperations) markEdited(path string) {
+	if !f.Edited[path] {
+		f.Edited[path] = true
+		f.EditedOrder = append(f.EditedOrder, path)
+	}
 }
 
 // ExtractFileOpsFromMessage extracts file paths from a tool call
@@ -64,11 +108,11 @@ func ExtractFileOpsFromMessage(message ai.Message, fileOps *FileOperations) {
 		}
 		switch call.Name {
 		case "read":
-			fileOps.Read[args.Path] = true
+			fileOps.markRead(args.Path)
 		case "write":
-			fileOps.Written[args.Path] = true
+			fileOps.markWritten(args.Path)
 		case "edit":
-			fileOps.Edited[args.Path] = true
+			fileOps.markEdited(args.Path)
 		}
 	}
 }
@@ -812,10 +856,10 @@ func extractFileOperations(messages []ai.Message, entries []SessionEntry, prevCo
 			var details CompactionDetails
 			if json.Unmarshal(prev.Details, &details) == nil {
 				for _, f := range details.ReadFiles {
-					fileOps.Read[f] = true
+					fileOps.markRead(f)
 				}
 				for _, f := range details.ModifiedFiles {
-					fileOps.Edited[f] = true
+					fileOps.markEdited(f)
 				}
 			}
 		}
@@ -856,11 +900,28 @@ type CompactionOptions struct {
 	Retry              *ai.RetryPolicy
 	Callbacks          *SummarizationCallbacks
 	SessionID          string
+	// ExtraHeaders ride on the summarizer request only (the better-compact
+	// opencode routing headers).
+	ExtraHeaders ai.ProviderHeaders
+	// OnFallback fires when the better-compact summarizer failed and the stock
+	// summarizer took over (the extension notified the UI).
+	OnFallback func(message string)
 }
 
 // Compact generates summaries for compaction using prepared data
-// (port of compact).
+// (port of compact). D142: the better-compact summarizer runs first; on any
+// failure or an unusable summary the stock summarizer takes over.
 func Compact(preparation *CompactionPreparation, options CompactionOptions) (*CompactionResult, error) {
+	if result, fallback := compactBetter(preparation, options); fallback == "" {
+		return result, nil
+	} else if options.OnFallback != nil {
+		options.OnFallback(fallback)
+	}
+	return compactStock(preparation, options)
+}
+
+// compactStock is the stock summarizer path (the previous Compact body).
+func compactStock(preparation *CompactionPreparation, options CompactionOptions) (*CompactionResult, error) {
 	var summary string
 	var summaryUsage ai.Usage
 	hasUsage := false
@@ -950,7 +1011,7 @@ func generateSummaryWithUsage(currentMessages []ai.Message, options CompactionOp
 	}
 	promptText += basePrompt
 
-	response, err := runSummarization(model, promptText, int(maxTokens), options)
+	response, err := runSummarization(model, promptText, int(maxTokens), options, nil, options.ThinkingLevel)
 	if err != nil {
 		return nil, err
 	}
@@ -976,7 +1037,7 @@ func generateTurnPrefixSummary(messages []ai.Message, options CompactionOptions)
 	conversationText := SerializeConversation(llmMessages)
 	promptText := fmt.Sprintf("<conversation>\n%s\n</conversation>\n\n%s", conversationText, turnPrefixSummarizationPrompt)
 
-	response, err := runSummarization(model, promptText, int(maxTokens), options)
+	response, err := runSummarization(model, promptText, int(maxTokens), options, nil, options.ThinkingLevel)
 	if err != nil {
 		return nil, err
 	}
@@ -992,8 +1053,9 @@ func generateTurnPrefixSummary(messages []ai.Message, options CompactionOptions)
 }
 
 // runSummarization builds the context and calls the LLM once (via the
-// retry-wrapped choke point).
-func runSummarization(model *ai.Model, promptText string, maxTokens int, options CompactionOptions) (*ai.AssistantMessage, error) {
+// retry-wrapped choke point). extraHeaders ride on the request; reasoning
+// overrides the options' thinking level (empty = none).
+func runSummarization(model *ai.Model, promptText string, maxTokens int, options CompactionOptions, extraHeaders ai.ProviderHeaders, reasoning ai.ThinkingLevel) (*ai.AssistantMessage, error) {
 	context := ai.NormalizeContext(ai.Context{
 		SystemPrompt: strPtrOf(SummarizationSystemPrompt),
 		Messages: []ai.Message{&ai.UserMessage{
@@ -1006,14 +1068,13 @@ func runSummarization(model *ai.Model, promptText string, maxTokens int, options
 			APIKey:    options.APIKey,
 			Ctx:       options.Ctx,
 			SessionID: options.SessionID,
+			Headers:   extraHeaders,
 		},
-		Reasoning: options.ThinkingLevel,
+		Reasoning: reasoning,
 	}
 	// maxTokens plumbs through SamplingExtras-free path: the named field.
 	streamOptions.MaxTokens = &maxTokens
-	if model.Reasoning && options.ThinkingLevel != "" && options.ThinkingLevel != ai.ThinkOff {
-		// reasoning set above
-	} else {
+	if !(model.Reasoning && reasoning != "" && reasoning != ai.ThinkOff) {
 		streamOptions.Reasoning = ""
 	}
 	return CompleteSummarization(model, context, &streamOptions, options.StreamFn, options.Retry, options.Callbacks)
@@ -1046,3 +1107,390 @@ func JSLength(s string) int { return ai.JSLength(s) }
 func JSSlice(s string, start, end int) string { return ai.JSSlice(s, start, end) }
 
 func ceilDiv(a, b int) int { return (a + b - 1) / b }
+
+// ============================================================================
+// Better-compact summarizer (D142 — the compaction extension)
+// ============================================================================
+
+// SummaryMaxTokens is the text budget for the better-compact summary call,
+// well above stock's ~13k, with reasoning never enabled.
+const SummaryMaxTokens = 32_768
+
+// BetterCompactMinSummaryLength is the minimum plausible summary length: a
+// real summary of thousands of tokens is never shorter.
+const BetterCompactMinSummaryLength = 40
+
+// MaxListedFiles is how many paths each regenerated file list keeps; older
+// entries are dropped rather than replayed forever.
+const MaxListedFiles = 40
+
+// BetterSummarizationPrompt is the initial structured-summary prompt
+// (summary.ts SUMMARIZATION_PROMPT, from takltc/pi-better-compact, MIT).
+const BetterSummarizationPrompt = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
+
+Use this EXACT format:
+
+## Goal
+[What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]
+
+## Constraints & Preferences
+- [Any constraints, preferences, or requirements mentioned by user]
+- [Or "(none)" if none were mentioned]
+
+## Progress
+### Done
+- [x] [Completed tasks/changes]
+
+### In Progress
+- [ ] [Current work]
+
+### Blocked
+- [Issues preventing progress, if any]
+
+## Key Decisions
+- **[Decision]**: [Brief rationale]
+
+## Next Steps
+1. [Ordered list of what should happen next]
+
+## Critical Context
+- [Any data, examples, or references needed to continue]
+- [Or "(none)" if not applicable]
+
+Keep each section concise. Preserve exact file paths, function names, and error messages.
+
+HARD BUDGET: the whole summary must stay under 8,000 tokens. Compress instead of accumulating: merge duplicate bullets, keep only objectives that are still open under "Goal", and keep only the 5 most recent Done bullets. The read-files and modified-files lists are appended automatically after your summary, so never write them yourself.`
+
+// BetterUpdateSummarizationPrompt is the rewrite-not-append update prompt
+// (summary.ts UPDATE_SUMMARIZATION_PROMPT).
+const BetterUpdateSummarizationPrompt = `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
+
+Update the existing structured summary with new information. This is a REWRITE, not an append: the output must not be longer than the input summary plus what the new messages require.
+
+RULES:
+- ADD new progress, decisions, and context from the new messages
+- MERGE bullets that say the same thing instead of appending a second copy
+- UPDATE the Progress section: move items from "In Progress" to "Done" when completed
+- DELETE finished work that is no longer needed to continue; keep at most the 5 most recent Done bullets
+- "## Goal" lists ONLY objectives still open. A goal that is achieved gets removed, not marked done and kept forever.
+- DROP anything a later message contradicts or supersedes; keep the newest version of a decision together with its reason
+- PRESERVE exact file paths, function names, and error messages for work that is still relevant
+- NEVER restate the read-files or modified-files lists; they are regenerated and appended after your summary
+
+HARD BUDGET: the whole summary must stay under 8,000 tokens. When it would exceed that, compress by dropping the oldest completed work first. Never grow the summary by concatenation.
+
+Use the same EXACT format as the previous summary (Goal / Constraints & Preferences / Progress / Key Decisions / Next Steps / Critical Context).`
+
+// BetterTurnPrefixPrompt is the split-turn prefix prompt (summary.ts
+// TURN_PREFIX_PROMPT).
+const BetterTurnPrefixPrompt = `This is the PREFIX of a turn that was too large to keep. The SUFFIX (recent work) is retained.
+
+Summarize the prefix to provide context for the retained suffix:
+
+## Original Request
+[What did the user ask for in this turn?]
+
+## Early Progress
+- [Key decisions and work done in the prefix]
+
+## Context for Suffix
+- [Information needed to understand the retained recent work]
+
+Be concise. Focus on what's needed to understand the kept suffix.`
+
+// SummaryMode selects the better-compact prompt (summary.ts SummaryMode).
+type SummaryMode = string
+
+// Summary modes.
+const (
+	SummaryModeHistory    SummaryMode = "history"
+	SummaryModeUpdate     SummaryMode = "update"
+	SummaryModeTurnPrefix SummaryMode = "turn-prefix"
+)
+
+// fileListBlockRegex matches the exact block shape formatFileOperations emits
+// (RE2: two alternations instead of a backreference).
+var fileListBlockRegex = regexp.MustCompile(`(?s)<read-files>\n.*?\n</read-files>\n?|<modified-files>\n.*?\n</modified-files>\n?`)
+
+// StripFileListSections removes the generated read-files / modified-files
+// blocks from a summary (summary.ts stripFileListSections): the lists are
+// re-derived from fileOps every round, so feeding them back only accumulates.
+func StripFileListSections(text string) string {
+	out := fileListBlockRegex.ReplaceAllString(text, "")
+	out = regexp.MustCompile(`\n{3,}`).ReplaceAllString(out, "\n\n")
+	out = regexp.MustCompile(`[ \t]+\n`).ReplaceAllString(out, "\n")
+	return strings.TrimRight(out, " \t\n")
+}
+
+// BuildSummarizerPrompt builds the user prompt for the summarizer call
+// (summary.ts buildSummarizerPrompt).
+func BuildSummarizerPrompt(conversationText string, mode SummaryMode, previousSummary string, customInstructions string) string {
+	prompt := "<conversation>\n" + conversationText + "\n</conversation>\n\n"
+	if previousSummary != "" {
+		carried := StripFileListSections(previousSummary)
+		prompt += "<previous-summary>\n" + carried + "\n</previous-summary>\n\n"
+	}
+	var basePrompt string
+	switch {
+	case mode == SummaryModeTurnPrefix:
+		basePrompt = BetterTurnPrefixPrompt
+	case previousSummary != "":
+		basePrompt = BetterUpdateSummarizationPrompt
+	default:
+		basePrompt = BetterSummarizationPrompt
+	}
+	prompt += basePrompt
+	if customInstructions != "" {
+		prompt += "\n\nAdditional focus: " + customInstructions
+	}
+	return prompt
+}
+
+// IsUsableSummary reports whether a summary is substantive text, not empty or
+// truncated junk (summary.ts isUsableSummary).
+func IsUsableSummary(text string) bool {
+	return len(strings.TrimSpace(text)) >= BetterCompactMinSummaryLength
+}
+
+// FileLists is the regenerated file-op listing (summary.ts FileLists).
+type FileLists struct {
+	ReadFiles       []string
+	ModifiedFiles   []string
+	OmittedRead     int
+	OmittedModified int
+}
+
+// capToMostRecent drops the oldest entries beyond maxFiles; the tail is the
+// most recently seen work.
+func capToMostRecent(paths []string, maxFiles int) (kept []string, omitted int) {
+	omitted = len(paths) - maxFiles
+	if omitted < 0 {
+		omitted = 0
+	}
+	return paths[omitted:], omitted
+}
+
+// ComputeFileListsCapped merges writes and edits into modified, excludes
+// modified paths from read, caps each list to the most recent maxFiles paths
+// and sorts the kept ones (summary.ts computeFileLists).
+func ComputeFileListsCapped(fileOps *FileOperations, maxFiles int) FileLists {
+	modifiedSeen := append(append([]string{}, fileOps.WrittenOrder...), fileOps.EditedOrder...)
+	modified := map[string]bool{}
+	for _, f := range modifiedSeen {
+		modified[f] = true
+	}
+	readFiles := []string{}
+	for _, f := range fileOps.ReadOrder {
+		if !modified[f] {
+			readFiles = append(readFiles, f)
+		}
+	}
+	readKept, omittedRead := capToMostRecent(readFiles, maxFiles)
+	modifiedKept, omittedModified := capToMostRecent(modifiedSeen, maxFiles)
+	kept := []string{}
+	seenModified := map[string]bool{}
+	for _, f := range modifiedKept {
+		if !seenModified[f] {
+			seenModified[f] = true
+			kept = append(kept, f)
+		}
+	}
+	sort.Strings(readKept)
+	sort.Strings(kept)
+	return FileLists{
+		ReadFiles: readKept, ModifiedFiles: kept,
+		OmittedRead: omittedRead, OmittedModified: omittedModified,
+	}
+}
+
+// FormatFileOperationsCapped renders the file-list sections with omission
+// markers (summary.ts formatFileOperations + renderFileSection).
+func FormatFileOperationsCapped(lists FileLists) string {
+	render := func(tag string, files []string, omitted int) string {
+		// Sorted defensively: the block shape is what StripFileListSections
+		// later matches on.
+		sortedFiles := append([]string{}, files...)
+		sort.Strings(sortedFiles)
+		marker := ""
+		if omitted > 0 {
+			marker = "\n" + strconv.Itoa(omitted) + " older path(s) omitted (newest " + strconv.Itoa(len(files)) + " kept)"
+		}
+		return "<" + tag + ">\n" + strings.Join(sortedFiles, "\n") + marker + "\n</" + tag + ">"
+	}
+	var sections []string
+	if len(lists.ReadFiles) > 0 {
+		sections = append(sections, render("read-files", lists.ReadFiles, lists.OmittedRead))
+	}
+	if len(lists.ModifiedFiles) > 0 {
+		sections = append(sections, render("modified-files", lists.ModifiedFiles, lists.OmittedModified))
+	}
+	if len(sections) == 0 {
+		return ""
+	}
+	return "\n\n" + strings.Join(sections, "\n\n")
+}
+
+// ParseCompactModelOverride parses PI_COMPACT_MODEL="provider/model-id";
+// malformed values are ignored (index.ts parseOverride).
+func ParseCompactModelOverride(envValue string) (provider, modelID string, ok bool) {
+	if envValue == "" {
+		return "", "", false
+	}
+	slash := strings.Index(envValue, "/")
+	if slash <= 0 || slash == len(envValue)-1 {
+		return "", "", false
+	}
+	return envValue[:slash], envValue[slash+1:], true
+}
+
+// OpenCodeHost is the gateway host that routes on its session headers.
+const OpenCodeHost = "opencode.ai"
+
+// IsOpenCodeModel reports whether the model needs opencode's session routing
+// headers (index.ts isOpenCodeModel).
+func IsOpenCodeModel(model *ai.Model) bool {
+	if model == nil {
+		return false
+	}
+	if model.Provider == "opencode" || model.Provider == "opencode-go" {
+		return true
+	}
+	parsed, err := url.Parse(model.BaseURL)
+	if err != nil {
+		return false
+	}
+	return parsed.Hostname() == OpenCodeHost
+}
+
+// betterCompactFallback carries the reason the better-compact summarizer gave
+// up (the extension notified and returned undefined).
+type betterCompactFallback = string
+
+// compactBetter runs the extension's replacement summarizer (index.ts
+// session_before_compact handler). Returns (result, "") on success or
+// (nil, reason) to fall back to the stock summarizer.
+func compactBetter(preparation *CompactionPreparation, options CompactionOptions) (*CompactionResult, betterCompactFallback) {
+	model := options.Model
+	if model == nil {
+		return nil, ""
+	}
+
+	mode := SummaryModeHistory
+	if preparation.PreviousSummary != "" {
+		mode = SummaryModeUpdate
+	}
+	hasHistory := len(preparation.MessagesToSummarize) > 0
+	hasPrefix := preparation.IsSplitTurn && len(preparation.TurnPrefixMessages) > 0
+	if !hasHistory && !hasPrefix {
+		// The extension returns undefined; pi falls back to default compaction.
+		return nil, "better-compact: nothing to summarize; using default compaction"
+	}
+
+	var historyText string
+	var historyUsage *ai.Usage
+	if hasHistory {
+		prompt := BuildSummarizerPrompt(
+			SerializeConversation(ConvertToLlm(preparation.MessagesToSummarize)),
+			mode, preparation.PreviousSummary, options.CustomInstructions,
+		)
+		result, err := runBetterSummarization(model, prompt, options)
+		if err != nil {
+			return nil, "better-compact: " + err.Error() + "; using default compaction"
+		}
+		if !IsUsableSummary(result.text) {
+			return nil, "better-compact: summary too short; using default compaction"
+		}
+		historyText = result.text
+		historyUsage = result.usage
+	}
+
+	var prefixText string
+	var prefixUsage *ai.Usage
+	if hasPrefix {
+		// Sequential, not the extension's Promise.all: the retry callbacks
+		// emit session events and are not goroutine-safe.
+		prompt := BuildSummarizerPrompt(
+			SerializeConversation(ConvertToLlm(preparation.TurnPrefixMessages)),
+			SummaryModeTurnPrefix, "", "",
+		)
+		result, err := runBetterSummarization(model, prompt, options)
+		if err != nil {
+			return nil, "better-compact: " + err.Error() + "; using default compaction"
+		}
+		if IsUsableSummary(result.text) {
+			prefixText = result.text
+			prefixUsage = result.usage
+		}
+	}
+
+	summary := historyText
+	if prefixText != "" {
+		if summary != "" {
+			summary += "\n\n---\n\n"
+		}
+		summary += "**Turn Context (split turn):**\n\n" + prefixText
+	}
+	if !IsUsableSummary(summary) {
+		return nil, "better-compact: summary too short; using default compaction"
+	}
+
+	lists := ComputeFileListsCapped(preparation.FileOps, MaxListedFiles)
+	summary += FormatFileOperationsCapped(lists)
+
+	if preparation.FirstKeptEntryID == "" {
+		return nil, "First kept entry has no UUID - session may need migration"
+	}
+
+	details, _ := ai.MarshalJSON(CompactionDetails{ReadFiles: lists.ReadFiles, ModifiedFiles: lists.ModifiedFiles})
+	result := &CompactionResult{
+		Summary: summary, FirstKeptEntryID: preparation.FirstKeptEntryID,
+		TokensBefore: int64(preparation.TokensBefore),
+		Details:      details,
+	}
+	if historyUsage != nil || prefixUsage != nil {
+		combined := ai.Usage{}
+		switch {
+		case historyUsage != nil && prefixUsage != nil:
+			combined = CombineUsage(*historyUsage, *prefixUsage)
+		case historyUsage != nil:
+			combined = *historyUsage
+		default:
+			combined = *prefixUsage
+		}
+		result.Usage = &combined
+	}
+	return result, ""
+}
+
+// runBetterSummarization makes one better-compact LLM call: 32k text budget,
+// reasoning never enabled, the session id and opencode's routing headers
+// attached (index.ts summarize).
+func runBetterSummarization(model *ai.Model, promptText string, options CompactionOptions) (*summaryWithUsage, error) {
+	maxTokens := SummaryMaxTokens
+	if model.MaxTokens > 0 && int64(maxTokens) > model.MaxTokens {
+		maxTokens = int(model.MaxTokens)
+	}
+	var headers ai.ProviderHeaders
+	if sessionID := options.SessionID; sessionID != "" && IsOpenCodeModel(model) {
+		headers = ai.ProviderHeaders{
+			"x-opencode-session": &sessionID,
+			"x-opencode-client":  strPtrOf("pi"),
+		}
+	}
+	summaryOptions := options
+	summaryOptions.ExtraHeaders = headers
+	summaryOptions.ThinkingLevel = "" // reasoning never enabled
+	response, err := runSummarization(model, promptText, maxTokens, summaryOptions, headers, "")
+	if err != nil {
+		return nil, err
+	}
+	if failure := GetSummarizationFailure(response, "Summarization"); failure != "" {
+		return nil, fmt.Errorf("%s", failure)
+	}
+	for _, block := range response.Content {
+		if _, ok := block.(ai.ToolCall); ok {
+			return nil, fmt.Errorf("Summarization attempted to call a tool")
+		}
+	}
+	return &summaryWithUsage{text: contentTextOf(response.Content), usage: &response.Usage}, nil
+}

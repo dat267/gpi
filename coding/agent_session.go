@@ -516,6 +516,7 @@ func (s *AgentSession) CompactSession(ctx context.Context, customInstructions st
 		}
 	}
 
+	s.applyCompactModelOverride(&options)
 	result, err := Compact(preparation, options)
 	if err != nil {
 		aborted := compactionCtx.Err() != nil

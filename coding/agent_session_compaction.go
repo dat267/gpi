@@ -200,6 +200,7 @@ func (s *AgentSession) RunAutoCompaction(ctx context.Context, reason CompactionR
 		}
 	}
 
+	s.applyCompactModelOverride(&options)
 	result, err := Compact(preparation, options)
 	if err != nil {
 		s.emit(&SessionEvent{
@@ -220,6 +221,37 @@ func (s *AgentSession) RunAutoCompaction(ctx context.Context, reason CompactionR
 	s.emit(&SessionEvent{Type: SessionCompactionEnd, Reason: reason, Result: result})
 	// An overflow recovery that consumed the failed message retries the turn.
 	return willRetry, nil
+}
+
+// applyCompactModelOverride resolves the PI_COMPACT_MODEL=provider/model-id
+// override for the better-compact summarizer (D142; the extension's
+// pickSummarizer): a resolvable model with configured auth replaces the
+// session model, everything else keeps the session model. The auth material
+// is re-resolved for the override.
+func (s *AgentSession) applyCompactModelOverride(options *CompactionOptions) {
+	provider, modelID, ok := ParseCompactModelOverride(CompactModelEnv("PI_COMPACT_MODEL"))
+	if !ok {
+		return
+	}
+	runtime := s.ModelRuntime()
+	if runtime == nil {
+		return
+	}
+	model := runtime.GetModel(provider, modelID)
+	if model == nil || !runtime.HasConfiguredAuth(provider) {
+		return
+	}
+	options.Model = model
+	if resolution, err := runtime.GetAuthForModel(model, nil); err == nil && resolution != nil {
+		options.APIKey = resolution.Auth.APIKey
+		options.Headers = headersToStrings(resolution.Auth.Headers)
+		options.Env = resolution.Env
+		if resolution.Auth.BaseURL != "" {
+			copied := *model
+			copied.BaseURL = resolution.Auth.BaseURL
+			options.Model = &copied
+		}
+	}
 }
 
 func headersToStrings(headers ai.ProviderHeaders) map[string]string {

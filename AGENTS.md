@@ -142,6 +142,13 @@ summarized in the README scoreboard. The range is **D1–D139**. Representative:
   on every session event; FormatTokens/FormatCwdForFooter keep upstream
   behavior. app.UI is the TuiReference forwarder (D105) so the /tui and
   exit-replay renderer swaps reach every holder.
+- D142 — the compaction summarizer follows the user's compaction extension
+  (~/.pi/agent/extensions/compaction) instead of stock: a 32k no-reasoning
+  call with the pi-better-compact structured prompts, the previous summary's
+  file lists stripped before it is fed back, regenerated file lists capped to
+  the most recent 40 per list, the PI_COMPACT_MODEL override and opencode
+  routing headers. On any failure or an unusable summary it falls back to the
+  stock summarizer.
 - D44/D47 — Go uses function fields instead of overridable methods; listeners
   are compared by code pointer.
 - D51 — `StdinBuffer` uses callbacks instead of `EventEmitter`.

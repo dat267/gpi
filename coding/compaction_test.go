@@ -281,7 +281,7 @@ func TestPrepareAndCompactFlow(t *testing.T) {
 			calls++
 			stream := ai.NewAssistantMessageEventStream()
 			msg := &ai.AssistantMessage{
-				Content: ai.ContentList{ai.TextContent{Text: "## Goal\ntest summary"}},
+				Content: ai.ContentList{ai.TextContent{Text: "## Goal\ntest summary long enough to pass the usability check"}},
 				API:     model.API, Provider: model.Provider, Model: model.ID,
 				StopReason: ai.StopStop, Timestamp: 1,
 			}

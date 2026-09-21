@@ -55,7 +55,7 @@ func seedBranch(t *testing.T, session *AgentSession) {
 func TestCheckCompactionDisabled(t *testing.T) {
 	var runs atomic.Int64
 	model := &ai.Model{ID: "m", API: ai.APIAnthropicMessages, Provider: "anthropic", ContextWindow: 100000, MaxTokens: 8192}
-	session := compactionTestSession(t, model, summarizingStreamFn(t, &runs, "summary"), smallCompactionSettings())
+	session := compactionTestSession(t, model, summarizingStreamFn(t, &runs, "summary text that is long enough to pass the usability check"), smallCompactionSettings())
 	seedBranch(t, session)
 	session.control.autoCompaction = false
 
@@ -80,7 +80,7 @@ func TestCheckCompactionDisabled(t *testing.T) {
 func TestCheckCompactionThreshold(t *testing.T) {
 	var runs atomic.Int64
 	model := &ai.Model{ID: "m", API: ai.APIAnthropicMessages, Provider: "anthropic", ContextWindow: 100000, MaxTokens: 8192}
-	session := compactionTestSession(t, model, summarizingStreamFn(t, &runs, "summary text"), smallCompactionSettings())
+	session := compactionTestSession(t, model, summarizingStreamFn(t, &runs, "summary text that is long enough to pass the usability check"), smallCompactionSettings())
 	seedBranch(t, session)
 
 	assistant := &ai.AssistantMessage{
@@ -123,7 +123,7 @@ func TestCheckCompactionThreshold(t *testing.T) {
 func TestCheckCompactionOverflowCompleted(t *testing.T) {
 	var runs atomic.Int64
 	model := &ai.Model{ID: "m", API: ai.APIAnthropicMessages, Provider: "anthropic", ContextWindow: 1000, MaxTokens: 100}
-	session := compactionTestSession(t, model, summarizingStreamFn(t, &runs, "overflow summary"), smallCompactionSettings())
+	session := compactionTestSession(t, model, summarizingStreamFn(t, &runs, "overflow summary text that passes the usability check too"), smallCompactionSettings())
 	seedBranch(t, session)
 
 	// Case 2: a successful response beyond the window compacts without retry.
@@ -147,7 +147,7 @@ func TestCheckCompactionOverflowCompleted(t *testing.T) {
 func TestCheckCompactionOverflowError(t *testing.T) {
 	var runs atomic.Int64
 	model := &ai.Model{ID: "m", API: ai.APIAnthropicMessages, Provider: "anthropic", ContextWindow: 1000, MaxTokens: 100}
-	session := compactionTestSession(t, model, summarizingStreamFn(t, &runs, "recovered summary"), smallCompactionSettings())
+	session := compactionTestSession(t, model, summarizingStreamFn(t, &runs, "recovered summary text that passes the usability check"), smallCompactionSettings())
 	seedBranch(t, session)
 
 	// Case 1: an error overflow drops the failed message, compacts, and retries.
@@ -201,7 +201,7 @@ func TestCheckCompactionOverflowError(t *testing.T) {
 func TestCheckCompactionGuards(t *testing.T) {
 	var runs atomic.Int64
 	model := &ai.Model{ID: "m", API: ai.APIAnthropicMessages, Provider: "anthropic", ContextWindow: 1000, MaxTokens: 100}
-	session := compactionTestSession(t, model, summarizingStreamFn(t, &runs, "summary"), smallCompactionSettings())
+	session := compactionTestSession(t, model, summarizingStreamFn(t, &runs, "summary text that is long enough to pass the usability check"), smallCompactionSettings())
 	seedBranch(t, session)
 
 	// Aborted messages are skipped when the check allows it.
@@ -264,7 +264,7 @@ func TestRunAutoCompactionWithoutModel(t *testing.T) {
 func TestAbortCompaction(t *testing.T) {
 	var runs atomic.Int64
 	model := &ai.Model{ID: "m", API: ai.APIAnthropicMessages, Provider: "anthropic", ContextWindow: 1000, MaxTokens: 100}
-	session := compactionTestSession(t, model, summarizingStreamFn(t, &runs, "summary"), smallCompactionSettings())
+	session := compactionTestSession(t, model, summarizingStreamFn(t, &runs, "summary text that is long enough to pass the usability check"), smallCompactionSettings())
 	session.AbortCompaction()
 	if session.IsCompacting() {
 		t.Fatal("no compaction in flight")
