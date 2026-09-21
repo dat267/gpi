@@ -485,6 +485,7 @@ func NewLoader(requestRender RenderRequester, spinnerColor func(string) string, 
 
 // Render renders an empty line followed by the loader text.
 func (l *Loader) Render(width int) []string {
+	l.refreshDisplay()
 	return append([]string{""}, l.Text.Render(width)...)
 }
 
@@ -581,15 +582,24 @@ func (l *Loader) RenderedIndicatorAt(now time.Time) string {
 }
 
 func (l *Loader) updateDisplay() {
+	l.refreshDisplay()
+	if l.requestRender != nil {
+		l.requestRender.RequestRender(false)
+	}
+}
+
+// refreshDisplay recomputes the text from the current clock-derived frame
+// without requesting a render. Upstream's own setInterval called
+// updateDisplay between frames; in loop mode the owner's animation tick is
+// the only mutator, so Render recomputes here (stage 4) or the spinner would
+// freeze on the frame cached at start.
+func (l *Loader) refreshDisplay() {
 	renderedFrame := l.RenderedIndicatorAt(time.Now())
 	indicator := ""
 	if len(renderedFrame) > 0 {
 		indicator = renderedFrame + " "
 	}
 	l.Text.SetText(indicator + l.messageColor(l.messageValue))
-	if l.requestRender != nil {
-		l.requestRender.RequestRender(false)
-	}
 }
 
 // ---- CancellableLoader ----

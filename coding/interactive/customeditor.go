@@ -2,6 +2,7 @@ package interactive
 
 import (
 	"strings"
+	"time"
 
 	"github.com/dat267/pier/tui"
 )
@@ -69,6 +70,18 @@ func (c *CustomEditor) SetWorkingStatusIndicator(indicator *StatusIndicator) {
 // GetWorkingStatusIndicator returns the embedded status indicator.
 func (c *CustomEditor) GetWorkingStatusIndicator() *StatusIndicator {
 	return c.workingStatusIndicator
+}
+
+// AnimationFrame implements tui.Animator for the embedded working/compaction
+// status. The indicator lives in the editor's border, not in a container, so
+// the renderer's animation walk can only reach it through the editor; without
+// this, the spinner freezes whenever nothing else repaints (e.g. during
+// compaction, where no events stream).
+func (c *CustomEditor) AnimationFrame(now time.Time) (bool, time.Duration) {
+	if c.workingStatusIndicator == nil {
+		return false, 0
+	}
+	return c.workingStatusIndicator.AnimationFrame(now)
 }
 
 // OnAction registers a handler for an app action.
