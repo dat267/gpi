@@ -51,13 +51,17 @@ Packages mirror upstream `packages/`:
 go build ./...                     # everything
 go vet ./...                       # must be clean
 gofmt -l .                         # must be empty
-go test -race -count=2 ./...       # the completion gate (all 15 packages)
+go test -race -count=2 -timeout 60s ./...   # the completion gate (all packages)
 
 # the CLI (binary derives its display name from the file name)
 go build -o bin/pier ./cmd/pier
 ./bin/pier --help
 ./bin/pier -r                       # resume the newest session
 ```
+
+The gate runs with `GOTRACEBACK=all` in CI so a hung test prints every
+goroutine. The PTY watchdogs reuse a prebuilt binary via `PIER_TEST_BIN`
+(CI builds `./cmd/pier` first); locally they fall back to `./bin/pier`.
 
 The interactive mode reads credentials from `~/.pi/agent/auth.json` (or
 `PI_CODING_AGENT_DIR`). `/login` is wired, but the CLI does not install a
@@ -105,6 +109,61 @@ load-bearing (see below).
   this caused (editor submit, model selector, terminal↔screen scroll, stdin
   buffer exit). A re-entrancy/lock-order audit is worth re-running after any
   new locking code.
+- **PTY watchdogs.** `coding/interactive/ptywatch_test.go` drives the real
+  binary through the D136–D139 flows (editor submit, model selector,
+  fullscreen scroll, exit) inside a pty, then sends `SIGQUIT` and fails when
+  the stack dump shows any goroutine parked in `sync.runtime_SemacquireMutex`.
+  The tests use `$PIER_TEST_BIN`, else `./bin/pier`, else they build once into
+  a temp dir (and skip if that fails), so the package gate stays fast. CI
+  prebuilds the binary and sets `PIER_TEST_BIN`. `TestMutexBlockedDetectorHasTeeth`
+  proves the parser still catches a genuine mutex deadlock.
+
+### Lock inventory
+
+Every `sync.Mutex`/`sync.RWMutex` in `tui/` and `coding/interactive/`
+(non-test), what it protects, its ordering position, and the UI-loop refactor
+stage that retires it. Ordering classes: **(A)** `Renderer.renderMu` serializes
+rendering against input dispatch and is the outermost UI lock; **(B)** UI
+component/metadata locks nest inside (A), parents before children; **(C)** leaf
+state/registry locks never wrap component, renderer or callback calls; **(D)**
+independent of the UI locks. The invariant above still holds throughout: no
+user code under a lock, snapshot under and deliver outside.
+
+| Lock | Where | Protects | Order | Retirement |
+|---|---|---|---|---|
+| `Renderer.renderMu` | `tui/render.go:166` | render vs input dispatch (D84) | A | stage 2 (renders move to the loop) |
+| `Renderer.mu` | `tui/render.go:172` | focus, input listeners, posted queue, stopped flag, render timers | B | stage 2/3 (loop-owned) |
+| `Container.mu` | `tui/component.go:190` | child list + render cache (event goroutines vs render, D136 class) | B, parent→child | stage 1 (events arrive on the loop) |
+| `Editor.mu` | `tui/editor.go:70` | buffer, cursor, history (D136) | B | stage 1 (input on the loop) |
+| `AltScreen.mu` | `tui/altscreen.go:142` | fullscreen scroll/selection/scrollback (D138) | B | stage 3 (input + tick on the loop) |
+| `ScrollView.mu` | `tui/scrollview.go:48` | scroll position/follow-end (D138) | B | stage 3 (auto-scroll ticker → loop message) |
+| `Loader.mu` | `tui/selectlist.go:442` | loader animation frames | B | stage 4 (animation timer → loop tick) |
+| `AltScreenFlashContainer.mu` | `tui/selectlist.go:705` | flash entries + expiry timers | B | stage 4 (timer → loop message) |
+| `StdinBuffer.mu` | `tui/stdinbuffer.go:222` | sequence assembly, paste re-wrap, Kitty dedup (D51/D139) | C | stage 3 (reader goroutine owns a stateless decoder) |
+| `ProcessTerminal.mu` | `tui/terminal.go:127` | terminal writes, raw mode, resize bookkeeping | C | stage 3 (terminal writes only on the loop) |
+| `negotiationResult.lastDataMu` | `tui/terminal.go:460` | Kitty negotiation split-response flush timer | C | stage 3 |
+| `ModelSelectorComponent.mu` | `coding/interactive/modelselector.go:59` | selector state + background refresh (D137) | B | stage 4 |
+| `ScopedModelsSelectorComponent.mu` | `coding/interactive/scopedmodelsselector.go:257` | scoped-models state + refresh | B | stage 4 |
+| `SessionSelectorComponent.mu` | `coding/interactive/sessionselector.go:830` | selector state + queued loader applies (D103) | B | stage 4 |
+| `scheduleOnce` local `mu` | `coding/interactive/sessionselector.go:228` | cancelled flag of the auto-cancel timer | D | stage 4 (timer → loop message) |
+| `editCallComponent.previewMu` | `coding/interactive/toolrenderers.go:1046` | async edit-preview handoff | B | stage 4 (`TUI.Post`) |
+| `FooterComponent.cacheMu` | `coding/interactive/footer.go:208` | footer render cache (D141) | C | stage 4 (invalidations on the loop) |
+| `ModelCatalogRefreshCoordinator.mu` | `coding/interactive/catalogrefresh.go:34` | per-runtime refresh dedup (D98) | C | stage 4 |
+| `activeCatalogRefresh.mu` | `coding/interactive/catalogrefresh.go:22` | one refresh's result/cancel state | C | stage 4 |
+| `Lifecycle.mu` | `coding/interactive/interactivemode_lifecycle.go:107` | shutdown/suspend/lifecycle flags (D135) | C | stage 3/4 |
+| `StartupWiring.mu` | `coding/interactive/interactivemode_startup.go:71` | pending user inputs + telemetry-once flag (D123) | C | stage 1 |
+| `Theme.mu` (style colors) | `coding/interactive/theme.go:100` | style-color enable flag (test seam) | C | stage 4 |
+| `themeState.mu` | `coding/interactive/theme.go:802` | global theme registry + watcher (D85) | C | stage 4 |
+| `trueColorState.mu` | `coding/interactive/theme.go:1019` | truecolor capability (test seam) | C | stage 4 |
+| `customThemesDirState.mu` | `coding/interactive/theme.go:1041` | custom themes dir (test seam) | C | stage 4 |
+| `KeybindingsManager.mu` | `tui/keybindings.go:142` | user override definitions | C | stage 4 |
+| `globalKeybindingsState.mu` | `tui/keybindings.go:340` | global manager accessor (`SetKeybindings` seam) | C | stage 4 |
+| `kittyProtocolState.mu` | `tui/keys.go:21` | global Kitty active flag | C/D | stage 4 |
+| `lastEventTypeState.mu` | `tui/keys.go:342` | last parsed key event type (fidelity port) | D | stage 4 |
+| `widthCacheMu` | `tui/width.go:471` | memoized `VisibleWidth` cache | C | stage 4 (loop-confined; D-row if non-UI callers remain) |
+
+Stage 4's target is that this table is empty (or reduced to D-rowed exceptions
+where a shared non-UI caller genuinely requires a lock).
 - **Go 1.27 quirk.** Function literals passed as arguments need an explicit
   result type when the parameter's function type has one.
 - **RE2 regex** (no lookaround/backreferences). Put `-` first in a character

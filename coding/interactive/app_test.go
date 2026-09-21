@@ -162,16 +162,27 @@ func newTestApp(t *testing.T) (*App, func()) {
 	})
 
 	// Disable the render timer so the test's direct component access cannot race
-	// with a background render.
-	if screen, ok := app.UI.(*tui.MainScreen); ok {
-		screen.DisableAutoRender()
-	}
+	// with a background render. app.UI is a TuiReference (D105), so resolve the
+	// concrete renderer instead of type-asserting the reference itself.
+	disableAutoRenderForTest(app)
 
 	cleanup := func() {
 		app.Lifecycle.UnregisterSignalHandlers()
 		tui.SetKeybindings(previous)
 	}
 	return app, cleanup
+}
+
+// disableAutoRenderForTest turns off the render timer on the app's current
+// renderer (TuiReference-aware: the D105 forwarding reference hides the
+// concrete MainScreen from a plain type assertion).
+func disableAutoRenderForTest(app *App) {
+	if app == nil {
+		return
+	}
+	if screen, ok := app.currentRenderer().(*tui.MainScreen); ok {
+		screen.DisableAutoRender()
+	}
 }
 
 // waitForConditionWithin polls until the condition holds or the deadline

@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  # Every goroutine stack on a hang or crash (the PTY watchdogs parse the
+  # SIGQUIT dump for mutex-blocked goroutines).
+  GOTRACEBACK: all
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+
+      - name: build
+        run: go build ./...
+
+      - name: vet
+        run: go vet ./...
+
+      - name: build pier (used by the PTY watchdogs)
+        run: go build -o pier ./cmd/pier
+
+      - name: test
+        env:
+          PIER_TEST_BIN: ${{ github.workspace }}/pier
+        run: go test -race -count=2 -timeout 60s ./...
