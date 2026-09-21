@@ -3,6 +3,8 @@ package interactive
 import (
 	"context"
 	"os"
+
+	"golang.org/x/term"
 	"time"
 
 	"github.com/dat267/gpi/ai"
@@ -65,6 +67,9 @@ type AppOptions struct {
 	Offline bool
 	// Hyperlinks enables OSC 8 links in the update cards.
 	Hyperlinks bool
+	// StdoutIsTTY gates the resume hint (upstream's process.stdout.isTTY).
+	// Nil detects os.Stdout at shutdown.
+	StdoutIsTTY *bool
 	// InitialMessage/InitialMessages are sent after startup.
 	InitialMessage  string
 	InitialMessages []string
@@ -302,6 +307,20 @@ func NewApp(options AppOptions) *App {
 		DisableThemeAutoSync:    func() { StopThemeWatcher() },
 		RecordCrash:             func(kind string, err error) bool { return app.Trust.RecordCrash(kind, err) },
 		CrashReportInstructions: func() string { return app.Trust.CrashReportInstructions() },
+		// Upstream prints "To resume this session: pi --session …" after the
+		// interactive shutdown (interactive-mode.ts shutdown(), chalk.dim
+		// prefix).
+		ResumeCommand: func() string {
+			stdoutIsTTY := options.StdoutIsTTY
+			if stdoutIsTTY == nil {
+				detected := term.IsTerminal(int(os.Stdout.Fd()))
+				stdoutIsTTY = &detected
+			}
+			return FormatResumeCommand(app.SessionMgr, *stdoutIsTTY)
+		},
+		FormatResumeMessage: func(command string) string {
+			return "\x1b[2mTo resume this session:\x1b[22m " + command
+		},
 	})
 
 	app.Startup = &StartupWiring{

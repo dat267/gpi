@@ -201,6 +201,11 @@ func resumeSession(args *coding.Args, cwd string, agentDir string) (*coding.Sess
 	if args.SessionDir != nil {
 		sessionDir = *args.SessionDir
 	}
+	if args.Continue {
+		// Upstream -c uses SessionManager.continueRecent(cwd, sessionDir), which
+		// keeps sessionDir = default(cwd) so the resume hint stays `pi --session …`.
+		return coding.ContinueRecentSession(cwd, sessionDir), nil
+	}
 	if args.Session != nil {
 		return coding.OpenSession(*args.Session, sessionDir, "")
 	}
