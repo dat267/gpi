@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -67,11 +68,24 @@ func run(appName string, args *coding.Args) error {
 
 	settings := coding.NewSettingsManagerFromFiles(cwd, agentDir, coding.SettingsManagerCreateOptions{})
 
+	// Theme: initialize before any TUI (the -r picker runs before the app).
+	themeName := "dark"
+	if setting := settings.GetTheme(); setting != nil && *setting != "" {
+		themeName = *setting
+	}
+	interactive.SetTrueColorSupport(true)
+	interactive.SetStyleColorsEnabled(true)
+	interactive.InitTheme(themeName, false)
+
 	// Session manager: resume the newest session or start a fresh one.
 	var sessions *coding.SessionManager
-	if args.Resume || args.Continue || args.Session != nil || args.SessionID != nil {
-		sessions, err = resumeSession(args, cwd, agentDir)
+	if args.Resume || args.Continue || args.Fork != nil || args.Session != nil || args.SessionID != nil {
+		sessions, err = resumeSession(args, cwd, agentDir, settings)
 		if err != nil {
+			if errors.Is(err, errNoSessionSelected) {
+				fmt.Println("\x1b[2mNo session selected\x1b[0m")
+				return nil
+			}
 			return err
 		}
 	}
@@ -141,15 +155,6 @@ func run(appName string, args *coding.Args) error {
 	if err != nil {
 		return err
 	}
-
-	// Theme: initialize before building the component tree.
-	themeName := "dark"
-	if setting := settings.GetTheme(); setting != nil && *setting != "" {
-		themeName = *setting
-	}
-	interactive.SetTrueColorSupport(true)
-	interactive.SetStyleColorsEnabled(true)
-	interactive.InitTheme(themeName, false)
 
 	tuiMode := settings.GetTuiMode()
 	if args.TuiMode != nil {
@@ -239,9 +244,32 @@ func resolveSessionPath(sessionArg, cwd, sessionDir string) resolvedSession {
 	return resolvedSession{kind: "not_found", arg: sessionArg}
 }
 
+// errNoSessionSelected is returned when the -r picker is dismissed.
+var errNoSessionSelected = errors.New("no session selected")
+
+// selectResumeSession shows the interactive session picker (upstream
+// cli/session-picker.ts selectSession). A var so tests can stub it.
+var selectResumeSession = func(cwd string, sessionDir string, settings *coding.SettingsManager) (string, bool) {
+	current := func(_ interactive.SessionListProgress, ctx context.Context) ([]coding.SessionInfo, error) {
+		return coding.ListSessions(cwd, sessionDir), nil
+	}
+	all := func(_ interactive.SessionListProgress, ctx context.Context) ([]coding.SessionInfo, error) {
+		if sessionDir != "" {
+			return coding.ListAllSessions(sessionDir), nil
+		}
+		return coding.ListAllSessions(""), nil
+	}
+	selected := interactive.SelectSession(interactive.SelectSessionOptions{
+		Settings:      settings,
+		CurrentLoader: current,
+		AllLoader:     all,
+	})
+	return selected, selected != ""
+}
+
 // resumeSession opens the session requested by the CLI flags (upstream
 // createSessionManager's session selection).
-func resumeSession(args *coding.Args, cwd string, agentDir string) (*coding.SessionManager, error) {
+func resumeSession(args *coding.Args, cwd string, agentDir string, settings *coding.SettingsManager) (*coding.SessionManager, error) {
 	sessionDir := ""
 	if args.SessionDir != nil {
 		sessionDir = *args.SessionDir
@@ -266,10 +294,48 @@ func resumeSession(args *coding.Args, cwd string, agentDir string) (*coding.Sess
 			return nil, err
 		}
 	}
+	// Upstream validateForkFlags runs before any session is opened.
+	if args.Fork != nil {
+		var conflicts []string
+		if args.Session != nil {
+			conflicts = append(conflicts, "--session")
+		}
+		if args.Continue {
+			conflicts = append(conflicts, "--continue")
+		}
+		if args.Resume {
+			conflicts = append(conflicts, "--resume")
+		}
+		if args.NoSession {
+			conflicts = append(conflicts, "--no-session")
+		}
+		if len(conflicts) > 0 {
+			return nil, fmt.Errorf("--fork cannot be combined with %s", strings.Join(conflicts, ", "))
+		}
+	}
 	if args.Continue {
 		// Upstream -c uses SessionManager.continueRecent(cwd, sessionDir), which
 		// keeps sessionDir = default(cwd) so the resume hint stays `pi --session …`.
 		return coding.ContinueRecentSession(cwd, sessionDir), nil
+	}
+	if args.Fork != nil {
+		// Upstream createSessionManager's fork branch.
+		forkID := ""
+		if args.SessionID != nil {
+			for _, info := range coding.ListSessions(cwd, sessionDir) {
+				if info.ID == *args.SessionID {
+					return nil, fmt.Errorf("Session already exists with id '%s'", *args.SessionID)
+				}
+			}
+			forkID = *args.SessionID
+		}
+		resolved := resolveSessionPath(*args.Fork, cwd, sessionDir)
+		switch resolved.kind {
+		case "path", "local", "global":
+			return coding.ForkSession(resolved.path, cwd, sessionDir, &coding.NewSessionOptions{ID: forkID})
+		default:
+			return nil, fmt.Errorf("No session found matching '%s'", resolved.arg)
+		}
 	}
 	if args.Session != nil {
 		resolved := resolveSessionPath(*args.Session, cwd, sessionDir)
@@ -299,8 +365,14 @@ func resumeSession(args *coding.Args, cwd string, agentDir string) (*coding.Sess
 		sm.NewSession(&coding.NewSessionOptions{ID: *args.SessionID})
 		return sm, nil
 	}
-	// -r/--resume: upstream opens the interactive session picker
-	// (cli/session-picker.ts, not ported); open the newest session instead.
+	if args.Resume {
+		// Upstream parsed.resume opens the interactive session picker.
+		selected, ok := selectResumeSession(cwd, sessionDir, settings)
+		if !ok {
+			return nil, errNoSessionSelected
+		}
+		return coding.OpenSession(selected, sessionDir, "")
+	}
 	listed := coding.ListSessions(cwd, sessionDir)
 	if len(listed) == 0 {
 		return nil, fmt.Errorf("no sessions to resume")
