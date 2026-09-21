@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/dat267/gpi/chord"
-	"github.com/dat267/gpi/server"
+	"github.com/dat267/pier/chord"
+	"github.com/dat267/pier/server"
 )
 
 // TestHarness is a scriptable RoutedSessionHandle (upstream TestHarness).

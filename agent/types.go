@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of packages/agent/src/types.ts.

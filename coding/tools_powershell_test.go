@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Tests keyed to upstream utils/shell.ts, core/tools/powershell.ts, and

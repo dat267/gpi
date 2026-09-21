@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Version is the pi version (upstream reads it from package.json; hosts set it

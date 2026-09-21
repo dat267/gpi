@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of the models.json layer of core/provider-composer.ts: composing

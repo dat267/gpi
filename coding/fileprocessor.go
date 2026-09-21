@@ -11,7 +11,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of cli/file-processor.ts and the resizable-image contract in

@@ -1,4 +1,4 @@
-// Command gpi is the Go port's interactive coding-agent CLI.
+// Command pier is the Go port's interactive coding-agent CLI.
 //
 // It is a pragmatic entrypoint: it boots the ported session/services (settings,
 // auth, model runtime, agent session) and runs the ported interactive mode
@@ -15,9 +15,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/dat267/gpi/ai"
-	"github.com/dat267/gpi/coding"
-	"github.com/dat267/gpi/coding/interactive"
+	"github.com/dat267/pier/ai"
+	"github.com/dat267/pier/coding"
+	"github.com/dat267/pier/coding/interactive"
 )
 
 // executableName returns the invoked binary name (without the .exe suffix),

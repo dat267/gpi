@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dat267/gpi/chord"
-	"github.com/dat267/gpi/protocol"
+	"github.com/dat267/pier/chord"
+	"github.com/dat267/pier/protocol"
 )
 
 // Port of src/session-router.ts: per-client serialized routing, attachment

@@ -1,7 +1,7 @@
 package delta
 
 import (
-	"github.com/dat267/gpi/chord"
+	"github.com/dat267/pier/chord"
 )
 
 // Port of the applier half of chord/delta.

@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dat267/gpi/coding"
-	"github.com/dat267/gpi/tui"
+	"github.com/dat267/pier/coding"
+	"github.com/dat267/pier/tui"
 )
 
 // Port of src/modes/interactive/components/config-selector.ts: the package

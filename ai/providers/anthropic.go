@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of providers/anthropic.ts (auth resolution and provider factory).

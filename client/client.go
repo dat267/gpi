@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/dat267/gpi/protocol"
+	"github.com/dat267/pier/protocol"
 )
 
 // Port of src/client.ts. The chord-backed service subscription methods

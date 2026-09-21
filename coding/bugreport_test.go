@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/dat267/gpi/agent"
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/agent"
+	"github.com/dat267/pier/ai"
 )
 
 // Round 112 tests: session JSONL export, URL/JSON redaction, bug report

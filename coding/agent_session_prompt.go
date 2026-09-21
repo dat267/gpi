@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of the prompt pipeline of core/agent-session.ts: prompt with streaming

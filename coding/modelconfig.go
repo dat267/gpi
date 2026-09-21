@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of core/model-config.ts: an immutable, credential-blind models.json

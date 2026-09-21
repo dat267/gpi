@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of core/cache-warmer.ts: keeping one prompt cache entry alive by

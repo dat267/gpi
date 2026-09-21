@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of modes/print-mode.ts (the extension-free core).

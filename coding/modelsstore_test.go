@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Round 97 tests: the file-backed and in-memory model catalog stores.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/dat267/gpi/tui"
+	"github.com/dat267/pier/tui"
 )
 
 // TestStopModeSwitchesToRegularOnTranscriptExit covers the fullscreen exit

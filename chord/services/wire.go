@@ -3,8 +3,8 @@ package services
 import (
 	"fmt"
 
-	"github.com/dat267/gpi/chord"
-	"github.com/dat267/gpi/chord/delta"
+	"github.com/dat267/pier/chord"
+	"github.com/dat267/pier/chord/delta"
 )
 
 // Port of src/services/wire.ts: control calls, strict validation, and the

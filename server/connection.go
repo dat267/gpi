@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/dat267/gpi/chord/services"
-	"github.com/dat267/gpi/protocol"
+	"github.com/dat267/pier/chord/services"
+	"github.com/dat267/pier/protocol"
 )
 
 // Port of src/connection.ts and src/listener.ts.

@@ -13,8 +13,8 @@ package server
 import (
 	"context"
 
-	"github.com/dat267/gpi/chord"
-	"github.com/dat267/gpi/chord/services"
+	"github.com/dat267/pier/chord"
+	"github.com/dat267/pier/chord/services"
 )
 
 // SessionMetadata identifies one durable session (port of pi-agent-core's

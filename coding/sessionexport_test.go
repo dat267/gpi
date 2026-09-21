@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // TestSerializeSessionBranchHeader guards D130: the serialized branch starts

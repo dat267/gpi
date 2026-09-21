@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dat267/gpi/protocol"
+	"github.com/dat267/pier/protocol"
 )
 
 // Port of src/transports/unix/*.ts.

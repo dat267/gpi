@@ -1,7 +1,7 @@
 package coding
 
 import (
-	"github.com/dat267/gpi/agent"
+	"github.com/dat267/pier/agent"
 )
 
 // Port of core/tools/powershell.ts.

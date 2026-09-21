@@ -5,9 +5,9 @@ import (
 	"net"
 	"sync"
 
-	"github.com/dat267/gpi/chord"
-	"github.com/dat267/gpi/chord/services"
-	"github.com/dat267/gpi/protocol"
+	"github.com/dat267/pier/chord"
+	"github.com/dat267/pier/chord/services"
+	"github.com/dat267/pier/protocol"
 )
 
 // WireChannel is the byte transport a ProtocolTestClient writes to.

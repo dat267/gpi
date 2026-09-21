@@ -3,7 +3,7 @@ package providers
 import (
 	"strings"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of providers/cloudflare-auth.ts, providers/cloudflare-stream.ts, and the

@@ -1,4 +1,4 @@
-module github.com/dat267/gpi
+module github.com/dat267/pier
 
 go 1.27
 

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of core/models-store.ts: locked JSON-backed storage for dynamically

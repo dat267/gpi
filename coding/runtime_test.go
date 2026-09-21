@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Round 95 unit tests: config-value resolution, provider attribution, runtime

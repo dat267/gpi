@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dat267/gpi/ai"
-	"github.com/dat267/gpi/coding"
-	"github.com/dat267/gpi/tui"
+	"github.com/dat267/pier/ai"
+	"github.com/dat267/pier/coding"
+	"github.com/dat267/pier/tui"
 )
 
 // TestInteractiveModeHelpers covers the helper layer of interactive-mode.ts.
@@ -161,7 +161,7 @@ func TestFormatResumeCommand(t *testing.T) {
 	if !manager.IsPersisted() {
 		t.Fatal("session should be persisted")
 	}
-	if command := FormatResumeCommand(manager, false); command != "" {
+	if command := FormatResumeCommand(manager, "", false); command != "" {
 		t.Fatalf("non-tty command = %q", command)
 	}
 	// The session file is written lazily on the first append; create it so the
@@ -169,18 +169,18 @@ func TestFormatResumeCommand(t *testing.T) {
 	if err := os.WriteFile(manager.GetSessionFile(), []byte("{}\n"), 0o644); err != nil {
 		t.Fatalf("write session file: %v", err)
 	}
-	command := FormatResumeCommand(manager, true)
+	command := FormatResumeCommand(manager, "pier", true)
 	if command == "" {
 		t.Fatal("missing command")
 	}
-	want := coding.AppName + " --session-dir " + QuoteIfNeeded(manager.GetSessionDir()) + " --session " + manager.GetSessionID()
+	want := "pier" + " --session-dir " + QuoteIfNeeded(manager.GetSessionDir()) + " --session " + manager.GetSessionID()
 	if command != want {
 		t.Fatalf("command = %q, want %q", command, want)
 	}
 
 	// Non-persisted managers produce no command.
 	notPersisted := coding.NewSessionManager("/tmp/proj", &coding.SessionManagerOptions{Persist: boolPtr(false)})
-	if command := FormatResumeCommand(notPersisted, true); command != "" {
+	if command := FormatResumeCommand(notPersisted, "", true); command != "" {
 		t.Fatalf("non-persisted command = %q", command)
 	}
 }

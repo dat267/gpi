@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/chord"
-	"github.com/dat267/gpi/server"
+	"github.com/dat267/pier/chord"
+	"github.com/dat267/pier/server"
 )
 
 func TestDeferredResolvesOnceAndAwaitsContext(t *testing.T) {

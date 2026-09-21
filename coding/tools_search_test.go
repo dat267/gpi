@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // find/grep tests against the real fd/rg binaries (the tools' default

@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/chord"
-	"github.com/dat267/gpi/chord/delta"
-	"github.com/dat267/gpi/chord/services"
+	"github.com/dat267/pier/chord"
+	"github.com/dat267/pier/chord/delta"
+	"github.com/dat267/pier/chord/services"
 )
 
 // Tests for the replicated-state runtime and the instance directory, keyed to

@@ -16,7 +16,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dat267/gpi/chord"
+	"github.com/dat267/pier/chord"
 )
 
 // Seg is one path segment.

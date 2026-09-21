@@ -15,8 +15,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dat267/gpi/agent"
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/agent"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of core/tools/output-accumulator.ts and core/tools/bash.ts (the

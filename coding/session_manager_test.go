@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Session manager tests keyed to upstream session-manager.ts semantics.

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // imagesFromTranscript collects the image blocks of the last user message.

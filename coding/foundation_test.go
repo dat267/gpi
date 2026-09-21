@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Round 94 unit tests: event bus, usage totals, cache stats, session cwd,

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Round 116 tests: HTML entity decoding and tool-result image normalization.

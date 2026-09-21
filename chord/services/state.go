@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/dat267/gpi/chord"
-	"github.com/dat267/gpi/chord/delta"
+	"github.com/dat267/pier/chord"
+	"github.com/dat267/pier/chord/delta"
 )
 
 // Port of src/services/state.ts and src/services/state-internals.ts.

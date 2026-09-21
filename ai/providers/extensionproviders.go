@@ -1,6 +1,6 @@
 package providers
 
-import "github.com/dat267/gpi/ai"
+import "github.com/dat267/pier/ai"
 
 // Extension providers: Go ports of the user's pi provider extensions
 // (~/.pi/agent/extensions/providers). They are registered alongside the

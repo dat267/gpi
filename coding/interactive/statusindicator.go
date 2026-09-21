@@ -3,7 +3,7 @@ package interactive
 import (
 	"strings"
 
-	"github.com/dat267/gpi/tui"
+	"github.com/dat267/pier/tui"
 )
 
 // Port of src/modes/interactive/components/{status-indicator,

@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dat267/gpi/agent"
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/agent"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of core/tools/{read,write,ls}.ts (minus the extension wrapper and UI

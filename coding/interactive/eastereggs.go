@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dat267/gpi/tui"
+	"github.com/dat267/pier/tui"
 )
 
 // Port of src/modes/interactive/components/{skill-invocation-message,

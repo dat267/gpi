@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/chord"
-	"github.com/dat267/gpi/protocol"
-	"github.com/dat267/gpi/server"
-	servertesting "github.com/dat267/gpi/server/testing"
+	"github.com/dat267/pier/chord"
+	"github.com/dat267/pier/protocol"
+	"github.com/dat267/pier/server"
+	servertesting "github.com/dat267/pier/server/testing"
 )
 
 // Unix transport tests keyed to upstream

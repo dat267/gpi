@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of packages/agent/src/agent.ts: the stateful wrapper around the

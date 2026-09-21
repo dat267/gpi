@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/dat267/gpi/chord"
-	"github.com/dat267/gpi/chord/delta"
+	"github.com/dat267/pier/chord"
+	"github.com/dat267/pier/chord/delta"
 )
 
 // Port of src/services/handle.ts plus the local (in-process) service targets

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dat267/gpi/chord"
-	"github.com/dat267/gpi/chord/delta"
+	"github.com/dat267/pier/chord"
+	"github.com/dat267/pier/chord/delta"
 )
 
 // chord service-layer tests keyed to upstream (services/wire.ts,

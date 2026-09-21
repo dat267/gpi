@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/dat267/gpi/protocol"
+	"github.com/dat267/pier/protocol"
 )
 
 // Port of src/connection.ts: the connection state machine.

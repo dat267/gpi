@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of core/cache-stats.ts: prompt-cache waste accounting.

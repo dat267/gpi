@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/chord"
-	"github.com/dat267/gpi/chord/facets"
-	"github.com/dat267/gpi/chord/services"
+	"github.com/dat267/pier/chord"
+	"github.com/dat267/pier/chord/facets"
+	"github.com/dat267/pier/chord/services"
 )
 
 // Tests keyed to upstream packages/chord/src/facets/host.ts.

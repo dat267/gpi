@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of core/auth-storage.ts: credential storage backed by auth.json.

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dat267/gpi/coding"
-	"github.com/dat267/gpi/tui"
+	"github.com/dat267/pier/coding"
+	"github.com/dat267/pier/tui"
 )
 
 // Port of src/modes/interactive/session-share.ts and the orchestration of

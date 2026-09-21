@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dat267/gpi/ai"
-	"github.com/dat267/gpi/ai/providers"
+	"github.com/dat267/pier/ai"
+	"github.com/dat267/pier/ai/providers"
 )
 
 // Port of core/model-runtime.ts: the configured pi-ai Models collection used by

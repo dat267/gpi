@@ -10,7 +10,7 @@ A from-scratch Go port of Mario Zechner's **pi** (upstream:
 It is a sibling of the TypeScript monorepo, not a fork: the Go code mirrors the
 upstream packages file-for-file.
 
-- Module: `github.com/dat267/gpi`, Go `1.27`.
+- Module: `github.com/dat267/pier`, Go `1.27`.
 - Dependencies are offline-cached only: `golang.org/x/text`, `x/term`, `x/sys`.
 - Upstream checkout used while porting: `/tmp/pi` (see the README's pin table).
 - License: MIT (see `LICENSE`).
@@ -41,7 +41,7 @@ Packages mirror upstream `packages/`:
 | `coding` | `packages/coding-agent` core | session, tools, compaction, settings, model runtime |
 | `coding/interactive` | `packages/coding-agent` interactive mode | components, theme, the mode wirings |
 | `tui` | `packages/pi-tui` | terminal abstraction, renderer, components |
-| `cmd/gpi` | `main.ts` | the CLI entrypoint |
+| `cmd/pier` | `main.ts` | the CLI entrypoint |
 | `chord`, `client`, `protocol`, `server`, `telemetry`, `durable` | same | supporting packages |
 | `scripts` | — | catalog generators |
 
@@ -54,9 +54,9 @@ gofmt -l .                         # must be empty
 go test -race -count=2 ./...       # the completion gate (all 15 packages)
 
 # the CLI (binary derives its display name from the file name)
-go build -o bin/gpi ./cmd/gpi
-./bin/gpi --help
-./bin/gpi -r                       # resume the newest session
+go build -o bin/pier ./cmd/pier
+./bin/pier --help
+./bin/pier -r                       # resume the newest session
 ```
 
 The interactive mode reads credentials from `~/.pi/agent/auth.json` (or
@@ -82,7 +82,7 @@ into narrow, injectable wirings (all in `coding/interactive`):
   `_commands.go`, `_queue.go`, `_events.go`, `_ui.go` — the named surfaces.
 - `transcript.go`, `footer.go`, `customeditor.go`, `tuirenderer.go`,
   `extensionsselector.go`, `sessionshare.go`, `interactivemode_helpers.go`.
-- `cmd/gpi/main.go` — boots settings/auth/model-runtime/agent-session and runs
+- `cmd/pier/main.go` — boots settings/auth/model-runtime/agent-session and runs
   the `App` (port of `main.ts`'s boot).
 
 `tui/render.go` (+ `mainscreen.go`, `altscreen.go`, `terminal.go`,
@@ -178,12 +178,12 @@ then the `pi-tui` library (renderer, layout, terminals, keys, markdown,
 components), then the interactive coding-agent mode (theme, every component,
 and the mode method groups), each round verified against upstream Node goldens
 and committed locally with a README scoreboard update. The CLI
-(`cmd/gpi`, originally `cmd/pi`) and its composition layer (`app.go`) came last,
+(`cmd/pier`, originally `cmd/pi`) and its composition layer (`app.go`) came last,
 followed by four deadlock fixes found by driving the real binary in a PTY:
 D136 (editor submit), D137 (model selector), D138 (scroll), D139 (exit). The
-executable was then renamed from `pi` to `gpi` (the display name follows the
+executable was then renamed from `pi` to `gpi` and finally to `pier` (the display name follows the
 invoked file name).
 
-To reproduce the exit/scroll checks, drive `bin/gpi` under a PTY, exercise the
+To reproduce the exit/scroll checks, drive `bin/pier` under a PTY, exercise the
 flow, then send `SIGQUIT` to the process and look for goroutines blocked on
 `sync.Mutex`.

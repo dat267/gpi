@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of core/session-export.ts: serializing the current branch as JSONL.

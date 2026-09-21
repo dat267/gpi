@@ -3,7 +3,7 @@ package delta
 import (
 	"fmt"
 
-	"github.com/dat267/gpi/chord"
+	"github.com/dat267/pier/chord"
 )
 
 // Port of the codec half of chord/delta: path interning and arity omission

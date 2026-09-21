@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/dat267/gpi/coding"
-	"github.com/dat267/gpi/tui"
+	"github.com/dat267/pier/coding"
+	"github.com/dat267/pier/tui"
 )
 
 // Port of the key-handler wiring and the editor submit handler of

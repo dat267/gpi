@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/dat267/gpi/agent"
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/agent"
+	"github.com/dat267/pier/ai"
 )
 
 // Round 110 tests: the automatic compaction decision (overflow, recoverable

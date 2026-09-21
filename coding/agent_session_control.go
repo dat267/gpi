@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/dat267/gpi/agent"
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/agent"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of the state/control surface of core/agent-session.ts: read-only state

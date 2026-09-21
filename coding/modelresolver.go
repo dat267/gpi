@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of core/model-resolver.ts plus the thinking-level validation from

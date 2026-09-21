@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Compaction tests keyed to upstream compaction.ts semantics.

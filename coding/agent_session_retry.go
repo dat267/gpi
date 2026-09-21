@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of the auto-retry section of core/agent-session.ts and the post-run

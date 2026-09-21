@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/agent"
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/agent"
+	"github.com/dat267/pier/ai"
 )
 
 // AgentSession tests keyed to upstream agent-session.ts semantics.

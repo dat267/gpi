@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of core/remote-catalog-provider.ts: a persisted pi.dev catalog overlay

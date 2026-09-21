@@ -1,7 +1,7 @@
 package providers
 
 import (
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of providers/google.ts (Generative AI API).

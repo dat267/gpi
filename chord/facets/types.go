@@ -14,8 +14,8 @@ package facets
 import (
 	"context"
 
-	"github.com/dat267/gpi/chord"
-	"github.com/dat267/gpi/chord/services"
+	"github.com/dat267/pier/chord"
+	"github.com/dat267/pier/chord/services"
 )
 
 // RemoteServices is a connected set of remote service handles (upstream

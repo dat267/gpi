@@ -1,4 +1,4 @@
-/gpi
+/pier
 *.test
 /bin/
-/cmd/gpi/gpi
+/cmd/pier/pier

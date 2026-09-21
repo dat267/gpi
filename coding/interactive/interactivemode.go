@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dat267/gpi/ai"
-	"github.com/dat267/gpi/coding"
-	"github.com/dat267/gpi/tui"
+	"github.com/dat267/pier/ai"
+	"github.com/dat267/pier/coding"
+	"github.com/dat267/pier/tui"
 )
 
 // Port of the helper layer of src/modes/interactive/interactive-mode.ts (the
@@ -119,9 +119,11 @@ func QuoteIfNeeded(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
-// FormatResumeCommand builds the `pi --session …` resume command, or "" when
-// the session cannot be resumed from the shell.
-func FormatResumeCommand(manager *coding.SessionManager, stdoutIsTTY bool) string {
+// FormatResumeCommand builds the resume command for the running executable
+// (upstream's `pi --session …` with its APP_NAME constant; the port threads
+// the executable name), or "" when the session cannot be resumed from the
+// shell.
+func FormatResumeCommand(manager *coding.SessionManager, appName string, stdoutIsTTY bool) string {
 	if !stdoutIsTTY {
 		return ""
 	}
@@ -135,7 +137,10 @@ func FormatResumeCommand(manager *coding.SessionManager, stdoutIsTTY bool) strin
 	if _, err := os.Stat(sessionFile); err != nil {
 		return ""
 	}
-	args := []string{coding.AppName}
+	if appName == "" {
+		appName = coding.AppName
+	}
+	args := []string{appName}
 	if !manager.UsesDefaultSessionDir() {
 		args = append(args, "--session-dir", QuoteIfNeeded(manager.GetSessionDir()))
 	}

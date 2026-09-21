@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of core/session-manager.ts (v3 JSONL session trees) and the

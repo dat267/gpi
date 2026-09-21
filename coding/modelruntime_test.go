@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Round 100 tests: the ModelRuntime composition/availability/credential

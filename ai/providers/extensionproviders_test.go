@@ -3,7 +3,7 @@ package providers
 import (
 	"testing"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // TestExtensionProvidersRegistered covers the two user provider extensions:

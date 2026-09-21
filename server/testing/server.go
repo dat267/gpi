@@ -1,7 +1,7 @@
 package testing
 
 import (
-	"github.com/dat267/gpi/server"
+	"github.com/dat267/pier/server"
 )
 
 // TestServerOptions configure CreateTestServer.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of core/messages.ts convertToLlm and the custom AgentMessage shapes

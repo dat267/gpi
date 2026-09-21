@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/dat267/gpi/tui"
+	"github.com/dat267/pier/tui"
 )
 
 // Port of src/modes/interactive/components/tool-execution.ts: the tool call

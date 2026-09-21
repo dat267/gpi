@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/chord"
-	"github.com/dat267/gpi/chord/delta"
-	"github.com/dat267/gpi/chord/services"
-	"github.com/dat267/gpi/protocol"
+	"github.com/dat267/pier/chord"
+	"github.com/dat267/pier/chord/delta"
+	"github.com/dat267/pier/chord/services"
+	"github.com/dat267/pier/protocol"
 )
 
 // Client service-layer tests keyed to upstream client.ts: serviceCatalogue,

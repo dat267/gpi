@@ -3,7 +3,7 @@ package coding
 import (
 	"encoding/base64"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of utils/tool-result-images.ts: normalize image blocks returned by tool

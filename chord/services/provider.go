@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/dat267/gpi/chord"
-	"github.com/dat267/gpi/chord/delta"
+	"github.com/dat267/pier/chord"
+	"github.com/dat267/pier/chord/delta"
 )
 
 // Port of src/services/provider.ts and src/services/loopback.ts.

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Bash tool tests keyed to upstream semantics (bash.ts): output truncation

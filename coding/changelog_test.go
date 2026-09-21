@@ -97,10 +97,10 @@ func TestChangelogAgainstUpstreamGolden(t *testing.T) {
 		checkCoreGolden(t, golden, "links "+label, NormalizeChangelogLinks(spec.Markdown, spec.Version))
 	}
 
-	if err := os.MkdirAll("/tmp/gpi-core", 0o755); err != nil {
+	if err := os.MkdirAll("/tmp/pier-core", 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	changelogPath := "/tmp/gpi-core/CHANGELOG.md"
+	changelogPath := "/tmp/pier-core/CHANGELOG.md"
 	if err := os.WriteFile(changelogPath, []byte(corpus.Changelog), 0o644); err != nil {
 		t.Fatalf("write changelog: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestChangelogAgainstUpstreamGolden(t *testing.T) {
 		comparisons = append(comparisons, CompareChangelogVersions(pair[0], pair[1]))
 	}
 	checkCoreGolden(t, golden, "changelog compare", comparisons)
-	missing := ParseChangelog("/tmp/gpi-core/nope.md")
+	missing := ParseChangelog("/tmp/pier-core/nope.md")
 	if missing == nil {
 		missing = []ChangelogEntry{}
 	}
@@ -123,9 +123,9 @@ func TestChangelogAgainstUpstreamGolden(t *testing.T) {
 func TestFooterDataProviderAgainstUpstreamGolden(t *testing.T) {
 	golden := loadCoreGolden(t)
 
-	repo := "/tmp/gpi-core/repo"
-	detached := "/tmp/gpi-core/detached"
-	plain := "/tmp/gpi-core/plain"
+	repo := "/tmp/pier-core/repo"
+	detached := "/tmp/pier-core/detached"
+	plain := "/tmp/pier-core/plain"
 	for _, dir := range []string{filepath.Join(repo, ".git"), filepath.Join(detached, ".git"), plain} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", dir, err)

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/agent"
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/agent"
+	"github.com/dat267/pier/ai"
 )
 
 // Tool tests keyed to upstream tool semantics (truncate.ts, read.ts,

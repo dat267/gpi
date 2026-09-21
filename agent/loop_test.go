@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of the core subset of packages/agent/test/agent-loop.test.ts.

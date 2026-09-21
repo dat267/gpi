@@ -3,7 +3,7 @@ package coding
 import (
 	"fmt"
 
-	"github.com/dat267/gpi/agent"
+	"github.com/dat267/pier/agent"
 )
 
 // Port of core/tools/index.ts: the tool registry and the tool-set

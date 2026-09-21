@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/dat267/gpi/tui"
+	"github.com/dat267/pier/tui"
 )
 
 // Port of src/modes/interactive/components/diff.ts plus the jsdiff

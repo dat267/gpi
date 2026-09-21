@@ -7,9 +7,9 @@ import (
 	"golang.org/x/term"
 	"time"
 
-	"github.com/dat267/gpi/ai"
-	"github.com/dat267/gpi/coding"
-	"github.com/dat267/gpi/tui"
+	"github.com/dat267/pier/ai"
+	"github.com/dat267/pier/coding"
+	"github.com/dat267/pier/tui"
 )
 
 // Port of the InteractiveMode constructor (src/modes/interactive/
@@ -338,7 +338,7 @@ func NewApp(options AppOptions) *App {
 				detected := term.IsTerminal(int(os.Stdout.Fd()))
 				stdoutIsTTY = &detected
 			}
-			return FormatResumeCommand(app.SessionMgr, *stdoutIsTTY)
+			return FormatResumeCommand(app.SessionMgr, options.AppName, *stdoutIsTTY)
 		},
 		FormatResumeMessage: func(command string) string {
 			return "\x1b[2mTo resume this session:\x1b[22m " + command

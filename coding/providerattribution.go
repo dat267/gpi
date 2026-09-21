@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Port of core/provider-attribution.ts: default attribution headers and

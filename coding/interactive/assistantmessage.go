@@ -3,8 +3,8 @@ package interactive
 import (
 	"strings"
 
-	"github.com/dat267/gpi/ai"
-	"github.com/dat267/gpi/tui"
+	"github.com/dat267/pier/ai"
+	"github.com/dat267/pier/tui"
 )
 
 // Port of src/modes/interactive/components/assistant-message.ts: the assistant

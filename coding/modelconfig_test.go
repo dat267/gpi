@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Round 98 tests: models.json loading and validation (core/model-config.ts) and

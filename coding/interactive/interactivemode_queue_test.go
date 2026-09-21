@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dat267/gpi/ai"
-	"github.com/dat267/gpi/coding"
-	"github.com/dat267/gpi/tui"
+	"github.com/dat267/pier/ai"
+	"github.com/dat267/pier/coding"
+	"github.com/dat267/pier/tui"
 )
 
 // queueTestSession implements QueueSession.

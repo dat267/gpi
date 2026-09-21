@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Round 96 tests: the auth.json credential storage (file/in-memory backends,

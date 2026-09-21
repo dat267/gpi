@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/coding"
-	"github.com/dat267/gpi/tui"
+	"github.com/dat267/pier/coding"
+	"github.com/dat267/pier/tui"
 )
 
 func newRunTestWiring(t *testing.T) (*RunWiring, *coding.SettingsManager) {

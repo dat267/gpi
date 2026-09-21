@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dat267/gpi/tui"
+	"github.com/dat267/pier/tui"
 )
 
 // Port of src/core/keybindings.ts: the coding-agent keybinding table (the TUI

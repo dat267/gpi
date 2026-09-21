@@ -3,7 +3,7 @@ package delta
 import (
 	"strings"
 
-	"github.com/dat267/gpi/chord"
+	"github.com/dat267/pier/chord"
 )
 
 // Port of the diff engine half of chord/delta: minimal op emission between

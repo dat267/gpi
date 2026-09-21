@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/protocol"
+	"github.com/dat267/pier/protocol"
 )
 
 // Client tests keyed to upstream (connection.ts, client.ts). An in-memory

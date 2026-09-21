@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // waitForBashEvent polls for a bash-execution-update event with the id.

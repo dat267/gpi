@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dat267/gpi/ai"
+	"github.com/dat267/pier/ai"
 )
 
 // Tests ported from packages/coding-agent/test/model-resolver.test.ts.

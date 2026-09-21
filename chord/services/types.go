@@ -11,8 +11,8 @@
 package services
 
 import (
-	"github.com/dat267/gpi/chord"
-	"github.com/dat267/gpi/chord/delta"
+	"github.com/dat267/pier/chord"
+	"github.com/dat267/pier/chord/delta"
 )
 
 // Port of src/services/errors.ts.
