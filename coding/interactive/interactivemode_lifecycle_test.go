@@ -340,3 +340,36 @@ func errorsNew(message string) error { return &lifecycleTestError{message: messa
 type lifecycleTestError struct{ message string }
 
 func (e *lifecycleTestError) Error() string { return e.message }
+
+// TestLifecycleShutdownStopMode covers the fullscreenExitOutput setting on
+// shutdown (upstream's stop() reads settingsManager.getFullscreenExitOutput()
+// and stopInteractiveTui consumes it).
+func TestLifecycleShutdownStopMode(t *testing.T) {
+	lifecycle, _, exits, _ := newLifecycleTest(t)
+	outputs := []string{}
+	lifecycle.options.StopMode = func(output string) { outputs = append(outputs, output) }
+	lifecycle.options.FullscreenExitOutput = func() string { return "resume-hint" }
+	lifecycle.Shutdown(false)
+	if len(outputs) != 1 || outputs[0] != "resume-hint" {
+		t.Fatalf("stopMode outputs = %v", outputs)
+	}
+	if len(*exits) != 1 || (*exits)[0] != 0 {
+		t.Fatalf("exits = %v", *exits)
+	}
+
+	// Without a setting reader the default is "transcript".
+	lifecycle2, _, _, _ := newLifecycleTest(t)
+	got := ""
+	lifecycle2.options.StopMode = func(output string) { got = output }
+	lifecycle2.Shutdown(false)
+	if got != "transcript" {
+		t.Fatalf("default output = %q", got)
+	}
+
+	// Without a StopMode wiring the shutdown still exits (plain renderer stop).
+	lifecycle3, _, exits3, _ := newLifecycleTest(t)
+	lifecycle3.Shutdown(false)
+	if len(*exits3) != 1 || (*exits3)[0] != 0 {
+		t.Fatalf("exits = %v", *exits3)
+	}
+}

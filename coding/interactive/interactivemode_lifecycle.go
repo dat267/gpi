@@ -71,6 +71,12 @@ type LifecycleOptions struct {
 	DisposeRuntime func()
 	// ResumeCommand builds the resume command ("" to skip).
 	ResumeCommand func() string
+	// StopMode tears the whole mode down (upstream's stop()); the argument is
+	// the fullscreen exit output setting. Nil falls back to Stop.
+	StopMode func(fullscreenExitOutput string)
+	// FullscreenExitOutput reads the fullscreenExitOutput setting (upstream's
+	// settingsManager.getFullscreenExitOutput()).
+	FullscreenExitOutput func() string
 
 	// Platform is "win32" on Windows (suspend support).
 	Platform string
@@ -321,7 +327,7 @@ func (l *Lifecycle) Shutdown(fromSignal bool) {
 		if l.options.Terminal != nil {
 			_ = l.options.Terminal.DrainInput(1000, 0)
 		}
-		l.Stop()
+		l.stopMode()
 		l.options.Exit(0)
 		return
 	}
@@ -332,7 +338,7 @@ func (l *Lifecycle) Shutdown(fromSignal bool) {
 	if l.options.Terminal != nil {
 		_ = l.options.Terminal.DrainInput(1000, 0)
 	}
-	l.Stop()
+	l.stopMode()
 	if l.options.DisposeRuntime != nil {
 		l.options.DisposeRuntime()
 	}
@@ -348,6 +354,21 @@ func (l *Lifecycle) Shutdown(fromSignal bool) {
 		}
 	}
 	l.options.Exit(0)
+}
+
+// stopMode tears the mode down (upstream's stop(), which reads the
+// fullscreenExitOutput setting). Falls back to the plain renderer stop when
+// the mode wiring is absent.
+func (l *Lifecycle) stopMode() {
+	output := "transcript"
+	if l.options.FullscreenExitOutput != nil {
+		output = l.options.FullscreenExitOutput()
+	}
+	if l.options.StopMode != nil {
+		l.options.StopMode(output)
+		return
+	}
+	l.Stop()
 }
 
 // Stop stops the renderer.

@@ -241,8 +241,10 @@ func NewApp(options AppOptions) *App {
 		ShowError:        func(message string) { app.showError(message) },
 		RequestRender:    func() { app.UI.RequestRender(false) },
 		StopThemeWatcher: func() { StopThemeWatcher() },
-		Stop:             func(output string) { app.Lifecycle.StopInteractiveTui(output) },
-		Exit:             options.Exit,
+		// Upstream's fatal path calls stop(), which reads the
+		// fullscreenExitOutput setting.
+		Stop: func(string) { app.StopMode(options.Settings.GetFullscreenExitOutput()) },
+		Exit: options.Exit,
 	}
 
 	// UI state + transcript.
@@ -306,8 +308,7 @@ func NewApp(options AppOptions) *App {
 
 		DisableThemeAutoSync:    func() { StopThemeWatcher() },
 		RecordCrash:             func(kind string, err error) bool { return app.Trust.RecordCrash(kind, err) },
-		CrashReportInstructions: func() string { return app.Trust.CrashReportInstructions() },
-		// Upstream prints "To resume this session: pi --session …" after the
+		CrashReportInstructions: func() string { return app.Trust.CrashReportInstructions() }, // Upstream prints "To resume this session: pi --session …" after the
 		// interactive shutdown (interactive-mode.ts shutdown(), chalk.dim
 		// prefix).
 		ResumeCommand: func() string {
@@ -321,6 +322,8 @@ func NewApp(options AppOptions) *App {
 		FormatResumeMessage: func(command string) string {
 			return "\x1b[2mTo resume this session:\x1b[22m " + command
 		},
+		FullscreenExitOutput: func() string { return options.Settings.GetFullscreenExitOutput() },
+		StopMode:             func(output string) { app.StopMode(output) },
 	})
 
 	app.Startup = &StartupWiring{
@@ -639,6 +642,37 @@ func (a *App) Close() {
 
 // LifecycleCheckShutdown performs a requested shutdown.
 func (a *App) LifecycleCheckShutdown() { a.Lifecycle.CheckShutdownRequested() }
+
+// StopMode tears the whole mode down (upstream's stop()): the active selector,
+// terminal progress, the status indicator, extension terminal input listeners,
+// the footer and its data provider, the session-event subscription, the
+// renderer (with the fullscreen exit output setting) and the signal handlers.
+func (a *App) StopMode(fullscreenExitOutput string) {
+	if a.Commands == nil {
+		// Teardown before Init finished: stop the renderer only.
+		a.Lifecycle.StopInteractiveTui(fullscreenExitOutput)
+		return
+	}
+	a.Commands.Stop(
+		fullscreenExitOutput,
+		func() { a.Slot.DisposeActiveSelector() },
+		func() { a.UIState.ClearExtensionTerminalInputListeners() },
+		func() { a.Footer.Dispose() },
+		func() { a.FooterData.Dispose() },
+		func() {
+			if a.unsubscribe != nil {
+				a.unsubscribe()
+			}
+		},
+		func(output string) {
+			// Upstream only stops the TUI once init completed.
+			if a.Lifecycle.IsInitialized() {
+				a.Lifecycle.StopInteractiveTui(output)
+			}
+		},
+		a.Lifecycle.UnregisterSignalHandlers,
+	)
+}
 
 // RunnerShowChatError appends an error line.
 func (a *App) RunnerShowChatError(message string) { a.Runner.ShowChatError(message) }
