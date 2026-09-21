@@ -401,3 +401,20 @@ func TestEventDispatcherCompaction(t *testing.T) {
 		t.Fatalf("compaction render = %q", lines)
 	}
 }
+
+// TestQueueUpdateRefreshesPendingBanner pins the steering-banner fix: when a
+// queued steering/follow-up message is consumed by the turn, the session
+// emits queue_update and the dispatcher must rebuild the pending-messages
+// banner (upstream calls updatePendingMessagesDisplay). Without the hook the
+// banner kept showing messages that were no longer queued.
+func TestQueueUpdateRefreshesPendingBanner(t *testing.T) {
+	dispatcher, _, _, _ := newEventTestDispatcher(t)
+
+	refreshes := 0
+	dispatcher.UpdatePendingMessagesDisplay = func() { refreshes++ }
+
+	dispatcher.HandleEvent(&coding.SessionEvent{Type: coding.SessionQueueUpdate})
+	if refreshes != 1 {
+		t.Fatalf("queue_update must refresh the pending banner, got %d refreshes", refreshes)
+	}
+}

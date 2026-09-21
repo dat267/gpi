@@ -308,6 +308,7 @@ func NewApp(options AppOptions) *App {
 
 	app.Events = NewEventDispatcher(app.Transcript, app.UIState, app.Footer, app.Settings, app.Session, app.SessionMgr, app.DefaultEditor)
 	app.Events.ShowError = func(message string) { app.showError(message) }
+	app.Events.UpdatePendingMessagesDisplay = app.Queue.UpdatePendingMessagesDisplay
 	app.Events.HideThinkingBlock = options.Settings.GetHideThinkingBlock()
 	app.Events.HiddenThinkingLabel = app.UIState.DefaultHiddenThinkingLabel
 	app.Events.OutputPad = options.Settings.GetOutputPad()

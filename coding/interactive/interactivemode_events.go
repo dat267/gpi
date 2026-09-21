@@ -40,6 +40,10 @@ type EventDispatcher struct {
 	ShowError func(message string)
 	// SuggestBugReport offers the bug-report flow.
 	SuggestBugReport func()
+	// UpdatePendingMessagesDisplay refreshes the queued steering/follow-up
+	// banner. Runs on queue_update so consumed messages clear the banner
+	// (upstream parity: updatePendingMessagesDisplay).
+	UpdatePendingMessagesDisplay func()
 	// FlushCompactionQueue drains the queued compaction messages.
 	FlushCompactionQueue func(willRetry bool)
 	// StartWork runs blocking work off the UI loop. The flush can start a
@@ -136,6 +140,9 @@ func (d *EventDispatcher) HandleEvent(event *coding.SessionEvent) {
 		d.requestRender()
 
 	case coding.SessionQueueUpdate:
+		if d.UpdatePendingMessagesDisplay != nil {
+			d.UpdatePendingMessagesDisplay()
+		}
 		d.requestRender()
 
 	case coding.SessionEntryAppended:
