@@ -34,10 +34,12 @@ type AppSession struct {
 	*coding.AgentSession
 }
 
-// GetToolRenderers resolves a tool's custom renderers. Extension mechanics are
-// out of scope (D41), so this always returns nil and the transcript uses the
-// fallback renderer.
-func (s *AppSession) GetToolRenderers(toolName string) *ToolRenderers { return nil }
+// GetToolRenderers resolves a tool's custom renderers: an extension-registered
+// definition falling back to the built-in one. Extension mechanics are out of
+// scope (D41), so this always resolves to the built-in renderers.
+func (s *AppSession) GetToolRenderers(toolName string) *ToolRenderers {
+	return WithBuiltInRenderers(toolName, nil)
+}
 
 // AppOptions are the booted collaborators the app composes.
 type AppOptions struct {
@@ -105,9 +107,12 @@ type App struct {
 	FooterData    *coding.FooterDataProvider
 	UIState       *InteractiveUIState
 	Transcript    *TranscriptRenderer
-	Queue         *QueueController
-	Events        *EventDispatcher
-	Slot          *SelectorSlot
+	// TranscriptScrollView is the fullscreen transcript scroll view (upstream's
+	// transcriptScrollView).
+	TranscriptScrollView *tui.ScrollView
+	Queue                *QueueController
+	Events               *EventDispatcher
+	Slot                 *SelectorSlot
 
 	Lifecycle    *Lifecycle
 	Startup      *StartupWiring
@@ -548,6 +553,22 @@ func (a *App) Init(ctx context.Context) {
 	}
 	a.Lifecycle.RegisterSignalHandlers()
 	a.Theme.ApplyFromSettings()
+	// Build the shared fullscreen layout (scrollable transcript + fixed dock)
+	// and mount it as the renderer's layout root (upstream init).
+	theme := ActiveTheme()
+	viewport := CreateChatViewport(ChatViewportOptions{
+		Document:            a.DocumentContainer,
+		PendingMessages:     a.PendingMessages,
+		Status:              a.StatusContainer,
+		WidgetsAbove:        a.WidgetAbove,
+		Editor:              a.EditorContainer,
+		WidgetsBelow:        a.WidgetBelow,
+		Footer:              a.FooterContainer,
+		Scrollbar:           tui.ScrollViewScrollbar(a.Settings.GetFullscreenScrollbar()),
+		ScrollbarTrackStyle: func(text string) string { return theme.Fg("scrollbarTrack", text) },
+		ScrollbarThumbStyle: func(text string) string { return theme.Fg("scrollbarThumb", text) },
+	})
+	a.TranscriptScrollView = viewport.Transcript
 	a.Lifecycle.MountInteractiveTui(a.UI, []tui.Component{
 		a.DocumentContainer,
 		a.PendingMessages,
@@ -556,7 +577,7 @@ func (a *App) Init(ctx context.Context) {
 		a.EditorContainer,
 		a.WidgetBelow,
 		a.FooterContainer,
-	}, nil)
+	}, viewport.Root)
 	a.UI.SetFocus(a.DefaultEditor)
 	a.initialized = true
 	a.Lifecycle.MarkInitialized()
