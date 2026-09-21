@@ -326,14 +326,26 @@ func (c *ToolExecutionComponent) updateDisplay() {
 		if c.definition.RenderCall == nil {
 			addChild(c.createResultRegion(c.createCallFallback()))
 			hasContent = true
-		} else if component := safeRenderCall(c.definition.RenderCall, c.args, theme, c.renderContext(c.callRendererComponent)); component != nil {
-			c.callRendererComponent = component
-			addChild(c.createResultRegion(component))
-			hasContent = true
 		} else {
-			c.callRendererComponent = nil
-			addChild(c.createResultRegion(c.createCallFallback()))
-			hasContent = true
+			// Upstream passes the same rendererState object by reference into
+			// every render context (`state: this.rendererState`), so a
+			// renderCall that stores state (edit: the call component with its
+			// async preview) is visible to renderResult. Go contexts are
+			// by-value, so the mutated State must be written back here or the
+			// result renderer loses the call component: the edit header box
+			// stays toolPendingBg and the diff falls to the result section.
+			callContext := c.renderContext(c.callRendererComponent)
+			if component := safeRenderCall(c.definition.RenderCall, c.args, theme, callContext); component != nil {
+				c.rendererState = callContext.State
+				c.callRendererComponent = component
+				addChild(c.createResultRegion(component))
+				hasContent = true
+			} else {
+				c.rendererState = callContext.State
+				c.callRendererComponent = nil
+				addChild(c.createResultRegion(c.createCallFallback()))
+				hasContent = true
+			}
 		}
 
 		if c.result != nil {
@@ -342,17 +354,22 @@ func (c *ToolExecutionComponent) updateDisplay() {
 					addChild(c.createResultRegion(component))
 					hasContent = true
 				}
-			} else if component := safeRenderResult(c.definition.RenderResult, c.result,
-				ToolRenderResultOptions{Expanded: c.expanded, IsPartial: c.isPartial},
-				theme, c.renderContext(c.resultRendererComponent)); component != nil {
-				c.resultRendererComponent = component
-				addChild(c.createResultRegion(component))
-				hasContent = true
 			} else {
-				c.resultRendererComponent = nil
-				if component := c.createResultFallback(); component != nil {
+				resultContext := c.renderContext(c.resultRendererComponent)
+				if component := safeRenderResult(c.definition.RenderResult, c.result,
+					ToolRenderResultOptions{Expanded: c.expanded, IsPartial: c.isPartial},
+					theme, resultContext); component != nil {
+					c.rendererState = resultContext.State
+					c.resultRendererComponent = component
 					addChild(c.createResultRegion(component))
 					hasContent = true
+				} else {
+					c.rendererState = resultContext.State
+					c.resultRendererComponent = nil
+					if component := c.createResultFallback(); component != nil {
+						addChild(c.createResultRegion(component))
+						hasContent = true
+					}
 				}
 			}
 		}
