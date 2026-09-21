@@ -30,6 +30,13 @@ type TUI interface {
 	AddInputListener(listener TuiInputListener) func()
 	RemoveInputListener(listener TuiInputListener)
 	RenderNow(force bool)
+	// RenderTicks delivers coalesced render requests when the renderer runs in
+	// loop mode (EnableRenderTicks); nil otherwise.
+	RenderTicks() <-chan struct{}
+	// EnableRenderTicks switches the renderer to caller-driven rendering.
+	EnableRenderTicks()
+	// RenderCount reports completed paints (test seam).
+	RenderCount() int64
 	RequestRender(force bool)
 	SetFocus(component Component)
 	ShowOverlay(component Component, options *OverlayOptions) OverlayHandle
@@ -106,6 +113,15 @@ func (r *TuiReference) RemoveInputListener(listener TuiInputListener) {
 
 // RenderNow renders immediately.
 func (r *TuiReference) RenderNow(force bool) { r.get().RenderNow(force) }
+
+// RenderTicks forwards the active renderer's tick channel.
+func (r *TuiReference) RenderTicks() <-chan struct{} { return r.get().RenderTicks() }
+
+// EnableRenderTicks switches the active renderer to caller-driven rendering.
+func (r *TuiReference) EnableRenderTicks() { r.get().EnableRenderTicks() }
+
+// RenderCount forwards the active renderer's paint count.
+func (r *TuiReference) RenderCount() int64 { return r.get().RenderCount() }
 
 // RequestRender requests a render.
 func (r *TuiReference) RequestRender(force bool) { r.get().RequestRender(force) }

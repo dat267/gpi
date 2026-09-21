@@ -290,3 +290,34 @@ func TestRunLoopAppliesEventsWhileTurnRuns(t *testing.T) {
 		t.Fatal("run loop did not exit within 2s of cancellation")
 	}
 }
+
+// TestDrainReadyEventsRendersOncePerBurst asserts the stage-2 coalescing
+// contract at the loop level: N queued events drain into a single paint.
+func TestDrainReadyEventsRendersOncePerBurst(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+
+	var applied int64
+	app.Events.CheckShutdownRequested = func() { atomic.AddInt64(&applied, 1) }
+
+	wiring := app.Runner
+	const burst = 32
+	for i := 0; i < burst; i++ {
+		app.sessionEvents.enqueue(&coding.SessionEvent{Type: coding.SessionAgentSettled})
+	}
+	for i := 0; i < burst; i++ {
+		app.sessionEvents.enqueue(&coding.SessionEvent{Type: coding.SessionMessageUpdate})
+	}
+
+	// One drain applies the whole burst; one paint follows.
+	before := app.UI.RenderCount()
+	wiring.drainReadyEvents()
+	wiring.renderUI()
+
+	if got := atomic.LoadInt64(&applied); got != burst {
+		t.Fatalf("applied %d terminal events, want %d", got, burst)
+	}
+	if got := app.UI.RenderCount() - before; got != 1 {
+		t.Fatalf("renders for one burst = %d, want 1", got)
+	}
+}

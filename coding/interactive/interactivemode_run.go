@@ -447,6 +447,54 @@ func (w *RunWiring) Run(ctx context.Context, options InitOptions, runOptions Run
 	w.runLoop(ctx, initial)
 }
 
+// renderTicks returns the active renderer's tick channel (nil when the
+// renderer has its own timer, e.g. in tests that drive RenderNow directly).
+func (w *RunWiring) renderTicks() <-chan struct{} {
+	if w.UI == nil {
+		return nil
+	}
+	return w.UI.RenderTicks()
+}
+
+// drainReadyEvents applies every session event that is already queued. The
+// caller then paints once (loop-side coalescing).
+func (w *RunWiring) drainReadyEvents() {
+	for {
+		select {
+		case event, ok := <-w.SessionEvents:
+			if !ok {
+				w.SessionEvents = nil
+				continue
+			}
+			if w.Events != nil {
+				w.Events.HandleEvent(event)
+			}
+			continue
+		default:
+		}
+		select {
+		case event, ok := <-w.PartialEvents:
+			if !ok {
+				w.PartialEvents = nil
+				continue
+			}
+			if w.Events != nil {
+				w.Events.HandleEvent(event)
+			}
+			continue
+		default:
+		}
+		return
+	}
+}
+
+// renderUI paints the current state (loop goroutine only).
+func (w *RunWiring) renderUI() {
+	if w.UI != nil {
+		w.UI.RenderNow(false)
+	}
+}
+
 // runnerWorkState is the loop-owned work bookkeeping: at most one blocking
 // unit (a turn, a compaction-queue flush) runs at a time, with the rest
 // queued. Nothing here is shared with other goroutines: only the loop
@@ -551,6 +599,11 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 			if w.Events != nil {
 				w.Events.HandleEvent(event)
 			}
+		case <-w.renderTicks():
+			// Coalesce: apply every event already queued, then paint once, so
+			// a burst of N messages produces one render rather than N.
+			w.drainReadyEvents()
+			w.renderUI()
 		case text := <-inputsCh:
 			w.startWork(func(context.Context) error { return w.Prompt(ctx, text) })
 		case err := <-doneCh:

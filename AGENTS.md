@@ -96,6 +96,21 @@ invented to bridge that gap). Stage 1 has landed:
 - **D143** records the divergence: upstream is single-threaded (await +
   microtask order), the port is an explicit select loop with off-loop work and
   partial coalescing.
+Stage 2 (rendering on the loop) has landed:
+
+- **`Renderer.EnableRenderTicks`** (`tui/render.go`) switches a renderer from
+  its internal timer to a caller-driven mode: `RequestRender` coalesces onto a
+  capacity-1 `renderTicks` channel (a channel send, so no callback runs under
+  the renderer lock) and no longer arms a timer. The app's renderers enable it
+  in `CreateInteractiveTui`. Channel default (timer + throttle) remains for the
+  standalone session picker and library users.
+- The run loop selects on `UI.RenderTicks()`, drains every already-queued
+  session event (`RunWiring.drainReadyEvents`) and paints once
+  (`renderUI`), so a burst of N messages produces one render, not N.
+- `Renderer.RenderCount()` counts paints (test seam).
+- **D144**: the interactive renderer is caller-driven (the loop owns the frame
+  schedule) where upstream schedules its own throttled frames.
+
 - Stage 1 also fixed the read side of `coding.SessionManager`
   (`GetEntries`, `BuildContextEntriesForLeaf`, `BuildSessionContext` now take
   `m.mu`; `AppendCompaction`/`GetSessionName` use the locked helpers): those
@@ -164,8 +179,8 @@ user code under a lock, snapshot under and deliver outside.
 
 | Lock | Where | Protects | Order | Retirement |
 |---|---|---|---|---|
-| `Renderer.renderMu` | `tui/render.go:166` | render vs input dispatch (D84) | A | stage 2 (renders move to the loop) |
-| `Renderer.mu` | `tui/render.go:172` | focus, input listeners, posted queue, stopped flag, render timers | B | stage 2/3 (loop-owned) |
+| `Renderer.renderMu` | `tui/render.go` | render vs input dispatch (D84) | A | **stage 2: the timer is gone; this lock now only serializes the loop's paint against the TUI input goroutine, so stage 3 removes it with the input move** |
+| `Renderer.mu` | `tui/render.go` | focus, input listeners, posted queue, stopped flag, tick channel | B | stage 3/4 (loop-owned once input and the remaining callers move) |
 | `Container.mu` | `tui/component.go:190` | child list + render cache (event goroutines vs render, D136 class) | B, parent→child | stage 1 (events arrive on the loop) |
 | `Editor.mu` | `tui/editor.go:70` | buffer, cursor, history (D136) | B | stage 1 (input on the loop) |
 | `AltScreen.mu` | `tui/altscreen.go:142` | fullscreen scroll/selection/scrollback (D138) | B | stage 3 (input + tick on the loop) |
@@ -254,6 +269,10 @@ summarized in the README scoreboard. The range is **D1–D139**. Representative:
   is retired in stage 1 (the submission handoff is a buffered channel); the
   others retire in stages 3-4.
 - D132 — branch summarization is tracked as compaction and abortable.
+- D144 — the interactive renderer runs in caller-driven tick mode (the run
+  loop coalesces render requests and paints once per drain) instead of
+  arming its own throttled render timer; the standalone session picker and
+  library users keep the timer.
 - D143 — the interactive run loop is an explicit `select` over producer
   channels (session events, submissions, work completion, `ctx.Done()`) with
   blocking work off-loop and latest-wins coalescing for streaming partials,

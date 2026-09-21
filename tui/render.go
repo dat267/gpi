@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -164,6 +165,13 @@ type Renderer struct {
 	// handling: Go's timer-driven renders run on other goroutines, while
 	// upstream's event loop is single-threaded (divergence D84).
 	renderMu sync.Mutex
+	// renderTicks, when non-nil, replaces the render timer: requestRender
+	// signals on it (capacity 1, so bursts coalesce) and the owner renders on
+	// its own goroutine (stage 2 of the UI-loop refactor). A channel send,
+	// rather than a callback, keeps user code out of the renderer lock.
+	renderTicks chan struct{}
+	// renderCount counts completed paints (test seam for coalescing).
+	renderCount int64
 
 	// mu guards the render scheduling, focus, overlay, and listener state.
 	// Upstream is single-threaded (Node's event loop); the Go port drives the
@@ -317,6 +325,40 @@ func (t *Renderer) RemoveInputListener(listener TuiInputListener) {
 	}
 }
 
+// EnableRenderTicks switches the renderer from its internal timer to the
+// caller-driven tick channel: requestRender signals RenderTicks() instead of
+// arming a timer, and the owner renders with RenderNow. Bursts coalesce in the
+// capacity-1 channel.
+func (t *Renderer) EnableRenderTicks() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.renderTicks == nil {
+		t.renderTicks = make(chan struct{}, 1)
+	}
+}
+
+// RenderTicks returns the render-request channel (nil until EnableRenderTicks).
+func (t *Renderer) RenderTicks() <-chan struct{} {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.renderTicks
+}
+
+// RenderCount reports completed paints (test seam).
+func (t *Renderer) RenderCount() int64 { return atomic.LoadInt64(&t.renderCount) }
+
+// signalRenderLocked coalesces a render request onto the tick channel.
+// Callers hold the lock; a channel send is not user code, so it is safe here.
+func (t *Renderer) signalRenderLocked() {
+	if t.renderTicks == nil {
+		return
+	}
+	select {
+	case t.renderTicks <- struct{}{}:
+	default:
+	}
+}
+
 // RenderNow renders immediately.
 func (t *Renderer) RenderNow(force bool) {
 	t.mu.Lock()
@@ -356,6 +398,12 @@ func (t *Renderer) requestRenderLocked(force bool) {
 		t.requestImmediateRenderLocked()
 		return
 	}
+	if t.renderTicks != nil {
+		// Loop mode: coalesce onto the tick channel instead of arming a timer.
+		t.renderRequested = true
+		t.signalRenderLocked()
+		return
+	}
 	if t.renderRequested {
 		return
 	}
@@ -367,6 +415,12 @@ func (t *Renderer) requestRenderLocked(force bool) {
 // lock. Auto-render is disabled in tests (D83), including this path.
 func (t *Renderer) requestImmediateRenderLocked() {
 	if t.autoRenderDisabled {
+		return
+	}
+	if t.renderTicks != nil {
+		// Loop mode: input latency is the loop's business; just signal.
+		t.renderRequested = true
+		t.signalRenderLocked()
 		return
 	}
 	t.cancelRenderTimerLocked()
@@ -444,6 +498,7 @@ func (t *Renderer) doRender() {
 	if t.DoRender != nil {
 		t.DoRender()
 	}
+	atomic.AddInt64(&t.renderCount, 1)
 }
 
 // Post schedules fn to run on the UI side: drained at the next render, under

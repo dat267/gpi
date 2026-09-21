@@ -28,8 +28,22 @@ var clipboardCopier CopySelectionFn
 // SetClipboardCopier installs the clipboard copier (D106).
 func SetClipboardCopier(copier CopySelectionFn) { clipboardCopier = copier }
 
-// CreateInteractiveTui builds the renderer for the requested mode.
+// CreateInteractiveTui builds the renderer for the requested mode. The
+// interactive mode drives rendering from its own loop, so the renderer's
+// internal timer is replaced by the tick channel (stage 2).
 func CreateInteractiveTui(options InteractiveTuiOptions) tui.TUI {
+	return withRenderTicks(createInteractiveTui(options))
+}
+
+// withRenderTicks switches a freshly created renderer to loop-driven rendering.
+func withRenderTicks(screen tui.TUI) tui.TUI {
+	if screen != nil {
+		screen.EnableRenderTicks()
+	}
+	return screen
+}
+
+func createInteractiveTui(options InteractiveTuiOptions) tui.TUI {
 	terminal := options.Terminal
 	if terminal == nil {
 		terminal = tui.NewProcessTerminal(nil, nil)
