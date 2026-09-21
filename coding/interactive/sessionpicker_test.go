@@ -14,10 +14,12 @@ import (
 type scriptedTerminal struct {
 	fakeRendererTerminal
 	onInput func(string)
+	started chan struct{}
 }
 
 func (s *scriptedTerminal) Start(onInput func(string), onResize func()) {
 	s.onInput = onInput
+	close(s.started)
 }
 
 func TestSelectSessionSelects(t *testing.T) {
@@ -35,7 +37,7 @@ func TestSelectSessionSelects(t *testing.T) {
 		return sessions, nil
 	}
 
-	terminal := &scriptedTerminal{fakeRendererTerminal: fakeRendererTerminal{width: 80, height: 24}}
+	terminal := &scriptedTerminal{fakeRendererTerminal: fakeRendererTerminal{width: 80, height: 24}, started: make(chan struct{})}
 	type result struct {
 		path string
 	}
@@ -50,9 +52,12 @@ func TestSelectSessionSelects(t *testing.T) {
 	}()
 
 	time.Sleep(200 * time.Millisecond)
-	if terminal.onInput == nil {
+	select {
+	case <-terminal.started:
+	case <-time.After(5 * time.Second):
 		t.Fatal("picker never started the terminal input pump")
 	}
+	time.Sleep(200 * time.Millisecond) // let the loads settle and render
 	terminal.onInput("\r")
 
 	select {
@@ -76,7 +81,7 @@ func TestSelectSessionCancel(t *testing.T) {
 		return nil, nil
 	}
 
-	terminal := &scriptedTerminal{fakeRendererTerminal: fakeRendererTerminal{width: 80, height: 24}}
+	terminal := &scriptedTerminal{fakeRendererTerminal: fakeRendererTerminal{width: 80, height: 24}, started: make(chan struct{})}
 	done := make(chan string, 1)
 	go func() {
 		done <- SelectSession(SelectSessionOptions{
@@ -87,6 +92,12 @@ func TestSelectSessionCancel(t *testing.T) {
 	}()
 
 	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-terminal.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("picker never started the terminal input pump")
+	}
+	time.Sleep(200 * time.Millisecond) // let the loads settle and render
 	terminal.onInput("\x1b")
 
 	select {

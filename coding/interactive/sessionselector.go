@@ -850,6 +850,12 @@ type SessionSelectorComponent struct {
 	allLoad     context.CancelFunc
 	loads       sync.WaitGroup
 
+	// pendingApply holds loader-result mutations queued from the load
+	// goroutine and drained inside Render, which runs under the renderer's
+	// lock alongside input handling. Applying directly from the goroutine
+	// raced the render timer (same class as D136-D139).
+	pendingApply []func()
+
 	mode             string // "list" | "rename"
 	renameInput      *tui.Input
 	renameTargetPath string
@@ -981,6 +987,20 @@ func NewSessionSelectorComponent(currentSessionsLoader SessionsLoader, allSessio
 	return component
 }
 
+// Render drains queued load results (under the renderer's lock, serialized
+// with input handling) before rendering.
+func (c *SessionSelectorComponent) Render(width int) []string {
+	c.mu.Lock()
+	pending := c.pendingApply
+	c.pendingApply = nil
+	c.mu.Unlock()
+	for _, apply := range pending {
+		apply()
+	}
+	return c.Container.Render(width)
+}
+
+// requestRenderNow schedules a render.
 func (c *SessionSelectorComponent) requestRenderNow() {
 	if c.requestRender != nil {
 		c.requestRender()
@@ -988,8 +1008,17 @@ func (c *SessionSelectorComponent) requestRenderNow() {
 }
 
 // WaitForPendingLoads blocks until the in-flight loads have been applied
-// (test seam, D103).
-func (c *SessionSelectorComponent) WaitForPendingLoads() { c.loads.Wait() }
+// (test seam, D103) and drains any queued result mutations.
+func (c *SessionSelectorComponent) WaitForPendingLoads() {
+	c.loads.Wait()
+	c.mu.Lock()
+	pending := c.pendingApply
+	c.pendingApply = nil
+	c.mu.Unlock()
+	for _, apply := range pending {
+		apply()
+	}
+}
 
 func (c *SessionSelectorComponent) buildBaseLayout(content tui.Component, showHeader bool) {
 	c.Container.Clear()
@@ -1183,19 +1212,26 @@ func (c *SessionSelectorComponent) loadScope(scope SessionScope) {
 					c.allSessions = sessions
 				}
 				activeScope := c.scope
-				c.mu.Unlock()
 				if scope == activeScope {
-					c.sessionList.SetSessions(sessions, showCwd)
+					snapshot := sessions
+					c.pendingApply = append(c.pendingApply, func() {
+						c.sessionList.SetSessions(snapshot, showCwd)
+					})
 				}
+				c.mu.Unlock()
 			}
 			c.mu.Lock()
 			activeScope := c.scope
-			c.mu.Unlock()
-			if scope != activeScope {
-				return
+			if scope == activeScope {
+				loadedSnapshot, totalSnapshot := loaded, total
+				c.pendingApply = append(c.pendingApply, func() {
+					c.header.SetProgress(loadedSnapshot, totalSnapshot)
+				})
 			}
-			c.header.SetProgress(loaded, total)
-			c.requestRenderNow()
+			c.mu.Unlock()
+			if scope == activeScope {
+				c.requestRenderNow()
+			}
 		}
 
 		loader := c.currentSessionsLoader
@@ -1216,21 +1252,27 @@ func (c *SessionSelectorComponent) loadScope(scope SessionScope) {
 			c.allLoad = nil
 		}
 		activeScope := c.scope
+		var apply func()
+		if scope == activeScope {
+			if err != nil {
+				message := err.Error()
+				apply = func() {
+					c.header.SetLoading(false)
+					c.header.SetStatusMessage(&sessionStatusMessage{Type: "error", Message: "Failed to load sessions: " + message}, 4000)
+					c.sessionList.SetSessions(nil, showCwd)
+				}
+			} else {
+				apply = func() {
+					c.header.SetLoading(false)
+					c.sessionList.SetSessions(sessions, showCwd)
+				}
+			}
+			c.pendingApply = append(c.pendingApply, apply)
+		}
 		c.mu.Unlock()
-		if scope != activeScope {
-			return
-		}
-		if err != nil {
-			message := err.Error()
-			c.header.SetLoading(false)
-			c.header.SetStatusMessage(&sessionStatusMessage{Type: "error", Message: "Failed to load sessions: " + message}, 4000)
-			c.sessionList.SetSessions(nil, showCwd)
+		if scope == activeScope {
 			c.requestRenderNow()
-			return
 		}
-		c.header.SetLoading(false)
-		c.sessionList.SetSessions(sessions, showCwd)
-		c.requestRenderNow()
 	}()
 }
 
