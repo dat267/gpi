@@ -88,6 +88,10 @@ type AppOptions struct {
 type App struct {
 	options AppOptions
 
+	// initialUI is the renderer created at composition time; the lifecycle
+	// swaps it on /tui switches and the exit replay.
+	initialUI tui.TUI
+
 	UI          tui.TUI
 	Theme       *InteractiveThemeController
 	Settings    *coding.SettingsManager
@@ -180,20 +184,21 @@ func NewApp(options AppOptions) *App {
 	// Renderer + theme. app.UI is the stable forwarding reference (upstream's
 	// createInteractiveTuiReference(() => this.renderer)): SwitchTuiMode swaps
 	// the lifecycle's renderer and every holder of app.UI follows it.
-	initialUI := CreateInteractiveTui(InteractiveTuiOptions{
+	aInitialUI := CreateInteractiveTui(InteractiveTuiOptions{
 		TuiMode:                options.TuiMode,
 		ShowHardwareCursor:     options.Settings.GetShowHardwareCursor(),
 		LogDirectory:           options.AgentDir,
 		Terminal:               terminal,
 		FullscreenCopyOnSelect: appBoolPtr(options.Settings.GetFullscreenCopyOnSelect()),
 	})
+	app.initialUI = aInitialUI
 	app.UI = tui.NewTuiReference(func() tui.TUI {
 		if app.Lifecycle != nil {
 			if current := app.Lifecycle.CurrentUI(); current != nil {
 				return current
 			}
 		}
-		return initialUI
+		return app.initialUI
 	})
 	app.UI.SetClearOnShrink(options.Settings.GetClearOnShrink())
 	app.Theme = NewInteractiveThemeController(ThemeControllerOptions{
@@ -304,7 +309,7 @@ func NewApp(options AppOptions) *App {
 	app.UIState.RenderWidgets()
 
 	app.Lifecycle = NewLifecycle(LifecycleOptions{
-		UI:           initialUI,
+		UI:           aInitialUI,
 		Session:      app.Session,
 		Settings:     app.Settings,
 		Terminal:     terminal,
@@ -607,7 +612,7 @@ func (a *App) Init(ctx context.Context) {
 		ScrollbarThumbStyle: func(text string) string { return theme.Fg("scrollbarThumb", text) },
 	})
 	a.TranscriptScrollView = viewport.Transcript
-	a.Lifecycle.MountInteractiveTui(a.UI, []tui.Component{
+	a.Lifecycle.MountInteractiveTui(a.currentRenderer(), []tui.Component{
 		a.DocumentContainer,
 		a.PendingMessages,
 		a.StatusContainer,
@@ -658,6 +663,17 @@ func (a *App) Close() {
 
 // LifecycleCheckShutdown performs a requested shutdown.
 func (a *App) LifecycleCheckShutdown() { a.Lifecycle.CheckShutdownRequested() }
+
+// currentRenderer returns the concrete active renderer (upstream's
+// this.renderer); app.UI is the forwarding reference.
+func (a *App) currentRenderer() tui.TUI {
+	if a.Lifecycle != nil {
+		if current := a.Lifecycle.CurrentUI(); current != nil {
+			return current
+		}
+	}
+	return a.initialUI
+}
 
 // StopMode tears the whole mode down (upstream's stop()): the active selector,
 // terminal progress, the status indicator, extension terminal input listeners,

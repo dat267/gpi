@@ -91,7 +91,11 @@ load-bearing (see below).
 
 ## Conventions and gotchas
 
-- **Locking (hard-won).** Never call out to user code / callbacks while holding
+- **Locking (hard-won).** `tui.Container` methods lock `Container.mu`
+  (session-event goroutines mutate the chat/document containers while the
+  render timer renders them; upstream is single-threaded). Locks always nest
+  parent→child; callbacks/invalidate fan-out is snapshotted under the lock and
+  delivered outside it. Never call out to user code / callbacks while holding
   a mutex; the callback may re-enter the same object or trigger shutdown.
   `Render` runs under the render lock and takes component locks; input runs
   under the render lock but not the renderer lock. Known-good patterns:

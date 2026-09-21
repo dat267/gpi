@@ -132,3 +132,7 @@ func (r *TuiReference) Clear() { r.get().Clear() }
 var _ TUI = (*TuiReference)(nil)
 
 var _ TUI = (*TuiReference)(nil)
+
+// Current returns the active renderer (for code that must type-assert the
+// concrete renderer, upstream's this.renderer).
+func (r *TuiReference) Current() TUI { return r.get() }

@@ -167,10 +167,19 @@ func (w *SettingsWiring) BuildSettingsConfig() SettingsConfig {
 
 // TuiMode reports the renderer mode ("" for the regular renderer).
 func TuiMode(ui tui.TUI) string {
-	if _, ok := ui.(*tui.AltScreen); ok {
+	if _, ok := tuiConcrete(ui).(*tui.AltScreen); ok {
 		return "fullscreen"
 	}
 	return "regular"
+}
+
+// tuiConcrete unwraps the UI forwarding reference so type assertions see the
+// active renderer (upstream reads this.renderer where the port holds app.UI).
+func tuiConcrete(ui tui.TUI) tui.TUI {
+	if reference, ok := ui.(*tui.TuiReference); ok {
+		return reference.Current()
+	}
+	return ui
 }
 
 func warningSettingsFromCoding(warnings coding.SettingsWarnings) WarningSettings {
@@ -376,7 +385,7 @@ func (w *SettingsWiring) BuildSettingsCallbacks(done func(), refresh func()) Set
 		},
 		OnFullscreenCopyOnSelectChange: func(enabled bool) {
 			settings.SetFullscreenCopyOnSelect(enabled)
-			if renderer, ok := w.Renderer.(*tui.AltScreen); ok {
+			if renderer, ok := tuiConcrete(w.Renderer).(*tui.AltScreen); ok {
 				renderer.SetCopyOnSelect(enabled)
 			}
 		},

@@ -230,7 +230,7 @@ func (w *CommandWiring) HandleBugCommand(ctx context.Context, hint string) {
 // HandleCopyCommand copies the selection or the last assistant message.
 func (w *CommandWiring) HandleCopyCommand(flashConfirmation bool, preferSelection bool) {
 	if preferSelection {
-		if altScreen, ok := w.UI.(*tui.AltScreen); ok && !altScreen.GetCopyOnSelect() && altScreen.HasActiveSelection() {
+		if altScreen, ok := tuiConcrete(w.UI).(*tui.AltScreen); ok && !altScreen.GetCopyOnSelect() && altScreen.HasActiveSelection() {
 			if w.CopyActiveSelection != nil {
 				w.CopyActiveSelection()
 				return
@@ -254,7 +254,7 @@ func (w *CommandWiring) HandleCopyCommand(flashConfirmation bool, preferSelectio
 		return
 	}
 	if flashConfirmation {
-		if altScreen, isAlt := w.UI.(*tui.AltScreen); isAlt {
+		if altScreen, isAlt := tuiConcrete(w.UI).(*tui.AltScreen); isAlt {
 			altScreen.Flash("Copied!", 0)
 			return
 		}
