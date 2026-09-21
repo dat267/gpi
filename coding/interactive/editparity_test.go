@@ -11,17 +11,16 @@ import (
 )
 
 // TestEditToolRenderUpstreamParity pins the edit tool block's rendered bytes
-// against upstream. The golden was produced by driving upstream's
-// ToolExecutionComponent + editRenderers with the same file, edits, result
-// and width via node (probe: /tmp/parity/editprobe.mjs, node 26 type
-// stripping) and dumping component.render(80) as JSON lines:
+// against the installed upstream (pi 0.86.1 bundle, chunk-CMRUVXTE.js). The
+// golden was produced by driving its ToolExecutionComponent +
+// createEditToolDefinition with the same file, edits, result and width via
+// node (probe: /tmp/parity/editprobe-0861.mjs, FORCE_COLOR=1 so
+// chalk.inverse parity holds) and dumping component.render(80) as JSON lines.
 //
-//	"=== component render(80) ===" section of the probe output.
-//
-// It covers both reported visuals: the bg-tinted box around the
-// "edit <path>" header (upstream draws it too: 2 tinted padding lines +
-// header line inside toolSuccessBg) and the diff line formatting
-// ("-1 ", "+1 ", " 2 " context normalization).
+// It covers the self-shell layout (single Box(1,1): one space horizontal
+// padding, one blank line vertical padding — 0.86.1 added
+// renderShell:"self"; the 0.86.0 checkout renders a nested double box) and
+// the diff line formatting ("-1 ", "+1 ", " 2 " context normalization).
 func TestEditToolRenderUpstreamParity(t *testing.T) {
 	dir := "/tmp/pier_parity"
 	if err := os.MkdirAll(dir, 0o755); err != nil {

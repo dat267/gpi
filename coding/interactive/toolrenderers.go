@@ -1132,6 +1132,10 @@ func toolDetailsFrom[T any](details any) *T {
 }
 
 var editRenderers = ToolRenderers{
+	// Upstream 0.86.1 renders the edit block through the self shell: the
+	// block is a single Box(1,1) (one space horizontal padding, one blank
+	// line vertical padding), not nested inside the tool content box.
+	RenderShell: "self",
 	RenderCall: func(args any, theme *Theme, context *ToolRenderContext) tui.Component {
 		var component *editCallComponent
 		if box, ok := context.LastComponent.(*editCallComponent); ok {
