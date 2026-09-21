@@ -3,6 +3,7 @@ package interactive
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -155,9 +156,18 @@ func TestRunInitQuiet(t *testing.T) {
 // TestRunLoop covers the run orchestration and main loop.
 func TestRunLoop(t *testing.T) {
 	wiring, _ := newRunTestWiring(t)
-	// The startup wiring's input queue feeds the loop.
+	// The startup wiring's input queue feeds the loop. Prompts run on the
+	// loop's work goroutine (stage 1), so the recorder is test-guarded.
+	var promptsMu sync.Mutex
 	prompts := []string{}
+	recordedPrompts := func() []string {
+		promptsMu.Lock()
+		defer promptsMu.Unlock()
+		return append([]string{}, prompts...)
+	}
 	wiring.Prompt = func(_ context.Context, text string) error {
+		promptsMu.Lock()
+		defer promptsMu.Unlock()
 		prompts = append(prompts, text)
 		return nil
 	}
@@ -167,9 +177,11 @@ func TestRunLoop(t *testing.T) {
 	wiring.ShowStatus = func(message string) { statuses = append(statuses, message) }
 
 	ctx, cancel := context.WithCancel(context.Background())
+	// The submission channel is buffered, so the loop picks this up in order
+	// after the seeded initial messages.
+	wiring.Startup.QueueUserInput("loop input")
 	go func() {
-		waitForCondition(t, func() bool { return wiring.Startup.HasInputWaiter() })
-		wiring.Startup.QueueUserInput("loop input")
+		waitForConditionWithin(t, func() bool { return len(recordedPrompts()) >= 3 }, 5*time.Second)
 		cancel()
 	}()
 	wiring.Run(ctx, InitOptions{QuietStartup: true}, RunOptions{
@@ -182,6 +194,7 @@ func TestRunLoop(t *testing.T) {
 		InitialMessages:      []string{"second"},
 	})
 
+	prompts = recordedPrompts()
 	if len(prompts) != 3 || prompts[0] != "initial" || prompts[1] != "second" || prompts[2] != "loop input" {
 		t.Fatalf("prompts = %v", prompts)
 	}

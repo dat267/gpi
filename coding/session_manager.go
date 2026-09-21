@@ -392,7 +392,7 @@ func (m *SessionManager) AppendCompaction(summary string, firstKeptEntryID strin
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
-	context := m.BuildSessionContext()
+	context := m.buildSessionContextLocked()
 	systemMessage := ai.GetCurrentSystemMessage(context.Messages)
 	entry := m.nextEntry("compaction")
 	entry.Timestamp = timestamp
@@ -437,7 +437,7 @@ var newlinePattern = regexp.MustCompile(`[\r\n]+`)
 func (m *SessionManager) GetSessionName() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	entries := m.GetEntries()
+	entries := m.getEntriesLocked()
 	for i := len(entries) - 1; i >= 0; i-- {
 		if entries[i].Type == "session_info" && entries[i].Name != nil {
 			name := strings.TrimSpace(*entries[i].Name)
@@ -534,20 +534,36 @@ func (m *SessionManager) GetBranch(fromID string) []SessionEntry {
 // BuildContextEntriesForLeaf builds the active compaction-aware entry list
 // from the current leaf.
 func (m *SessionManager) BuildContextEntriesForLeaf() []SessionEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.buildContextEntriesForLeafLocked()
+}
+
+// buildContextEntriesForLeafLocked is BuildContextEntriesForLeaf for callers
+// already holding m.mu.
+func (m *SessionManager) buildContextEntriesForLeafLocked() []SessionEntry {
 	leafID := ""
 	if m.leafID != nil {
 		leafID = *m.leafID
 	}
-	return BuildContextEntries(m.GetEntries(), &leafID, m.byID)
+	return BuildContextEntries(m.getEntriesLocked(), &leafID, m.byID)
 }
 
 // BuildSessionContext builds the LLM context from the current leaf.
 func (m *SessionManager) BuildSessionContext() SessionContext {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.buildSessionContextLocked()
+}
+
+// buildSessionContextLocked is BuildSessionContext for callers already holding
+// m.mu.
+func (m *SessionManager) buildSessionContextLocked() SessionContext {
 	leafID := ""
 	if m.leafID != nil {
 		leafID = *m.leafID
 	}
-	return BuildSessionContext(m.GetEntries(), &leafID, m.byID)
+	return BuildSessionContext(m.getEntriesLocked(), &leafID, m.byID)
 }
 
 // GetHeader returns the session header.
@@ -564,13 +580,9 @@ func (m *SessionManager) GetHeader() *SessionHeader {
 
 // GetEntries returns all entries (excluding the header).
 func (m *SessionManager) GetEntries() []SessionEntry {
-	var out []SessionEntry
-	for _, entry := range m.fileEntries {
-		if entry.Entry != nil {
-			out = append(out, *entry.Entry)
-		}
-	}
-	return out
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.getEntriesLocked()
 }
 
 // Branch starts a new branch from an earlier entry.

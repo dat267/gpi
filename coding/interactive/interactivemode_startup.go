@@ -66,13 +66,16 @@ type StartupWiring struct {
 	// RequestRender requests a render.
 	RequestRender func()
 
-	// mu guards the pending input queue and callback (the TUI can submit from
-	// another goroutine; D123).
-	mu sync.Mutex
-	// pendingUserInputs queues inputs submitted before the main loop starts.
-	pendingUserInputs []string
-	// onInputCallback receives the next submitted input.
-	onInputCallback func(string)
+	// inputs receives submitted user text. The run loop is the single
+	// consumer; the TUI submit handler is the producer (the TUI delivers
+	// submissions from its own goroutine). Buffered with room for a turn's
+	// worth of queued submissions (capacity >= senders).
+	inputs chan string
+	// inputsClosed unblocks a producer parked on a full inputs channel once
+	// the app shuts down.
+	inputsClosed chan struct{}
+	// inputsClosedOnce makes Close idempotent.
+	inputsClosedOnce sync.Once
 	// anthropicSubscriptionWarningShown dedupes the warning.
 	anthropicSubscriptionWarningShown bool
 	// MainScreenRenderState is the captured main-screen state.
@@ -91,57 +94,60 @@ func (w *StartupWiring) showStatus(message string) {
 	}
 }
 
-// QueueUserInput records a submission for the main loop.
-func (w *StartupWiring) QueueUserInput(text string) {
-	w.mu.Lock()
-	callback := w.onInputCallback
-	if callback != nil {
-		w.onInputCallback = nil
+// InitInputs creates the submission channel. The app calls it once at
+// composition; the channel is loop-consumed (no lock on either side).
+func (w *StartupWiring) InitInputs() {
+	if w.inputs == nil {
+		w.inputs = make(chan string, inputQueueCapacity)
 	}
-	if callback == nil {
-		w.pendingUserInputs = append(w.pendingUserInputs, text)
-	}
-	w.mu.Unlock()
-	if callback != nil {
-		callback(text)
+	if w.inputsClosed == nil {
+		w.inputsClosed = make(chan struct{})
 	}
 }
 
-// GetUserInput waits for the next user input.
-func (w *StartupWiring) GetUserInput(ctx context.Context) (string, bool) {
-	w.mu.Lock()
-	if len(w.pendingUserInputs) > 0 {
-		value := w.pendingUserInputs[0]
-		w.pendingUserInputs = w.pendingUserInputs[1:]
-		w.mu.Unlock()
-		return value, true
-	}
-	results := make(chan string, 1)
-	w.onInputCallback = func(text string) { results <- text }
-	w.mu.Unlock()
+// Inputs exposes the submission channel to the run loop.
+func (w *StartupWiring) Inputs() <-chan string { return w.inputs }
 
+// QueueUserInput delivers a submission to the run loop. The send is buffered;
+// it only blocks when the queue is full (a turn's worth of pending
+// submissions) and unblocks at shutdown.
+func (w *StartupWiring) QueueUserInput(text string) {
+	if w.inputs == nil {
+		w.InitInputs()
+	}
 	select {
-	case text := <-results:
+	case w.inputs <- text:
+	case <-w.inputsClosed:
+	}
+}
+
+// GetUserInput waits for the next submission (test seam).
+func (w *StartupWiring) GetUserInput(ctx context.Context) (string, bool) {
+	if w.inputs == nil {
+		w.InitInputs()
+	}
+	select {
+	case text := <-w.inputs:
 		return text, true
+	case <-w.inputsClosed:
+		return "", false
 	case <-ctx.Done():
 		// Prefer a delivered input over cancellation (both may be ready).
 		select {
-		case text := <-results:
+		case text := <-w.inputs:
 			return text, true
 		default:
 		}
-		w.mu.Lock()
-		w.onInputCallback = nil
-		w.mu.Unlock()
 		return "", false
 	}
 }
 
-// HasInputWaiter reports whether a GetUserInput call is waiting (test helper).
-func (w *StartupWiring) HasInputWaiter() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.onInputCallback != nil
+// CloseInputs releases producers parked on the input queue.
+func (w *StartupWiring) CloseInputs() {
+	if w.inputsClosed == nil {
+		return
+	}
+	w.inputsClosedOnce.Do(func() { close(w.inputsClosed) })
 }
 
 // RebuildChatFromMessages re-renders the transcript from the session context.

@@ -69,6 +69,39 @@ browser opener (`interactive.SetBrowserOpener`), so the OAuth browser flow is a
 no-op; seed credentials with upstream pi or by hand. `--offline` skips the
 catalog refresh.
 
+## Concurrency architecture (UI event loop refactor)
+
+The interactive mode is being moved from mutex-guarded shared state to a
+single-writer UI loop (upstream is single-threaded; every Go-side lock was
+invented to bridge that gap). Stage 1 has landed:
+
+- **`sessionEventQueue`** (`interactivemode_eventqueue.go`) decouples the
+  session-event producers from the UI. Two buffered channels:
+  `lossless` (cap 256: message start/end, tool end, agent settled, compaction,
+  retries) and `partial` (cap 8: `message_update`, `tool_execution_update`,
+  `bash_execution_update`), where partials are latest-wins with an explicit
+  drop-oldest policy so a fast token stream cannot back-pressure the agent or
+  starve input. The subscription callback only enqueues; producers never touch
+  UI state or UI locks. `Close` releases a producer parked on a full channel.
+- **`runLoop`** (`interactivemode_run.go`) is the single writer: a `select`
+  over the two event channels, the submission channel
+  (`StartupWiring.inputs`, cap 64), work completion, and `ctx.Done()`.
+  Blocking work (a turn, the compaction-queue flush, which can start a turn)
+  runs in its own goroutine through `RunWiring.RunWork`, so a turn's events
+  drain while it runs; the loop only accepts submissions when idle, matching
+  upstream's awaited prompt. Initial messages are seeded as pending loop work
+  ahead of submissions.
+- Every channel is buffered; every consumer select has a `ctx.Done()` arm;
+  producers blocked on a full channel are released at shutdown.
+- **D143** records the divergence: upstream is single-threaded (await +
+  microtask order), the port is an explicit select loop with off-loop work and
+  partial coalescing.
+- Stage 1 also fixed the read side of `coding.SessionManager`
+  (`GetEntries`, `BuildContextEntriesForLeaf`, `BuildSessionContext` now take
+  `m.mu`; `AppendCompaction`/`GetSessionName` use the locked helpers): those
+  accessors were the first legitimate off-thread readers, and the agent writes
+  the same state from its own goroutine.
+
 ## Architecture of the interactive mode
 
 Upstream `interactive-mode.ts` is one ~4000-line class. The Go port splits it
@@ -151,7 +184,7 @@ user code under a lock, snapshot under and deliver outside.
 | `ModelCatalogRefreshCoordinator.mu` | `coding/interactive/catalogrefresh.go:34` | per-runtime refresh dedup (D98) | C | stage 4 |
 | `activeCatalogRefresh.mu` | `coding/interactive/catalogrefresh.go:22` | one refresh's result/cancel state | C | stage 4 |
 | `Lifecycle.mu` | `coding/interactive/interactivemode_lifecycle.go:107` | shutdown/suspend/lifecycle flags (D135) | C | stage 3/4 |
-| `StartupWiring.mu` | `coding/interactive/interactivemode_startup.go:71` | pending user inputs + telemetry-once flag (D123) | C | stage 1 |
+| ~~`StartupWiring.mu`~~ | `coding/interactive/interactivemode_startup.go` | pending user inputs + telemetry-once flag (D123) | C | **retired in stage 1** (input handoff is a channel) |
 | `Theme.mu` (style colors) | `coding/interactive/theme.go:100` | style-color enable flag (test seam) | C | stage 4 |
 | `themeState.mu` | `coding/interactive/theme.go:802` | global theme registry + watcher (D85) | C | stage 4 |
 | `trueColorState.mu` | `coding/interactive/theme.go:1019` | truecolor capability (test seam) | C | stage 4 |
@@ -217,8 +250,16 @@ summarized in the README scoreboard. The range is **D1–D139**. Representative:
 - D105/D106 — the ES `Proxy` renderer reference becomes an explicit forwarder;
   clipboard copying is injected (native clipboard out of scope).
 - D121/D123/D135 — cross-goroutine state made mutex-safe (model refresh,
-  startup input/telemetry, lifecycle flags, footer watcher).
+  startup input/telemetry, lifecycle flags, footer watcher). D123's input lock
+  is retired in stage 1 (the submission handoff is a buffered channel); the
+  others retire in stages 3-4.
 - D132 — branch summarization is tracked as compaction and abortable.
+- D143 — the interactive run loop is an explicit `select` over producer
+  channels (session events, submissions, work completion, `ctx.Done()`) with
+  blocking work off-loop and latest-wins coalescing for streaming partials,
+  where upstream is single-threaded and awaits the prompt; the stage-3 to
+  stage-4 stages move the remaining producers (input/signals, selector and
+  lifecycle callbacks) onto the same loop.
 - D136 — editor `OnSubmit` runs outside the editor lock.
 - D137 — model-selector callbacks run outside the state mutex.
 - D138 — terminal input is delivered outside the terminal lock.

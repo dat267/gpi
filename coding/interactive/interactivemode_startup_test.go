@@ -55,7 +55,8 @@ func newStartupTestWiring(t *testing.T) (*StartupWiring, *coding.SettingsManager
 	return wiring, settings
 }
 
-// TestStartupUserInput covers the input queue and callback.
+// TestStartupUserInput covers the submission channel: buffered delivery,
+// closed-queue shutdown and context cancellation.
 func TestStartupUserInput(t *testing.T) {
 	wiring, _ := newStartupTestWiring(t)
 
@@ -66,16 +67,10 @@ func TestStartupUserInput(t *testing.T) {
 		t.Fatalf("value = %q, ok = %v", value, ok)
 	}
 
-	// A later input resolves the waiting call.
-	results := make(chan string, 1)
-	go func() {
-		value, _ := wiring.GetUserInput(context.Background())
-		results <- value
-	}()
-	waitForCondition(t, func() bool { return wiring.HasInputWaiter() })
+	// A later input is buffered and received by the next read.
 	wiring.QueueUserInput("second")
 	select {
-	case value := <-results:
+	case value := <-wiring.Inputs():
 		if value != "second" {
 			t.Fatalf("value = %q", value)
 		}

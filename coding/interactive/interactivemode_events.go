@@ -1,6 +1,8 @@
 package interactive
 
 import (
+	"context"
+
 	"github.com/dat267/pier/agent"
 	"github.com/dat267/pier/ai"
 	"github.com/dat267/pier/coding"
@@ -40,6 +42,10 @@ type EventDispatcher struct {
 	SuggestBugReport func()
 	// FlushCompactionQueue drains the queued compaction messages.
 	FlushCompactionQueue func(willRetry bool)
+	// StartWork runs blocking work off the UI loop. The flush can start a
+	// turn, so it must not run inside event application (which would stop the
+	// loop from draining that turn's events). Nil runs inline (tests).
+	StartWork func(fn func(context.Context) error)
 	// CheckShutdownRequested handles a pending shutdown.
 	CheckShutdownRequested func()
 	// Init initializes the mode on the first event.
@@ -548,7 +554,15 @@ func (d *EventDispatcher) handleCompactionEnd(event *coding.SessionEvent) {
 		}
 	}
 	if d.FlushCompactionQueue != nil {
-		d.FlushCompactionQueue(event.WillRetry)
+		flush := d.FlushCompactionQueue
+		if d.StartWork != nil {
+			d.StartWork(func(context.Context) error {
+				flush(event.WillRetry)
+				return nil
+			})
+		} else {
+			flush(event.WillRetry)
+		}
 	}
 	d.requestRender()
 }

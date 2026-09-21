@@ -2,6 +2,7 @@ package interactive
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/dat267/pier/coding"
@@ -75,6 +76,20 @@ type RunWiring struct {
 	MaybeSaveTrust func() bool
 	// Prompt sends a prompt to the session.
 	Prompt func(ctx context.Context, text string) error
+	// Events applies session events. Only the run loop calls it.
+	Events *EventDispatcher
+	// SessionEvents carries the lossless session events and PartialEvents the
+	// coalescable streaming updates (interactivemode_eventqueue.go). Both are
+	// producer-written, loop-consumed channels.
+	SessionEvents <-chan *coding.SessionEvent
+	PartialEvents <-chan *coding.SessionEvent
+	// StartWork schedules blocking work off the loop (the event dispatcher
+	// uses it to run the compaction-queue flush). The loop installs it while
+	// running; callers must be on the loop goroutine.
+	StartWork func(fn func(context.Context) error)
+
+	// work is the loop-owned work queue (see runLoop).
+	work runnerWorkState
 	// ShowStatus/ShowError/ShowWarning report messages.
 	ShowStatus  func(message string)
 	ShowError   func(message string)
@@ -415,32 +430,140 @@ func (w *RunWiring) Run(ctx context.Context, options InitOptions, runOptions Run
 		go w.WarnAnthropic(ctx)
 	}
 
-	// Initial messages.
-	if runOptions.InitialMessage != "" && w.Prompt != nil {
-		if err := w.Prompt(ctx, runOptions.InitialMessage); err != nil {
-			w.ShowChatError(err.Error())
-		}
-	}
-	for _, message := range runOptions.InitialMessages {
-		if w.Prompt == nil {
-			break
-		}
-		if err := w.Prompt(ctx, message); err != nil {
-			w.ShowChatError(err.Error())
-		}
-	}
-
 	// Main loop.
 	if w.Startup == nil || w.Prompt == nil {
 		return
 	}
+
+	// Initial messages are ordinary prompts that run before the loop accepts
+	// submissions (upstream awaits them ahead of the input loop), so they are
+	// seeded as pending loop work rather than into the submission channel.
+	initial := make([]string, 0, 1+len(runOptions.InitialMessages))
+	if runOptions.InitialMessage != "" {
+		initial = append(initial, runOptions.InitialMessage)
+	}
+	initial = append(initial, runOptions.InitialMessages...)
+
+	w.runLoop(ctx, initial)
+}
+
+// runnerWorkState is the loop-owned work bookkeeping: at most one blocking
+// unit (a turn, a compaction-queue flush) runs at a time, with the rest
+// queued. Nothing here is shared with other goroutines: only the loop
+// goroutine mutates it.
+type runnerWorkState struct {
+	done    chan error
+	ctx     context.Context
+	active  bool
+	pending []func(context.Context) error
+}
+
+// RunWork schedules blocking work on the loop. It is called from loop-side
+// handlers (session-event application) and never blocks.
+func (w *RunWiring) RunWork(fn func(context.Context) error) {
+	if fn == nil {
+		return
+	}
+	if !w.work.active {
+		w.startWork(fn)
+		return
+	}
+	w.work.pending = append(w.work.pending, fn)
+}
+
+// startWork launches fn in its own goroutine and records the completion
+// channel. A panic is surfaced like a returned error instead of killing the
+// process.
+func (w *RunWiring) startWork(fn func(context.Context) error) {
+	done := make(chan error, 1)
+	w.work.done = done
+	w.work.active = true
+	workCtx := w.work.ctx
+	if workCtx == nil {
+		workCtx = context.Background()
+	}
+	go func() {
+		var err error
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					err = fmt.Errorf("panic: %v", recovered)
+				}
+			}()
+			err = fn(workCtx)
+		}()
+		done <- err
+	}()
+}
+
+// runLoop is the UI's single writer. It applies session events and user input
+// in arrival order and runs blocking work in a goroutine so a turn's events
+// keep draining while it runs (upstream awaits the prompt and processes the
+// event queue meanwhile; D-row: see AGENTS.md).
+func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
+	inputs := w.Startup.Inputs()
+	w.work.ctx = ctx
+	w.StartWork = w.RunWork
+	defer func() {
+		w.StartWork = nil
+		w.work.ctx = nil
+	}()
+
+	for _, text := range initialWork {
+		text := text
+		w.work.pending = append(w.work.pending, func(context.Context) error {
+			return w.Prompt(ctx, text)
+		})
+	}
+	if len(w.work.pending) > 0 {
+		next := w.work.pending[0]
+		w.work.pending = w.work.pending[1:]
+		w.startWork(next)
+	}
+
 	for {
-		input, ok := w.Startup.GetUserInput(ctx)
-		if !ok {
-			return
+		var (
+			inputsCh <-chan string
+			doneCh   chan error
+		)
+		if !w.work.active {
+			inputsCh = inputs
+		} else {
+			doneCh = w.work.done
 		}
-		if err := w.Prompt(ctx, input); err != nil {
-			w.ShowChatError(err.Error())
+
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-w.SessionEvents:
+			if !ok {
+				w.SessionEvents = nil
+				continue
+			}
+			if w.Events != nil {
+				w.Events.HandleEvent(event)
+			}
+		case event, ok := <-w.PartialEvents:
+			if !ok {
+				w.PartialEvents = nil
+				continue
+			}
+			if w.Events != nil {
+				w.Events.HandleEvent(event)
+			}
+		case text := <-inputsCh:
+			w.startWork(func(context.Context) error { return w.Prompt(ctx, text) })
+		case err := <-doneCh:
+			w.work.active = false
+			w.work.done = nil
+			if pending := w.work.pending; len(pending) > 0 {
+				next := pending[0]
+				w.work.pending = pending[1:]
+				w.startWork(next)
+			}
+			if err != nil {
+				w.ShowChatError(err.Error())
+			}
 		}
 	}
 }

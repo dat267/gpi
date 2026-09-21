@@ -138,7 +138,9 @@ type App struct {
 	Autocomplete *AutocompleteWiring
 
 	unsubscribe func()
-	initialized bool
+	// sessionEvents is the producer→loop queue (interactivemode_eventqueue.go).
+	sessionEvents *sessionEventQueue
+	initialized   bool
 }
 
 // NewApp builds the interactive-mode object graph.
@@ -300,6 +302,15 @@ func NewApp(options AppOptions) *App {
 	}
 	app.Events.CheckShutdownRequested = app.LifecycleCheckShutdown
 	app.Events.Init = func() { app.Transcript.RenderInitialMessages() }
+	// The compaction-queue flush can start a turn; run it off-loop so events
+	// keep draining while it runs.
+	app.Events.StartWork = func(fn func(context.Context) error) {
+		if app.Runner.StartWork != nil {
+			app.Runner.StartWork(fn)
+			return
+		}
+		fn(context.Background())
+	}
 
 	app.Slot = NewSelectorSlot(app.UI, app.EditorContainer, app.DefaultEditor)
 
@@ -365,9 +376,17 @@ func NewApp(options AppOptions) *App {
 		ShowStatus:      func(message string) { app.Transcript.ShowStatus(message) },
 		RequestRender:   func() { app.UI.RequestRender(false) },
 	}
+	// The submission channel exists from composition so the run loop always
+	// has a consumer side to select on.
+	app.Startup.InitInputs()
+
+	app.sessionEvents = newSessionEventQueue()
 
 	app.Runner = &RunWiring{
 		Startup:            app.Startup,
+		Events:             app.Events,
+		SessionEvents:      app.sessionEvents.Events(),
+		PartialEvents:      app.sessionEvents.Partials(),
 		UI:                 app.UI,
 		Settings:           app.Settings,
 		Terminal:           terminal,
@@ -633,8 +652,10 @@ func (a *App) Init(ctx context.Context) {
 	a.Lifecycle.MarkInitialized()
 
 	if a.unsubscribe == nil {
+		// Pure producer: the callback only enqueues; the run loop applies the
+		// event on the UI goroutine (interactivemode_eventqueue.go).
 		a.unsubscribe = a.Session.Subscribe(func(event *coding.SessionEvent) {
-			a.Events.HandleEvent(event)
+			a.sessionEvents.enqueue(event)
 		})
 	}
 	a.Autocomplete.SetupAutocompleteProvider()
@@ -662,6 +683,12 @@ func (a *App) Close() {
 	if a.unsubscribe != nil {
 		a.unsubscribe()
 		a.unsubscribe = nil
+	}
+	// Release producers parked on the event/input queues (the loop has
+	// stopped consuming by now).
+	a.sessionEvents.Close()
+	if a.Startup != nil {
+		a.Startup.CloseInputs()
 	}
 	a.Footer.Dispose()
 	a.FooterData.Dispose()
