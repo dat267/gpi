@@ -465,6 +465,7 @@ func NewApp(options AppOptions) *App {
 		Shutdown:             func() { app.Lifecycle.Shutdown(false) },
 		RequestRender:        func() { app.UI.RequestRender(false) },
 		ClearStatusIndicator: func() { app.UIState.ClearStatusIndicator("", false) },
+		SwitchSession:        app.SwitchSession,
 	}
 
 	app.Auth = &AuthWiring{
@@ -522,9 +523,14 @@ func NewApp(options AppOptions) *App {
 			hidden := app.Transcript.HideThinkingBlock
 			app.Queue.ToggleThinkingBlockVisibility(&hidden)
 		},
-		OnSessionTree:           func() { app.Selectors.ShowTreeSelector(context.Background(), "", false) },
-		OnSessionFork:           func() { app.Selectors.ShowUserMessageSelector(context.Background()) },
-		OnSessionResume:         app.Sessions.ShowSessionSelector,
+		OnSessionTree:   func() { app.Selectors.ShowTreeSelector(context.Background(), "", false) },
+		OnSessionFork:   func() { app.Selectors.ShowUserMessageSelector(context.Background()) },
+		OnSessionResume: app.Sessions.ShowSessionSelector,
+		OnSessionNew: func() {
+			if _, err := app.SessionNew(context.Background()); err != nil {
+				app.showWarning(err.Error())
+			}
+		},
 		ShowTreeSelector:        func() { app.Selectors.ShowTreeSelector(context.Background(), "", false) },
 		ShowUserMessageSelector: func() { app.Selectors.ShowUserMessageSelector(context.Background()) },
 	}
