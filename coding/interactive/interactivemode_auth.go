@@ -603,22 +603,25 @@ func (w *AuthWiring) CompleteProviderAuthentication(ctx context.Context, provide
 		defer cancel()
 		result, err := runtime.Refresh(refreshCtx, &coding.ModelsRefreshCallOptions{Providers: []string{providerID}})
 		cancelTimer()
-		if err != nil {
-			w.showWarning(actionLabel + ", but its model catalog could not be refreshed: " + err.Error())
-			return
-		}
-		if result.Aborted {
-			w.showWarning(actionLabel + ", but its model catalog refresh timed out; using cached models.")
-		} else if len(result.Errors) > 0 {
-			w.showWarning(actionLabel + ", but its model catalog could not be refreshed; using cached models.")
-		}
-		if deferSelection && w.Session == session && w.Session.Model() == previousModel {
-			finish()
-		}
-		if w.UpdateAvailableProviderCount != nil {
-			w.UpdateAvailableProviderCount()
-		}
-		w.requestRender()
+		// The warning/status mutations are marshaled onto the UI side.
+		w.UI.Post(func() {
+			if err != nil {
+				w.showWarning(actionLabel + ", but its model catalog could not be refreshed: " + err.Error())
+				return
+			}
+			if result.Aborted {
+				w.showWarning(actionLabel + ", but its model catalog refresh timed out; using cached models.")
+			} else if len(result.Errors) > 0 {
+				w.showWarning(actionLabel + ", but its model catalog could not be refreshed; using cached models.")
+			}
+			if deferSelection && w.Session == session && w.Session.Model() == previousModel {
+				finish()
+			}
+			if w.UpdateAvailableProviderCount != nil {
+				w.UpdateAvailableProviderCount()
+			}
+			w.requestRender()
+		})
 	}()
 }
 

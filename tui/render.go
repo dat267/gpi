@@ -136,6 +136,7 @@ type Renderer struct {
 
 	focusedComponent Component
 	inputListeners   []TuiInputListener
+	posted           []func()
 
 	renderRequested          bool
 	autoRenderDisabled       bool
@@ -439,8 +440,37 @@ func (t *Renderer) resetRenderState() {
 func (t *Renderer) doRender() {
 	t.renderMu.Lock()
 	defer t.renderMu.Unlock()
+	t.drainPosted()
 	if t.DoRender != nil {
 		t.DoRender()
+	}
+}
+
+// Post schedules fn to run on the UI side: drained at the next render, under
+// the render lock, so it is serialized with renders and input handling and
+// never concurrent with a paint. Callbacks may call back into the renderer
+// (RequestRender/SetFocus are fine) but must not call RenderNow or Stop.
+func (t *Renderer) Post(fn func()) {
+	t.mu.Lock()
+	t.posted = append(t.posted, fn)
+	t.mu.Unlock()
+	t.RequestRender(false)
+}
+
+// drainPosted runs queued callbacks; the caller holds renderMu. Looping
+// covers callbacks that post more work.
+func (t *Renderer) drainPosted() {
+	for {
+		t.mu.Lock()
+		pending := t.posted
+		t.posted = nil
+		t.mu.Unlock()
+		if len(pending) == 0 {
+			return
+		}
+		for _, fn := range pending {
+			fn()
+		}
 	}
 }
 

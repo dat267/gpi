@@ -23,6 +23,10 @@ type TUI interface {
 	GetTerminal() Terminal
 	Start()
 	Stop(options TuiStopOptions)
+	// Post runs fn on the UI side: serialized with renders and input handling
+	// (under the render lock), never concurrent with a paint. Callbacks may
+	// call back into the renderer, but must not call RenderNow or Stop.
+	Post(fn func())
 	AddInputListener(listener TuiInputListener) func()
 	RemoveInputListener(listener TuiInputListener)
 	RenderNow(force bool)
@@ -88,6 +92,9 @@ func (r *TuiReference) Start() { r.get().Start() }
 func (r *TuiReference) Stop(options TuiStopOptions) { r.get().Stop(options) }
 
 // AddInputListener registers an input listener.
+// Post forwards to the active renderer's post queue.
+func (r *TuiReference) Post(fn func()) { r.get().Post(fn) }
+
 func (r *TuiReference) AddInputListener(listener TuiInputListener) func() {
 	return r.get().AddInputListener(listener)
 }

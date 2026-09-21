@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dat267/pier/coding"
@@ -611,7 +612,7 @@ func rebuildBashResult(result *SortToolResultContent, options ToolRenderResultOp
 	output := strings.TrimSpace(GetTextOutput(result, showImages))
 	var truncation *coding.TruncationResult
 	var fullOutputPath string
-	if details, ok := result.Details.(*coding.BashToolDetails); ok {
+	if details := toolDetailsFrom[coding.BashToolDetails](result.Details); details != nil {
 		if details.Truncation != nil {
 			truncation = details.Truncation
 		}
@@ -1042,6 +1043,7 @@ type editPreview struct {
 
 type editCallComponent struct {
 	*tui.Box
+	previewMu      sync.Mutex
 	preview        *editPreview
 	previewArgsKey string
 	previewPending bool
@@ -1049,18 +1051,41 @@ type editCallComponent struct {
 	builtArgsKey   string
 }
 
+// setPreviewResult stores the async diff preview; the goroutine side of the
+// preview/Render handoff (the read side runs under the render lock).
+func (c *editCallComponent) setPreviewResult(requestKey string, preview *editPreview) {
+	c.previewMu.Lock()
+	defer c.previewMu.Unlock()
+	if c.previewArgsKey != requestKey {
+		return
+	}
+	c.preview = preview
+	c.previewPending = false
+}
+
+func (c *editCallComponent) snapshotPreview() *editPreview {
+	c.previewMu.Lock()
+	defer c.previewMu.Unlock()
+	if c.preview == nil {
+		return nil
+	}
+	snapshot := *c.preview
+	return &snapshot
+}
+
 func (c *editCallComponent) build(args *editRenderArgs, theme *Theme, cwd string) {
-	c.SetBgFn(getEditHeaderBg(c.preview, c.settledError, theme))
+	c.SetBgFn(getEditHeaderBg(c.snapshotPreview(), c.settledError, theme))
 	c.Clear()
 	c.AddChild(tui.NewText(formatEditCall(args, theme, cwd), 0, 0, nil))
-	if c.preview == nil {
+	preview := c.snapshotPreview()
+	if preview == nil {
 		return
 	}
 	body := ""
-	if c.preview.Error != "" {
-		body = theme.Fg("error", c.preview.Error)
+	if preview.Error != "" {
+		body = theme.Fg("error", preview.Error)
 	} else {
-		body = RenderDiff(c.preview.Diff, RenderDiffOptions{})
+		body = RenderDiff(preview.Diff, RenderDiffOptions{})
 	}
 	c.AddChild(tui.NewSpacer(1))
 	c.AddChild(tui.NewText(body, 0, 0, nil))
@@ -1075,6 +1100,29 @@ func argsKeyFor(args *editRenderArgs) string {
 		return ""
 	}
 	return string(encoded)
+}
+
+// toolDetailsFrom decodes tool-result details into the typed form. Session
+// results carry raw JSON; live results may already be typed. Upstream reads
+// details.* through JS's dynamic typing, which the port must do explicitly.
+func toolDetailsFrom[T any](details any) *T {
+	switch d := details.(type) {
+	case *T:
+		return d
+	case T:
+		return &d
+	case json.RawMessage:
+		var decoded T
+		if json.Unmarshal(d, &decoded) == nil {
+			return &decoded
+		}
+	case []byte:
+		var decoded T
+		if json.Unmarshal(d, &decoded) == nil {
+			return &decoded
+		}
+	}
+	return nil
 }
 
 var editRenderers = ToolRenderers{
@@ -1092,26 +1140,28 @@ var editRenderers = ToolRenderers{
 		}
 		previewInput := getRenderablePreviewInput(args)
 		argsKey := argsKeyFor(previewInput)
+		component.previewMu.Lock()
 		if component.previewArgsKey != argsKey {
 			component.preview = nil
 			component.previewArgsKey = argsKey
 			component.previewPending = false
 			component.settledError = false
 		}
-		if context.ArgsComplete && previewInput != nil && component.preview == nil && !component.previewPending {
+		startPreview := context.ArgsComplete && previewInput != nil && component.preview == nil && !component.previewPending
+		if startPreview {
 			component.previewPending = true
+		}
+		component.previewMu.Unlock()
+		if startPreview {
 			request := previewInput
 			requestKey := argsKey
 			cwd := context.Cwd
 			invalidate := context.Invalidate
 			go func() {
 				preview := computeEditsPreview(request.Path, request.Edits, cwd)
-				if component.previewArgsKey == requestKey {
-					component.preview = preview
-					component.previewPending = false
-					if invalidate != nil {
-						invalidate()
-					}
+				component.setPreviewResult(requestKey, preview)
+				if invalidate != nil {
+					invalidate()
 				}
 			}()
 		}
@@ -1125,19 +1175,21 @@ var editRenderers = ToolRenderers{
 		var resultDiff string
 		var firstChangedLine *int
 		if !context.IsError {
-			if details, ok := result.Details.(*coding.EditToolDetails); ok {
+			if details := toolDetailsFrom[coding.EditToolDetails](result.Details); details != nil {
 				resultDiff = details.Diff
 				firstChangedLine = details.FirstChangedLine
 			}
 		}
 		if callComponent != nil {
 			changed := false
+			callComponent.previewMu.Lock()
 			if resultDiff != "" {
 				callComponent.preview = &editPreview{Diff: resultDiff, FirstChangedLine: firstChangedLine}
 				callComponent.previewArgsKey = argsKey
 				callComponent.previewPending = false
 				changed = true
 			}
+			callComponent.previewMu.Unlock()
 			if callComponent.settledError != context.IsError {
 				callComponent.settledError = context.IsError
 				changed = true
@@ -1166,9 +1218,11 @@ func formatEditResult(args *editRenderArgs, callComponent *editCallComponent, re
 	}
 	var previewDiff string
 	var previewError string
-	if callComponent != nil && callComponent.preview != nil {
-		previewDiff = callComponent.preview.Diff
-		previewError = callComponent.preview.Error
+	if callComponent != nil {
+		if preview := callComponent.snapshotPreview(); preview != nil {
+			previewDiff = preview.Diff
+			previewError = preview.Error
+		}
 	}
 	if isError {
 		var blocks []string
@@ -1184,7 +1238,7 @@ func formatEditResult(args *editRenderArgs, callComponent *editCallComponent, re
 		return theme.Fg("error", errorText)
 	}
 	var resultDiff string
-	if details, ok := result.Details.(*coding.EditToolDetails); ok {
+	if details := toolDetailsFrom[coding.EditToolDetails](result.Details); details != nil {
 		resultDiff = details.Diff
 	}
 	if resultDiff != "" && resultDiff != previewDiff {

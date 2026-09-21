@@ -399,12 +399,16 @@ func (s *MainScreen) doRender() {
 			s.maxLinesRendered = maxInt(s.maxLinesRendered, len(newLines))
 		}
 		bufferLength := maxInt(height, len(newLines))
+		// Commit the render state under s.mu: the stop path reads it
+		// concurrently with in-flight timer renders.
+		s.mu.Lock()
 		s.previousViewportTop = maxInt(0, bufferLength-height)
 		s.positionHardwareCursor(cursorPos.Row, cursorPos.Col, cursorPos.Has, len(newLines))
 		s.previousLines = newLines
 		s.previousKittyImageIDs = s.collectKittyImageIDs(newLines)
 		s.previousWidth = width
 		s.previousHeight = height
+		s.mu.Unlock()
 	}
 
 	// First render: output everything without clearing (assumes a clean screen).
@@ -510,12 +514,14 @@ func (s *MainScreen) doRender() {
 			s.cursorRow = targetRow
 			s.hardwareCursorRow = targetRow
 		}
+		s.mu.Lock()
 		s.positionHardwareCursor(cursorPos.Row, cursorPos.Col, cursorPos.Has, len(newLines))
 		s.previousLines = newLines
 		s.previousKittyImageIDs = s.collectKittyImageIDs(newLines)
 		s.previousWidth = width
 		s.previousHeight = height
 		s.previousViewportTop = prevViewportTop
+		s.mu.Unlock()
 		return
 	}
 
@@ -612,6 +618,7 @@ func (s *MainScreen) doRender() {
 	output.Append("\x1b[?2026l")
 	output.Flush()
 
+	s.mu.Lock()
 	s.cursorRow = maxInt(0, len(newLines)-1)
 	s.hardwareCursorRow = finalCursorRow
 	s.maxLinesRendered = maxInt(s.maxLinesRendered, len(newLines))
@@ -623,6 +630,7 @@ func (s *MainScreen) doRender() {
 	s.previousKittyImageIDs = s.collectKittyImageIDs(newLines)
 	s.previousWidth = width
 	s.previousHeight = height
+	s.mu.Unlock()
 }
 
 // reportOverwideLine writes the crash log and reports the error (upstream

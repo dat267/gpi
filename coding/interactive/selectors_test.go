@@ -153,7 +153,7 @@ func TestSelectorsAgainstUpstreamGolden(t *testing.T) {
 		for index, text := range spec.Messages {
 			items = append(items, UserMessageItem{ID: itoa(index), Text: text})
 		}
-		component := NewUserMessageSelectorComponent(items, nil, nil, spec.Initial)
+		component := NewUserMessageSelectorComponent(items, nil, nil, spec.Initial, nil)
 		for _, input := range spec.Inputs {
 			component.GetMessageList().HandleInput(input)
 		}

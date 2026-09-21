@@ -273,40 +273,48 @@ func (w *ModelWiring) ShowModelsSelector(ctx context.Context) {
 			if disposed {
 				return
 			}
-			availableModels = w.Session.ModelRuntime().GetAvailableSnapshot()
-			availableModelIDs = map[string]bool{}
-			for _, model := range availableModels {
-				availableModelIDs[model.Provider+"/"+model.ID] = true
-			}
-			if !selectionChanged && len(sessionScopedModels) == 0 {
-				currentEnabledIds = configuredEnabledIDs(availableModels)
-				selector.UpdateModels(availableModels, currentEnabledIds)
-			} else {
-				selector.UpdateModels(availableModels, nil)
-			}
-			if currentEnabledIds != nil {
-				updateSessionModels(currentEnabledIds)
-			}
-			switch {
-			case err != nil:
-				message := "Could not refresh model catalogs: " + err.Error()
-				if timedOut {
-					message = "Model refresh timed out; showing cached models."
+			snapshot := w.Session.ModelRuntime().GetAvailableSnapshot()
+			// Mutations of the selector and the captured state are marshaled
+			// onto the UI side: serialized with renders and input (D136 class).
+			w.UI.Post(func() {
+				if disposed {
+					return
 				}
-				selector.SetRefreshStatus(message, "warning")
-			case result.Aborted && timedOut:
-				selector.SetRefreshStatus("Model refresh timed out; showing cached models.", "warning")
-			case len(result.Errors) > 0:
-				providers := make([]string, 0, len(result.Errors))
-				for provider := range result.Errors {
-					providers = append(providers, provider)
+				availableModels = snapshot
+				availableModelIDs = map[string]bool{}
+				for _, model := range snapshot {
+					availableModelIDs[model.Provider+"/"+model.ID] = true
 				}
-				sortStringsAscending(providers)
-				selector.SetRefreshStatus("Could not refresh "+strings.Join(providers, ", ")+"; showing cached models.", "warning")
-			default:
-				selector.SetRefreshStatus("Model catalogs refreshed.", "success")
-			}
-			w.requestRender()
+				if !selectionChanged && len(sessionScopedModels) == 0 {
+					currentEnabledIds = configuredEnabledIDs(availableModels)
+					selector.UpdateModels(availableModels, currentEnabledIds)
+				} else {
+					selector.UpdateModels(availableModels, nil)
+				}
+				if currentEnabledIds != nil {
+					updateSessionModels(currentEnabledIds)
+				}
+				switch {
+				case err != nil:
+					message := "Could not refresh model catalogs: " + err.Error()
+					if timedOut {
+						message = "Model refresh timed out; showing cached models."
+					}
+					selector.SetRefreshStatus(message, "warning")
+				case result.Aborted && timedOut:
+					selector.SetRefreshStatus("Model refresh timed out; showing cached models.", "warning")
+				case len(result.Errors) > 0:
+					providers := make([]string, 0, len(result.Errors))
+					for provider := range result.Errors {
+						providers = append(providers, provider)
+					}
+					sortStringsAscending(providers)
+					selector.SetRefreshStatus("Could not refresh "+strings.Join(providers, ", ")+"; showing cached models.", "warning")
+				default:
+					selector.SetRefreshStatus("Model catalogs refreshed.", "success")
+				}
+				w.requestRender()
+			})
 		}()
 
 		return CreatedSelector{

@@ -387,8 +387,10 @@ type UserMessageSelectorComponent struct {
 	messageList *UserMessageList
 }
 
-// NewUserMessageSelectorComponent creates the selector.
-func NewUserMessageSelectorComponent(messages []UserMessageItem, onSelect func(entryID string), onCancel func(), initialSelectedID string) *UserMessageSelectorComponent {
+// NewUserMessageSelectorComponent creates the selector. post marshals the
+// auto-cancel onto the UI side (upstream's single-threaded timer); nil falls
+// back to a direct call.
+func NewUserMessageSelectorComponent(messages []UserMessageItem, onSelect func(entryID string), onCancel func(), initialSelectedID string, post func(func())) *UserMessageSelectorComponent {
 	theme := ActiveTheme()
 	component := &UserMessageSelectorComponent{Container: &tui.Container{}}
 	component.AddChild(tui.NewSpacer(1))
@@ -409,8 +411,17 @@ func NewUserMessageSelectorComponent(messages []UserMessageItem, onSelect func(e
 
 	if len(messages) == 0 {
 		go func() {
-			// Auto-cancel shortly after mounting (upstream's 100ms timer).
+			// Auto-cancel shortly after mounting (upstream's 100ms timer),
+			// marshaled onto the UI side like any render-side mutation.
 			delayMillis(100)
+			if post != nil {
+				post(func() {
+					if onCancel != nil {
+						onCancel()
+					}
+				})
+				return
+			}
 			if onCancel != nil {
 				onCancel()
 			}

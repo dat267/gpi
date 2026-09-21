@@ -176,8 +176,12 @@ func TestScopedModelsWiring(t *testing.T) {
 	if enabled := selector.EnabledIDs(); len(enabled.IDs) != 1 || enabled.IDs[0] != "p/a" {
 		t.Fatalf("enabled = %+v", enabled)
 	}
-	// The refresh goroutine completes; wait for the render request.
-	waitForCondition(t, func() bool { return selector.RefreshStatus() == "Model catalogs refreshed." })
+	// The refresh goroutine completes; the result is marshaled onto the UI
+	// side and drains on the next render (auto-render is disabled here).
+	waitForCondition(t, func() bool {
+		wiring.UI.(*tui.MainScreen).RenderNow(true)
+		return selector.RefreshStatus() == "Model catalogs refreshed."
+	})
 
 	// Persisting a subset writes the settings.
 	selector.PersistEnabled(EnabledIds{IDs: []string{"p/a"}})

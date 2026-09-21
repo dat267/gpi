@@ -285,7 +285,10 @@ func TestAuthCompleteAuthentication(t *testing.T) {
 	session.model = &ai.Model{Provider: "unknown", ID: "unknown", API: "unknown"}
 	before := errorsShown.len()
 	wiring.CompleteProviderAuthentication(context.Background(), "anthropic", "Anthropic", "api_key", session.model)
-	waitForCondition(t, func() bool { return errorsShown.len() > before })
+	waitForCondition(t, func() bool {
+		wiring.UI.(*tui.MainScreen).RenderNow(true)
+		return errorsShown.len() > before
+	})
 	if !strings.Contains(errorsShown.last(), "no models are available for that provider") {
 		t.Fatalf("errors = %v", errorsShown.messages)
 	}

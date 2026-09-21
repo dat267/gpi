@@ -245,6 +245,10 @@ func (w *SelectorWiring) ShowUserMessageSelector(ctx context.Context) {
 		items = append(items, UserMessageItem{ID: message.EntryID, Text: message.Text})
 	}
 	w.Slot.Show(func(done func()) CreatedSelector {
+		var post func(func())
+		if w.Slot.UI != nil {
+			post = w.Slot.UI.Post
+		}
 		selector := NewUserMessageSelectorComponent(items,
 			func(entryID string) {
 				done()
@@ -277,7 +281,7 @@ func (w *SelectorWiring) ShowUserMessageSelector(ctx context.Context) {
 					w.Slot.UI.RequestRender(false)
 				}
 			},
-			initialSelectedID)
+			initialSelectedID, post)
 		return CreatedSelector{Component: selector, Focus: selector.GetMessageList()}
 	})
 }
