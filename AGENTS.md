@@ -314,8 +314,17 @@ summarized in the README scoreboard. The range is **D1–D139**. Representative:
   refresh outcome, waiter count and canceled flag). Two races were fixed on the
   way: publishing must not overwrite an entry that appeared after the load, and
   a waiter slot is only claimed once the entry is confirmed published.
-- D135's footer-watcher half (`coding/footerdata.go`) sits outside the refactor's
-  edit scope and is documented rather than retired.
+- D149 — `FooterDataProvider.mu` (`coding/footerdata.go`) is the one lock the
+  refactor leaves in place, by design. It guards the provider's cwd, git paths,
+  branch, extension statuses and listener registry, which its own 500 ms
+  **watcher goroutine** (git HEAD polling) shares with the UI loop's footer
+  render. Closing it needs the same treatment as the accepted
+  `SessionManager` fix plus a decision on the watcher's delivery: the poll
+  result would have to be posted to the UI loop (like the theme watcher now is)
+  and the listener fan-out delivered outside the lock. That is a `coding/`
+  change outside this refactor's scope, so it is documented rather than
+  retired; the provider is otherwise loop-idiomatic (its polling goroutine only
+  reads git state and calls `Refresh`).
 - D145 — terminal input, resize and process signals reach the UI loop as
   channel messages from pure producers (the stdin reader, the SIGWINCH
   watcher, the signal handlers); the loop dispatches input, paints on resize
