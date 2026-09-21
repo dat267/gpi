@@ -10,7 +10,7 @@ import (
 	"github.com/dat267/gpi/tui"
 )
 
-func TestDockAfterScroll(t *testing.T) {
+func TestDockPinnedAfterScroll(t *testing.T) {
 	app, cleanup := newTestAppB(t)
 	defer cleanup()
 	app.Init(context.Background())
