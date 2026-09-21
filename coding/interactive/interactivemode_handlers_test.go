@@ -237,7 +237,7 @@ func TestSubmitCommandDispatch(t *testing.T) {
 
 // TestSubmitBashAndQueues covers the bash/compaction/streaming branches.
 func TestSubmitBashAndQueues(t *testing.T) {
-	_, submit, session, editor := newHandlerTestWiring(t)
+	keys, submit, session, editor := newHandlerTestWiring(t)
 	bashCalls := []string{}
 	submit.Handlers.HandleBashCommand = func(command string, exclude bool) error {
 		suffix := ""
@@ -266,18 +266,29 @@ func TestSubmitBashAndQueues(t *testing.T) {
 	}
 	session.bashRunning = false
 
-	// Compaction queues the prompt without steering.
+	// Compaction queues the message for after compaction (upstream
+	// queueCompactionMessage, steer mode). A raw Prompt would be rejected by
+	// the session while compaction is in progress and the message would be
+	// silently dropped.
 	session.compacting = true
+	promptsBefore := len(session.prompts)
 	submit.HandleSubmit(context.Background(), "during compaction")
-	if len(session.prompts) != 1 || session.prompts[0] != "during compaction" || session.streamingBehaviors[0] != "" {
-		t.Fatalf("prompts = %v, behaviors = %v", session.prompts, session.streamingBehaviors)
+	queued := keys.Queue.CompactionQueuedMessages()
+	if len(queued) != 1 || queued[0].Text != "during compaction" || queued[0].Mode != "steer" {
+		t.Fatalf("queued = %v", queued)
+	}
+	if len(session.prompts) != promptsBefore {
+		t.Fatalf("prompts = %v (message must not be submitted while compacting)", session.prompts)
+	}
+	if editor.GetText() != "" {
+		t.Fatalf("editor = %q", editor.GetText())
 	}
 	session.compacting = false
 
 	// Streaming steers.
 	session.streaming = true
 	submit.HandleSubmit(context.Background(), "steer me")
-	if session.streamingBehaviors[1] != "steer" {
+	if session.streamingBehaviors[0] != "steer" {
 		t.Fatalf("behaviors = %v", session.streamingBehaviors)
 	}
 	session.streaming = false

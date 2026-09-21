@@ -447,8 +447,14 @@ func (w *SubmitWiring) HandleSubmit(ctx context.Context, text string) {
 		}
 	}
 
-	// Queue input during compaction.
+	// Queue input during compaction: upstream queueCompactionMessage queues
+	// the message (steer mode) for after compaction — the session rejects
+	// prompts while compacting, so a raw Prompt would silently drop it.
 	if w.Session != nil && w.Session.IsCompacting() {
+		if w.Queue != nil {
+			w.Queue.QueueCompactionMessage(text, "steer")
+			return
+		}
 		addHistory(text)
 		clearEditor()
 		_ = w.Session.Prompt(ctx, text, nil)
