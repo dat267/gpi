@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dat267/pier/tui"
@@ -97,26 +98,21 @@ func (t *Theme) Bg(color ThemeBg, text string) string {
 // the style helpers return plain text (divergence D86: a package switch
 // instead of chalk's NO_COLOR/FORCE_COLOR environment handling).
 var styleColorsState struct {
-	mu      sync.Mutex
-	enabled bool
-	set     bool
+	enabled atomic.Bool
+	set     atomic.Bool
 }
 
 // SetStyleColorsEnabled toggles the chalk-equivalent style helpers.
 func SetStyleColorsEnabled(enabled bool) {
-	styleColorsState.mu.Lock()
-	defer styleColorsState.mu.Unlock()
-	styleColorsState.enabled = enabled
-	styleColorsState.set = true
+	styleColorsState.enabled.Store(enabled)
+	styleColorsState.set.Store(true)
 }
 
 func styleColorsEnabled() bool {
-	styleColorsState.mu.Lock()
-	defer styleColorsState.mu.Unlock()
-	if !styleColorsState.set {
+	if !styleColorsState.set.Load() {
 		return true
 	}
-	return styleColorsState.enabled
+	return styleColorsState.enabled.Load()
 }
 
 // Bold applies bold (chalk.bold).
@@ -798,39 +794,42 @@ func GetDefaultTheme() string {
 
 // ---- Global theme registry ----
 
+// themeState is process-global theme state. Stage 4 removed its mutex: values
+// are published with atomics (copy-on-write for the registry) so the theme
+// watcher, the UI loop and test seams can read concurrently without a lock.
+// The watcher's change callback is delivered on the UI loop by the app wiring.
 var themeState struct {
-	mu             sync.Mutex
-	current        *Theme
-	currentName    string
-	registered     map[string]*Theme
-	onChange       func()
-	watcherStop    chan struct{}
-	watcherWatchFn func(string) // test seam for the watcher (unused by default)
-	validator      func(label string, raw json.RawMessage) (*ThemeJSON, error)
+	current     atomic.Pointer[Theme]
+	currentName atomic.Pointer[string]
+	registered  atomic.Pointer[map[string]*Theme]
+	onChange    atomic.Pointer[func()]
+	watcherStop atomic.Pointer[chan struct{}]
+	validator   atomic.Pointer[func(label string, raw json.RawMessage) (*ThemeJSON, error)]
 }
 
 func registeredThemesSnapshot() map[string]*Theme {
-	themeState.mu.Lock()
-	defer themeState.mu.Unlock()
+	registered := themeState.registered.Load()
 	out := map[string]*Theme{}
-	for name, theme := range themeState.registered {
-		out[name] = theme
+	if registered != nil {
+		for name, theme := range *registered {
+			out[name] = theme
+		}
 	}
 	return out
 }
 
 func registeredThemesGet(name string) (*Theme, bool) {
-	themeState.mu.Lock()
-	defer themeState.mu.Unlock()
-	theme, ok := themeState.registered[name]
+	registered := themeState.registered.Load()
+	if registered == nil {
+		return nil, false
+	}
+	theme, ok := (*registered)[name]
 	return theme, ok
 }
 
 // SetRegisteredThemes installs the registered (in-memory) themes.
 func SetRegisteredThemes(themes []*Theme) {
-	themeState.mu.Lock()
-	defer themeState.mu.Unlock()
-	themeState.registered = map[string]*Theme{}
+	registered := map[string]*Theme{}
 	for _, theme := range themes {
 		if theme == nil || theme.Name == "" {
 			continue
@@ -838,15 +837,14 @@ func SetRegisteredThemes(themes []*Theme) {
 		if strings.Contains(theme.Name, "/") {
 			panic("Invalid theme name \"" + theme.Name + "\": theme names cannot contain \"/\"")
 		}
-		themeState.registered[theme.Name] = theme
+		registered[theme.Name] = theme
 	}
+	themeState.registered.Store(&registered)
 }
 
 // SetThemeJSONValidator installs the document validator.
 func SetThemeJSONValidator(validator func(label string, raw json.RawMessage) (*ThemeJSON, error)) {
-	themeState.mu.Lock()
-	defer themeState.mu.Unlock()
-	themeState.validator = validator
+	themeState.validator.Store(&validator)
 }
 
 // InitTheme loads the given theme (or the detected default) into the global slot.
@@ -855,15 +853,13 @@ func InitTheme(themeName string, enableWatcher bool) {
 	if name == "" {
 		name = GetDefaultTheme()
 	}
-	themeState.mu.Lock()
-	themeState.currentName = name
-	themeState.mu.Unlock()
+	themeState.currentName.Store(&name)
 	theme, err := loadTheme(name, "")
 	if err != nil {
-		setGlobalThemeLocked("dark", mustLoadTheme("dark"))
+		setGlobalTheme("dark", mustLoadTheme("dark"))
 		return
 	}
-	setGlobalThemeLocked(name, theme)
+	setGlobalTheme(name, theme)
 	if enableWatcher {
 		startThemeWatcher(name)
 	}
@@ -877,67 +873,58 @@ func mustLoadTheme(name string) *Theme {
 	return theme
 }
 
-func setGlobalThemeLocked(name string, theme *Theme) {
-	themeState.mu.Lock()
-	defer themeState.mu.Unlock()
-	themeState.current = theme
-	themeState.currentName = name
+func setGlobalTheme(name string, theme *Theme) {
+	themeState.current.Store(theme)
+	themeState.currentName.Store(&name)
 }
 
 // SetTheme switches the global theme.
 func SetTheme(name string, enableWatcher bool) (bool, string) {
-	themeState.mu.Lock()
-	themeState.currentName = name
-	themeState.mu.Unlock()
+	themeState.currentName.Store(&name)
 	theme, err := loadTheme(name, "")
 	if err != nil {
-		setGlobalThemeLocked("dark", mustLoadTheme("dark"))
+		setGlobalTheme("dark", mustLoadTheme("dark"))
 		return false, err.Error()
 	}
-	setGlobalThemeLocked(name, theme)
+	setGlobalTheme(name, theme)
 	if enableWatcher {
 		startThemeWatcher(name)
 	}
-	themeState.mu.Lock()
-	callback := themeState.onChange
-	themeState.mu.Unlock()
-	if callback != nil {
-		callback()
-	}
+	notifyThemeChange()
 	return true, ""
+}
+
+// notifyThemeChange delivers the registered callback (the app wires it through
+// the UI loop).
+func notifyThemeChange() {
+	callback := themeState.onChange.Load()
+	if callback != nil {
+		(*callback)()
+	}
 }
 
 // SetThemeInstance installs an in-memory theme.
 func SetThemeInstance(theme *Theme) {
-	setGlobalThemeLocked("<in-memory>", theme)
+	setGlobalTheme("<in-memory>", theme)
 	stopThemeWatcher()
-	themeState.mu.Lock()
-	callback := themeState.onChange
-	themeState.mu.Unlock()
-	if callback != nil {
-		callback()
-	}
+	notifyThemeChange()
 }
 
 // OnThemeChange registers the change callback.
 func OnThemeChange(callback func()) {
-	themeState.mu.Lock()
-	defer themeState.mu.Unlock()
-	themeState.onChange = callback
+	themeState.onChange.Store(&callback)
 }
 
 // CurrentTheme returns the active theme.
-func CurrentTheme() *Theme {
-	themeState.mu.Lock()
-	defer themeState.mu.Unlock()
-	return themeState.current
-}
+func CurrentTheme() *Theme { return themeState.current.Load() }
 
 // CurrentThemeName returns the active theme name.
 func CurrentThemeName() string {
-	themeState.mu.Lock()
-	defer themeState.mu.Unlock()
-	return themeState.currentName
+	name := themeState.currentName.Load()
+	if name == nil {
+		return ""
+	}
+	return *name
 }
 
 // startThemeWatcher polls a custom theme file for changes (D75: no fs.watch in
@@ -953,9 +940,7 @@ func startThemeWatcher(themeName string) {
 	}
 
 	stop := make(chan struct{})
-	themeState.mu.Lock()
-	themeState.watcherStop = stop
-	themeState.mu.Unlock()
+	themeState.watcherStop.Store(&stop)
 
 	go func() {
 		var lastMod time.Time
@@ -985,16 +970,16 @@ func startThemeWatcher(themeName string) {
 					// The file may be mid-write; ignore and retry on the next tick.
 					continue
 				}
-				themeState.mu.Lock()
-				if themeState.registered != nil {
-					themeState.registered[themeName] = reloaded
+				if registered := themeState.registered.Load(); registered != nil {
+					updated := make(map[string]*Theme, len(*registered)+1)
+					for name, theme := range *registered {
+						updated[name] = theme
+					}
+					updated[themeName] = reloaded
+					themeState.registered.Store(&updated)
 				}
-				themeState.current = reloaded
-				callback := themeState.onChange
-				themeState.mu.Unlock()
-				if callback != nil {
-					callback()
-				}
+				themeState.current.Store(reloaded)
+				notifyThemeChange()
 			}
 		}
 	}()
@@ -1002,12 +987,9 @@ func startThemeWatcher(themeName string) {
 
 // StopThemeWatcher stops the theme file watcher.
 func StopThemeWatcher() {
-	themeState.mu.Lock()
-	stop := themeState.watcherStop
-	themeState.watcherStop = nil
-	themeState.mu.Unlock()
+	stop := themeState.watcherStop.Swap(nil)
 	if stop != nil {
-		close(stop)
+		close(*stop)
 	}
 }
 
@@ -1016,44 +998,38 @@ func stopThemeWatcher() { StopThemeWatcher() }
 // terminalCapabilitiesTrueColor reports the terminal's truecolor support; the
 // host installs the capability flag (D69: injectable capabilities).
 var trueColorState struct {
-	mu      sync.Mutex
-	enabled bool
-	known   bool
+	enabled atomic.Bool
+	known   atomic.Bool
 }
 
 // SetTrueColorSupport installs the terminal truecolor capability.
 func SetTrueColorSupport(enabled bool) {
-	trueColorState.mu.Lock()
-	defer trueColorState.mu.Unlock()
-	trueColorState.enabled = enabled
-	trueColorState.known = true
+	trueColorState.enabled.Store(enabled)
+	trueColorState.known.Store(true)
 }
 
 func terminalCapabilitiesTrueColor() bool {
-	trueColorState.mu.Lock()
-	defer trueColorState.mu.Unlock()
-	return trueColorState.enabled
+	return trueColorState.enabled.Load()
 }
 
 // CustomThemesDir returns the user's custom themes directory. The host
 // installs it (upstream reads the agent directory).
 var customThemesDirState struct {
-	mu  sync.Mutex
-	dir string
+	dir atomic.Pointer[string]
 }
 
 // SetCustomThemesDir installs the custom themes directory.
 func SetCustomThemesDir(dir string) {
-	customThemesDirState.mu.Lock()
-	defer customThemesDirState.mu.Unlock()
-	customThemesDirState.dir = dir
+	customThemesDirState.dir.Store(&dir)
 }
 
 // CustomThemesDir returns the configured custom themes directory.
 func CustomThemesDir() string {
-	customThemesDirState.mu.Lock()
-	defer customThemesDirState.mu.Unlock()
-	return customThemesDirState.dir
+	dir := customThemesDirState.dir.Load()
+	if dir == nil {
+		return ""
+	}
+	return *dir
 }
 
 // ---- Terminal queries (src/modes/interactive/theme/theme.ts) ----

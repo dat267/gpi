@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dat267/pier/coding"
@@ -222,23 +223,17 @@ func (h *SessionSelectorHeader) SetStatusMessage(message *sessionStatusMessage, 
 	})
 }
 
-// scheduleOnce wraps a scheduler and returns a cancel function.
+// scheduleOnce wraps a scheduler and returns a cancel function. The timer may
+// fire on another goroutine, so the cancel flag is atomic (stage 4: no lock).
 func scheduleOnce(schedule func(ms int, fn func()), ms int, fn func()) func() {
-	canceled := false
-	var mu sync.Mutex
+	var canceled atomic.Bool
 	schedule(ms, func() {
-		mu.Lock()
-		defer mu.Unlock()
-		if canceled {
+		if canceled.Load() {
 			return
 		}
 		fn()
 	})
-	return func() {
-		mu.Lock()
-		defer mu.Unlock()
-		canceled = true
-	}
+	return func() { canceled.Store(true) }
 }
 
 // Invalidate is a no-op.
@@ -811,6 +806,9 @@ func (l *SessionList) HandleInput(keyData string) {
 
 // SessionSelectorOptions configure the selector.
 type SessionSelectorOptions struct {
+	// Post marshals background loader results onto the UI loop. It must be set
+	// at construction: the initial load starts inside the constructor.
+	Post                   func(fn func())
 	RenameSession          func(sessionPath string, currentName string) error
 	ShowRenameHint         bool
 	Keybindings            *tui.KeybindingsManager
@@ -826,8 +824,6 @@ type SessionSelectorOptions struct {
 // SessionSelectorComponent is the resume session selector.
 type SessionSelectorComponent struct {
 	*tui.Container
-
-	mu sync.Mutex
 
 	sessionList *SessionList
 	header      *SessionSelectorHeader
@@ -850,11 +846,9 @@ type SessionSelectorComponent struct {
 	allLoad     context.CancelFunc
 	loads       sync.WaitGroup
 
-	// pendingApply holds loader-result mutations queued from the load
-	// goroutine and drained inside Render, which runs under the renderer's
-	// lock alongside input handling. Applying directly from the goroutine
-	// raced the render timer (same class as D136-D139).
-	pendingApply []func()
+	// Post marshals background loader results onto the UI loop (stage 4).
+	// Nil applies inline (tests without a loop).
+	Post func(fn func())
 
 	mode             string // "list" | "rename"
 	renameInput      *tui.Input
@@ -879,6 +873,7 @@ func NewSessionSelectorComponent(currentSessionsLoader SessionsLoader, allSessio
 	}
 	component := &SessionSelectorComponent{
 		Container:             &tui.Container{},
+		Post:                  options.Post,
 		keybindings:           keybindings,
 		currentSessionsLoader: currentSessionsLoader,
 		allSessionsLoader:     allSessionsLoader,
@@ -945,7 +940,6 @@ func NewSessionSelectorComponent(currentSessionsLoader SessionsLoader, allSessio
 		if component.renameSession == nil {
 			return
 		}
-		component.mu.Lock()
 		loading := component.currentLoad != nil
 		if component.scope == SessionScopeAll {
 			loading = component.allLoad != nil
@@ -954,7 +948,6 @@ func NewSessionSelectorComponent(currentSessionsLoader SessionsLoader, allSessio
 		if component.scope == SessionScopeAll {
 			sessions = component.allSessions
 		}
-		component.mu.Unlock()
 		if loading {
 			return
 		}
@@ -990,13 +983,6 @@ func NewSessionSelectorComponent(currentSessionsLoader SessionsLoader, allSessio
 // Render drains queued load results (under the renderer's lock, serialized
 // with input handling) before rendering.
 func (c *SessionSelectorComponent) Render(width int) []string {
-	c.mu.Lock()
-	pending := c.pendingApply
-	c.pendingApply = nil
-	c.mu.Unlock()
-	for _, apply := range pending {
-		apply()
-	}
 	return c.Container.Render(width)
 }
 
@@ -1007,17 +993,10 @@ func (c *SessionSelectorComponent) requestRenderNow() {
 	}
 }
 
-// WaitForPendingLoads blocks until the in-flight loads have been applied
-// (test seam, D103) and drains any queued result mutations.
+// WaitForPendingLoads blocks until the in-flight loaders have finished (test
+// seam, D103). Loader results apply inline when no Post sink is installed.
 func (c *SessionSelectorComponent) WaitForPendingLoads() {
 	c.loads.Wait()
-	c.mu.Lock()
-	pending := c.pendingApply
-	c.pendingApply = nil
-	c.mu.Unlock()
-	for _, apply := range pending {
-		apply()
-	}
 }
 
 func (c *SessionSelectorComponent) buildBaseLayout(content tui.Component, showHeader bool) {
@@ -1061,7 +1040,6 @@ func (c *SessionSelectorComponent) SetFocused(focused bool) {
 func (c *SessionSelectorComponent) Focused() bool { return c.focused }
 
 func (c *SessionSelectorComponent) cancelLoads() {
-	c.mu.Lock()
 	if c.currentLoad != nil {
 		c.currentLoad()
 		c.currentLoad = nil
@@ -1072,7 +1050,6 @@ func (c *SessionSelectorComponent) cancelLoads() {
 		c.allLoad = nil
 		c.allSessions = nil
 	}
-	c.mu.Unlock()
 }
 
 func (c *SessionSelectorComponent) enterRenameMode(sessionPath string, currentName string) {
@@ -1126,14 +1103,12 @@ func (c *SessionSelectorComponent) confirmRename(value string) {
 func (c *SessionSelectorComponent) deleteSessionAndRefresh(sessionPath string) {
 	result := c.deleteSession(sessionPath)
 	if result.OK {
-		c.mu.Lock()
 		c.currentSessions = filterOutSession(c.currentSessions, sessionPath)
 		c.allSessions = filterOutSession(c.allSessions, sessionPath)
 		sessions := c.currentSessions
 		if c.scope == SessionScopeAll {
 			sessions = c.allSessions
 		}
-		c.mu.Unlock()
 
 		c.sessionList.SetSessions(sessions, c.scope == SessionScopeAll)
 		message := "Session deleted"
@@ -1166,13 +1141,11 @@ func filterOutSession(sessions []coding.SessionInfo, sessionPath string) []codin
 }
 
 func (c *SessionSelectorComponent) loadScope(scope SessionScope) {
-	c.mu.Lock()
 	alreadyLoading := c.currentLoad != nil
 	if scope == SessionScopeAll {
 		alreadyLoading = c.allLoad != nil
 	}
 	if alreadyLoading {
-		c.mu.Unlock()
 		return
 	}
 	showCwd := scope == SessionScopeAll
@@ -1182,7 +1155,6 @@ func (c *SessionSelectorComponent) loadScope(scope SessionScope) {
 	} else {
 		c.allLoad = cancel
 	}
-	c.mu.Unlock()
 
 	c.header.SetScope(scope)
 	c.header.SetLoading(true)
@@ -1191,47 +1163,33 @@ func (c *SessionSelectorComponent) loadScope(scope SessionScope) {
 	c.loads.Add(1)
 	go func() {
 		defer c.loads.Done()
-		isActive := func() bool {
-			c.mu.Lock()
-			defer c.mu.Unlock()
-			if scope == SessionScopeCurrent {
-				return c.currentLoad != nil
-			}
-			return c.allLoad != nil
-		}
+		// The worker is a pure producer: results are handed to the loop, which
+		// owns the selector state (stage 4). Cancellation is observed through
+		// the load context instead of shared state.
 		onProgress := func(loaded int, total int, partialSessions []coding.SessionInfo) {
-			if !isActive() {
+			if ctx.Err() != nil {
 				return
 			}
 			if partialSessions != nil {
 				sessions := append([]coding.SessionInfo{}, partialSessions...)
-				c.mu.Lock()
-				if scope == SessionScopeCurrent {
-					c.currentSessions = sessions
-				} else {
-					c.allSessions = sessions
-				}
-				activeScope := c.scope
-				if scope == activeScope {
-					snapshot := sessions
-					c.pendingApply = append(c.pendingApply, func() {
-						c.sessionList.SetSessions(snapshot, showCwd)
-					})
-				}
-				c.mu.Unlock()
-			}
-			c.mu.Lock()
-			activeScope := c.scope
-			if scope == activeScope {
-				loadedSnapshot, totalSnapshot := loaded, total
-				c.pendingApply = append(c.pendingApply, func() {
-					c.header.SetProgress(loadedSnapshot, totalSnapshot)
+				c.postApply(func() {
+					if scope == SessionScopeCurrent {
+						c.currentSessions = sessions
+					} else {
+						c.allSessions = sessions
+					}
+					if scope == c.scope {
+						c.sessionList.SetSessions(sessions, showCwd)
+					}
 				})
 			}
-			c.mu.Unlock()
-			if scope == activeScope {
+			c.postApply(func() {
+				if scope != c.scope {
+					return
+				}
+				c.header.SetProgress(loaded, total)
 				c.requestRenderNow()
-			}
+			})
 		}
 
 		loader := c.currentSessionsLoader
@@ -1239,41 +1197,46 @@ func (c *SessionSelectorComponent) loadScope(scope SessionScope) {
 			loader = c.allSessionsLoader
 		}
 		sessions, err := loader(onProgress, ctx)
-		if !isActive() {
+		if ctx.Err() != nil {
 			return
 		}
 
-		c.mu.Lock()
-		if scope == SessionScopeCurrent {
-			c.currentSessions = sessions
-			c.currentLoad = nil
-		} else {
-			c.allSessions = sessions
-			c.allLoad = nil
+		message := ""
+		if err != nil {
+			message = err.Error()
 		}
-		activeScope := c.scope
-		var apply func()
-		if scope == activeScope {
-			if err != nil {
-				message := err.Error()
-				apply = func() {
-					c.header.SetLoading(false)
-					c.header.SetStatusMessage(&sessionStatusMessage{Type: "error", Message: "Failed to load sessions: " + message}, 4000)
-					c.sessionList.SetSessions(nil, showCwd)
-				}
+		c.postApply(func() {
+			if scope == SessionScopeCurrent {
+				c.currentSessions = sessions
+				c.currentLoad = nil
 			} else {
-				apply = func() {
-					c.header.SetLoading(false)
-					c.sessionList.SetSessions(sessions, showCwd)
-				}
+				c.allSessions = sessions
+				c.allLoad = nil
 			}
-			c.pendingApply = append(c.pendingApply, apply)
-		}
-		c.mu.Unlock()
-		if scope == activeScope {
+			if scope != c.scope {
+				return
+			}
+			if message != "" {
+				c.header.SetLoading(false)
+				c.header.SetStatusMessage(&sessionStatusMessage{Type: "error", Message: "Failed to load sessions: " + message}, 4000)
+				c.sessionList.SetSessions(nil, showCwd)
+			} else {
+				c.header.SetLoading(false)
+				c.sessionList.SetSessions(sessions, showCwd)
+			}
 			c.requestRenderNow()
-		}
+		})
 	}()
+}
+
+// postApply runs fn on the UI loop when a Post sink is installed, else inline
+// (tests without a loop).
+func (c *SessionSelectorComponent) postApply(fn func()) {
+	if c.Post != nil {
+		c.Post(fn)
+		return
+	}
+	fn()
 }
 
 func (c *SessionSelectorComponent) toggleSortMode() {
@@ -1303,11 +1266,9 @@ func (c *SessionSelectorComponent) toggleNameFilter() {
 
 func (c *SessionSelectorComponent) refreshSessionsAfterMutation() {
 	c.cancelLoads()
-	c.mu.Lock()
 	c.currentSessions = nil
 	c.allSessions = nil
 	scope := c.scope
-	c.mu.Unlock()
 	c.loadScope(scope)
 }
 
@@ -1317,14 +1278,12 @@ func (c *SessionSelectorComponent) toggleScope() {
 	} else {
 		c.scope = SessionScopeCurrent
 	}
-	c.mu.Lock()
 	sessions := c.currentSessions
 	loading := c.currentLoad != nil
 	if c.scope == SessionScopeAll {
 		sessions = c.allSessions
 		loading = c.allLoad != nil
 	}
-	c.mu.Unlock()
 
 	c.header.SetScope(c.scope)
 	c.header.SetLoading(loading)

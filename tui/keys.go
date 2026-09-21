@@ -12,29 +12,26 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 )
 
 // ---- Global Kitty protocol state ----
 
+// kittyProtocolState is process-global; stage 4 made it atomic (the terminal
+// reader sets it while the input path reads it).
 var kittyProtocolState struct {
-	mu     sync.Mutex
-	active bool
+	active atomic.Bool
 }
 
 // SetKittyProtocolActive sets the global Kitty keyboard protocol state.
 // Called by ProcessTerminal after detecting protocol support.
 func SetKittyProtocolActive(active bool) {
-	kittyProtocolState.mu.Lock()
-	defer kittyProtocolState.mu.Unlock()
-	kittyProtocolState.active = active
+	kittyProtocolState.active.Store(active)
 }
 
 // IsKittyProtocolActive queries the global Kitty keyboard protocol state.
 func IsKittyProtocolActive() bool {
-	kittyProtocolState.mu.Lock()
-	defer kittyProtocolState.mu.Unlock()
-	return kittyProtocolState.active
+	return kittyProtocolState.active.Load()
 }
 
 // ---- Key identifiers ----
@@ -339,24 +336,20 @@ type parsedModifyOtherKeysSequence struct {
 // lastEventType stores the last parsed event type (upstream keeps this
 // module-level state; nothing reads it, but it is ported for fidelity).
 var lastEventTypeState struct {
-	mu        sync.Mutex
-	eventType KeyEventType
+	eventType atomic.Pointer[KeyEventType]
 }
 
 func setLastEventType(eventType KeyEventType) {
-	lastEventTypeState.mu.Lock()
-	defer lastEventTypeState.mu.Unlock()
-	lastEventTypeState.eventType = eventType
+	lastEventTypeState.eventType.Store(&eventType)
 }
 
 // LastKeyEventType returns the last parsed event type.
 func LastKeyEventType() KeyEventType {
-	lastEventTypeState.mu.Lock()
-	defer lastEventTypeState.mu.Unlock()
-	if lastEventTypeState.eventType == "" {
+	eventType := lastEventTypeState.eventType.Load()
+	if eventType == nil || *eventType == "" {
 		return KeyEventPress
 	}
-	return lastEventTypeState.eventType
+	return *eventType
 }
 
 // IsKeyRelease reports whether the input is a Kitty protocol key-release event.

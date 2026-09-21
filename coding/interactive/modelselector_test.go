@@ -150,7 +150,7 @@ func TestModelSelectorsAgainstUpstreamGolden(t *testing.T) {
 		if spec.SelectAsDefault {
 			onSelectAsDefault = func(*ai.Model) {}
 		}
-		component := NewModelSelectorComponent(nil, current, runtime, scoped, func(*ai.Model) {}, func() {},
+		component := NewModelSelectorComponent(nil, nil, current, runtime, scoped, func(*ai.Model) {}, func() {},
 			spec.Search, onSelectAsDefault, defaultModel)
 		for _, input := range spec.Inputs {
 			component.HandleInput(input)
@@ -231,7 +231,7 @@ func TestModelSelectorSelectNoDeadlock(t *testing.T) {
 	runtime := &fakeModelRuntime{models: models}
 	selected := make(chan *ai.Model, 1)
 	var component *ModelSelectorComponent
-	component = NewModelSelectorComponent(nil, models[0], runtime, nil, func(model *ai.Model) {
+	component = NewModelSelectorComponent(nil, nil, models[0], runtime, nil, func(model *ai.Model) {
 		// Callbacks may touch the component (render/dispose) without deadlocking.
 		component.Dispose()
 		_ = component.Render(80)

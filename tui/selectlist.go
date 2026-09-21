@@ -2,7 +2,6 @@ package tui
 
 import (
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -430,23 +429,32 @@ type LoaderIndicatorOptions struct {
 	IntervalMS int
 }
 
-// Loader is an animated spinner with a message.
+// Animator is implemented by components that animate from the render clock.
+// The owner (the renderer's loop) asks for the next frame delay and re-renders
+// when it elapses; components own no timer and mutate no state from another
+// goroutine (stage 4).
+type Animator interface {
+	// AnimationFrame reports whether the component needs another frame and how
+	// long until it. A non-positive delay means "as soon as possible".
+	AnimationFrame(now time.Time) (bool, time.Duration)
+}
+
+// Loader is an animated spinner with a message. The frame is derived from the
+// clock at render time, so the component holds no animation goroutine and no
+// lock.
 type Loader struct {
 	*Text
 
 	requestRender RenderRequester
 	spinnerColor  func(string) string
 	messageColor  func(string) string
-	message       string
 
-	mu             sync.Mutex
 	frames         []string
 	intervalMS     int
-	currentFrame   int
-	ticker         *time.Ticker
-	done           chan struct{}
 	renderVerbatim bool
-	stopped        bool
+	startedAt      time.Time
+	running        bool
+	messageValue   string
 }
 
 var defaultLoaderFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -460,7 +468,7 @@ func NewLoader(requestRender RenderRequester, spinnerColor func(string) string, 
 		requestRender: requestRender,
 		spinnerColor:  spinnerColor,
 		messageColor:  messageColor,
-		message:       message,
+		messageValue:  message,
 	}
 	if loader.spinnerColor == nil {
 		loader.spinnerColor = func(text string) string { return text }
@@ -480,34 +488,21 @@ func (l *Loader) Render(width int) []string {
 	return append([]string{""}, l.Text.Render(width)...)
 }
 
-// Start updates the display and (re)starts the animation.
+// Start updates the display and starts the animation.
 func (l *Loader) Start() {
+	l.startedAt = time.Now()
+	l.running = true
 	l.updateDisplay()
-	l.restartAnimation()
 }
 
-// Stop halts the animation. The stopped flag makes a callback that already
-// received a tick bail out under the lock (upstream's clearInterval is
-// sufficient on a single-threaded event loop; Go needs the flag: D64).
+// Stop halts the animation.
 func (l *Loader) Stop() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.stopped = true
-	if l.ticker != nil {
-		l.ticker.Stop()
-		l.ticker = nil
-	}
-	if l.done != nil {
-		close(l.done)
-		l.done = nil
-	}
+	l.running = false
 }
 
 // SetMessage updates the message.
 func (l *Loader) SetMessage(message string) {
-	l.mu.Lock()
-	l.message = message
-	l.mu.Unlock()
+	l.messageValue = message
 	l.updateDisplay()
 }
 
@@ -517,9 +512,27 @@ func (l *Loader) Invalidate() {
 	l.updateDisplay()
 }
 
+// AnimationFrame implements Animator: the loader needs a frame whenever it is
+// running with more than one frame.
+func (l *Loader) AnimationFrame(now time.Time) (bool, time.Duration) {
+	if !l.running || len(l.frames) <= 1 {
+		return false, 0
+	}
+	interval := time.Duration(l.intervalMS) * time.Millisecond
+	if interval <= 0 {
+		interval = time.Duration(defaultLoaderIntervalMS) * time.Millisecond
+	}
+	elapsed := now.Sub(l.startedAt)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	next := interval - (elapsed % interval)
+	return true, next
+}
+
 // SetIndicator configures the animation frames and interval.
 func (l *Loader) SetIndicator(indicator *LoaderIndicatorOptions) {
-	l.mu.Lock()
+	l.running = false
 	if indicator == nil {
 		l.renderVerbatim = false
 		l.frames = append([]string(nil), defaultLoaderFrames...)
@@ -537,69 +550,43 @@ func (l *Loader) SetIndicator(indicator *LoaderIndicatorOptions) {
 		}
 		l.intervalMS = interval
 	}
-	l.currentFrame = 0
-	l.mu.Unlock()
 	l.Start()
-}
-
-func (l *Loader) restartAnimation() {
-	l.Stop()
-	l.mu.Lock()
-	if len(l.frames) <= 1 {
-		l.mu.Unlock()
-		return
-	}
-	ticker := time.NewTicker(time.Duration(l.intervalMS) * time.Millisecond)
-	done := make(chan struct{})
-	l.ticker = ticker
-	l.done = done
-	l.stopped = false
-	l.mu.Unlock()
-
-	go func() {
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				l.mu.Lock()
-				if l.stopped {
-					l.mu.Unlock()
-					return
-				}
-				l.currentFrame = (l.currentFrame + 1) % len(l.frames)
-				l.mu.Unlock()
-				l.updateDisplay()
-			}
-		}
-	}()
 }
 
 // RenderedIndicator returns the current frame, styled unless verbatim.
 func (l *Loader) RenderedIndicator() string {
-	l.mu.Lock()
+	return l.RenderedIndicatorAt(time.Now())
+}
+
+// RenderedIndicatorAt renders the indicator for a given clock reading (the
+// frame follows the clock; tests can pin it).
+func (l *Loader) RenderedIndicatorAt(now time.Time) string {
 	frame := ""
 	if len(l.frames) > 0 {
-		frame = l.frames[l.currentFrame%len(l.frames)]
+		index := 0
+		if l.running {
+			interval := time.Duration(l.intervalMS) * time.Millisecond
+			if interval > 0 {
+				if elapsed := now.Sub(l.startedAt); elapsed > 0 {
+					index = int(elapsed/interval) % len(l.frames)
+				}
+			}
+		}
+		frame = l.frames[index%len(l.frames)]
 	}
-	verbatim := l.renderVerbatim
-	l.mu.Unlock()
-	if verbatim {
+	if l.renderVerbatim {
 		return frame
 	}
 	return l.spinnerColor(frame)
 }
 
 func (l *Loader) updateDisplay() {
-	renderedFrame := l.RenderedIndicator()
+	renderedFrame := l.RenderedIndicatorAt(time.Now())
 	indicator := ""
 	if len(renderedFrame) > 0 {
 		indicator = renderedFrame + " "
 	}
-	l.mu.Lock()
-	message := l.message
-	l.mu.Unlock()
-	l.Text.SetText(indicator + l.messageColor(message))
+	l.Text.SetText(indicator + l.messageColor(l.messageValue))
 	if l.requestRender != nil {
 		l.requestRender.RequestRender(false)
 	}
@@ -698,19 +685,19 @@ func (m *MouseRegion) Invalidate() { m.child.Invalidate() }
 // ---- AltScreenFlashContainer ----
 
 // AltScreenFlashContainer shows transient messages composited by the
-// alternate-screen renderer.
+// alternate-screen renderer. Entries expire from the render clock: no timer
+// goroutine and no lock (stage 4).
 type AltScreenFlashContainer struct {
 	requestRender func()
 
-	mu      sync.Mutex
 	entries []flashEntry
 	nextID  int
 }
 
 type flashEntry struct {
-	id      int
-	message string
-	timer   *time.Timer
+	id        int
+	message   string
+	expiresAt time.Time
 }
 
 // NewAltScreenFlashContainer creates a flash container.
@@ -723,47 +710,60 @@ func (c *AltScreenFlashContainer) Flash(message string, durationMS int) {
 	if durationMS == 0 {
 		durationMS = 1000
 	}
-	c.mu.Lock()
-	id := c.nextID
+	entry := flashEntry{
+		id:        c.nextID,
+		message:   message,
+		expiresAt: time.Now().Add(time.Duration(maxInt(0, durationMS)) * time.Millisecond),
+	}
 	c.nextID++
-	entry := flashEntry{id: id, message: message}
-	entry.timer = time.AfterFunc(time.Duration(maxInt(0, durationMS))*time.Millisecond, func() {
-		c.mu.Lock()
-		for index, existing := range c.entries {
-			if existing.id == id {
-				c.entries = append(c.entries[:index], c.entries[index+1:]...)
-				break
-			}
-		}
-		c.mu.Unlock()
-		if c.requestRender != nil {
-			c.requestRender()
-		}
-	})
 	c.entries = append(c.entries, entry)
-	c.mu.Unlock()
+	// The owner asks AnimationFrame for the next expiry and renders again; the
+	// immediate request only paints the new flash.
 	if c.requestRender != nil {
 		c.requestRender()
 	}
 }
 
-// Dispose clears all pending flashes.
-func (c *AltScreenFlashContainer) Dispose() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, entry := range c.entries {
-		entry.timer.Stop()
+// AnimationFrame implements Animator: flashes need one frame at the next
+// expiry.
+func (c *AltScreenFlashContainer) AnimationFrame(now time.Time) (bool, time.Duration) {
+	c.expire(now)
+	if len(c.entries) == 0 {
+		return false, 0
 	}
-	c.entries = nil
+	next := c.entries[0].expiresAt
+	for _, entry := range c.entries[1:] {
+		if entry.expiresAt.Before(next) {
+			next = entry.expiresAt
+		}
+	}
+	delay := next.Sub(now)
+	if delay < 0 {
+		delay = 0
+	}
+	return true, delay
 }
+
+// expire drops entries whose deadline passed.
+func (c *AltScreenFlashContainer) expire(now time.Time) {
+	kept := c.entries[:0]
+	for _, entry := range c.entries {
+		if entry.expiresAt.After(now) {
+			kept = append(kept, entry)
+		}
+	}
+	c.entries = kept
+}
+
+// Dispose clears all pending flashes.
+func (c *AltScreenFlashContainer) Dispose() { c.entries = nil }
 
 // Invalidate drops cached state (none).
 func (c *AltScreenFlashContainer) Invalidate() {}
 
 // Render renders the active flash messages, newest last.
 func (c *AltScreenFlashContainer) Render(width int) []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.expire(time.Now())
 	lines := make([]string, 0, len(c.entries))
 	for _, entry := range c.entries {
 		message := TruncateToWidth(" "+entry.message+" ", width, "", false)

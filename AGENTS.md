@@ -206,20 +206,20 @@ user code under a lock, snapshot under and deliver outside.
 | `StdinBuffer.mu` | `tui/stdinbuffer.go` | sequence assembly, paste re-wrap, Kitty dedup (D51/D139) | C | **stage 3: reduced** — the DrainInput callback swap is gone (the reader stamps an atomic), so the lock now only guards the decoder's own escape/sequence timeout timer; never touches UI state. Stage 4 folds the timer into the reader goroutine (D-row if retained) |
 | `ProcessTerminal.mu` | `tui/terminal.go:127` | terminal writes, raw mode, Kitty negotiation, resize bookkeeping | C | **stage 3: writes are loop-owned, but the stdin reader still shares negotiation state → retained; stage 4 D-row candidate (not UI state)** |
 | ~~`negotiationResult.lastDataMu`~~ | `tui/terminal.go` | DrainInput's last-input tracking | C | **retired in stage 3** (the reader stamps an atomic timestamp instead of swapping the buffer callback) |
-| `ModelSelectorComponent.mu` | `coding/interactive/modelselector.go:59` | selector state + background refresh (D137) | B | stage 4 |
-| `ScopedModelsSelectorComponent.mu` | `coding/interactive/scopedmodelsselector.go:257` | scoped-models state + refresh | B | stage 4 |
-| `SessionSelectorComponent.mu` | `coding/interactive/sessionselector.go:830` | selector state + queued loader applies (D103) | B | stage 4 |
-| `scheduleOnce` local `mu` | `coding/interactive/sessionselector.go:228` | cancelled flag of the auto-cancel timer | D | stage 4 (timer → loop message) |
-| `editCallComponent.previewMu` | `coding/interactive/toolrenderers.go:1046` | async edit-preview handoff | B | stage 4 (`TUI.Post`) |
-| `FooterComponent.cacheMu` | `coding/interactive/footer.go:208` | footer render cache (D141) | C | stage 4 (invalidations on the loop) |
+| ~~`ModelSelectorComponent.mu`~~ | `coding/interactive/modelselector.go` | selector state + background refresh (D137) | B | **retired in stage 4** (refresh results delivered with `Post`; no state lock) |
+| ~~`ScopedModelsSelectorComponent.mu`~~ | `coding/interactive/scopedmodelsselector.go` | scoped-models state + refresh | B | **retired in stage 4** (loop-owned) |
+| ~~`SessionSelectorComponent.mu`~~ | `coding/interactive/sessionselector.go` | selector state + queued loader applies (D103) | B | **retired in stage 4** (loader results delivered with `Post`, cancellation via the load context) |
+| ~~`scheduleOnce` local `mu`~~ | `coding/interactive/sessionselector.go` | cancelled flag of the auto-cancel timer | D | **retired in stage 4** (atomic flag) |
+| ~~`editCallComponent.previewMu`~~ | `coding/interactive/toolrenderers.go` | async edit-preview handoff | B | **retired in stage 4** (atomic preview pointer + claim flag) |
+| ~~`FooterComponent.cacheMu`~~ | `coding/interactive/footer.go` | footer render cache (D141) | C | **retired in stage 4** (invalidations are session events; Render is loop-side) |
 | `ModelCatalogRefreshCoordinator.mu` | `coding/interactive/catalogrefresh.go:34` | per-runtime refresh dedup (D98) | C | stage 4 |
 | `activeCatalogRefresh.mu` | `coding/interactive/catalogrefresh.go:22` | one refresh's result/cancel state | C | stage 4 |
-| `Lifecycle.mu` | `coding/interactive/interactivemode_lifecycle.go:107` | shutdown/suspend/lifecycle flags (D135) | C | stage 3/4 |
+| ~~`Lifecycle.mu`~~ | `coding/interactive/interactivemode_lifecycle.go` | shutdown/suspend/lifecycle flags (D135) | C | **retired in stage 4** (atomics; the emergency terminal path stays lock-free) |
 | ~~`StartupWiring.mu`~~ | `coding/interactive/interactivemode_startup.go` | pending user inputs + telemetry-once flag (D123) | C | **retired in stage 1** (input handoff is a channel) |
-| `Theme.mu` (style colors) | `coding/interactive/theme.go:100` | style-color enable flag (test seam) | C | stage 4 |
-| `themeState.mu` | `coding/interactive/theme.go:802` | global theme registry + watcher (D85) | C | stage 4 |
-| `trueColorState.mu` | `coding/interactive/theme.go:1019` | truecolor capability (test seam) | C | stage 4 |
-| `customThemesDirState.mu` | `coding/interactive/theme.go:1041` | custom themes dir (test seam) | C | stage 4 |
+| ~~`Theme.mu` (style colors)~~ | `coding/interactive/theme.go` | style-color enable flag (test seam) | C | **retired in stage 4** (atomic) |
+| ~~`themeState.mu`~~ | `coding/interactive/theme.go` | global theme registry + watcher (D85) | C | **retired in stage 4** (atomics, copy-on-write registry; watcher callbacks are posted to the loop) |
+| ~~`trueColorState.mu`~~ | `coding/interactive/theme.go` | truecolor capability (test seam) | C | **retired in stage 4** (atomic) |
+| ~~`customThemesDirState.mu`~~ | `coding/interactive/theme.go` | custom themes dir (test seam) | C | **retired in stage 4** (atomic) |
 | `KeybindingsManager.mu` | `tui/keybindings.go:142` | user override definitions | C | stage 4 |
 | `globalKeybindingsState.mu` | `tui/keybindings.go:340` | global manager accessor (`SetKeybindings` seam) | C | stage 4 |
 | `kittyProtocolState.mu` | `tui/keys.go:21` | global Kitty active flag | C/D | stage 4 |

@@ -6,7 +6,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -106,16 +106,18 @@ type LifecycleOptions struct {
 type Lifecycle struct {
 	options LifecycleOptions
 
-	// mu guards the cross-goroutine state flags (the run loop reads them while
-	// the signal/shutdown handlers write them; D135).
-	mu                sync.Mutex
-	initialized       bool
-	shuttingDown      bool
-	shutdownRequested bool
-	lastSigintTimeMS  int64
-	signalCleanups    []func()
-	mainScreenState   *tui.MainScreenRenderState
-	startupSubmit     bool
+	// Cross-goroutine flags are atomics (stage 4): the emergency terminal-error
+	// path must stay reachable from the terminal goroutine without a lock and
+	// without depending on the UI loop. mainScreenState is loop-owned.
+	initialized       atomic.Bool
+	shuttingDown      atomic.Bool
+	shutdownRequested atomic.Bool
+	lastSigintTimeMS  atomic.Int64
+	// signalCleanups is swapped atomically (registration is loop-side, the
+	// emergency path may unregister from the terminal goroutine).
+	signalCleanups  atomic.Pointer[[]func()]
+	mainScreenState *tui.MainScreenRenderState
+	startupSubmit   bool
 	// LayoutRoot is the fullscreen layout root set by the mode.
 	LayoutRoot tui.Component
 
@@ -152,33 +154,17 @@ func NewLifecycle(options LifecycleOptions) *Lifecycle {
 func (l *Lifecycle) Now() func() time.Time { return l.now }
 
 // IsInitialized reports the init state.
-func (l *Lifecycle) IsInitialized() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.initialized
-}
+func (l *Lifecycle) IsInitialized() bool { return l.initialized.Load() }
 
 // IsShuttingDown reports the shutdown state.
-func (l *Lifecycle) IsShuttingDown() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.shuttingDown
-}
+func (l *Lifecycle) IsShuttingDown() bool { return l.shuttingDown.Load() }
 
 // RequestShutdown marks a pending shutdown (the agent_settled hook).
-func (l *Lifecycle) RequestShutdown() {
-	l.mu.Lock()
-	l.shutdownRequested = true
-	l.mu.Unlock()
-}
+func (l *Lifecycle) RequestShutdown() { l.shutdownRequested.Store(true) }
 
 // MarkInitialized records that init completed (upstream sets isInitialized at
 // the end of init).
-func (l *Lifecycle) MarkInitialized() {
-	l.mu.Lock()
-	l.initialized = true
-	l.mu.Unlock()
-}
+func (l *Lifecycle) MarkInitialized() { l.initialized.Store(true) }
 
 // MountInteractiveTui mounts the shared component tree on a renderer.
 func (l *Lifecycle) MountInteractiveTui(renderer tui.TUI, components []tui.Component, layoutRoot tui.Component) {
@@ -285,14 +271,14 @@ func (l *Lifecycle) UpdateTerminalTitle() {
 // HandleCtrlC clears the editor, or shuts down on a double press within 500ms.
 func (l *Lifecycle) HandleCtrlC(clearEditor func()) {
 	now := l.now().UnixMilli()
-	if now-l.lastSigintTimeMS < 500 {
+	if now-l.lastSigintTimeMS.Load() < 500 {
 		l.Shutdown(false)
 		return
 	}
 	if clearEditor != nil {
 		clearEditor()
 	}
-	l.lastSigintTimeMS = now
+	l.lastSigintTimeMS.Store(now)
 }
 
 // HandleCtrlD shuts down (only called with an empty editor).
@@ -316,13 +302,9 @@ func (l *Lifecycle) HandleCtrlZ(showStatus func(string), suspend func()) {
 
 // Shutdown gracefully stops the mode.
 func (l *Lifecycle) Shutdown(fromSignal bool) {
-	l.mu.Lock()
-	if l.shuttingDown {
-		l.mu.Unlock()
+	if l.shuttingDown.Swap(true) {
 		return
 	}
-	l.shuttingDown = true
-	l.mu.Unlock()
 
 	if fromSignal {
 		// Emit the extension cleanup before touching the terminal.
@@ -388,9 +370,7 @@ func (l *Lifecycle) Stop() {
 
 // EmergencyTerminalExit exits when the terminal is gone.
 func (l *Lifecycle) EmergencyTerminalExit() {
-	l.mu.Lock()
-	l.shuttingDown = true
-	l.mu.Unlock()
+	l.shuttingDown.Store(true)
 	l.UnregisterSignalHandlers()
 	if l.options.KillDetachedChildren != nil {
 		l.options.KillDetachedChildren()
@@ -400,14 +380,11 @@ func (l *Lifecycle) EmergencyTerminalExit() {
 
 // UncaughtCrash restores the terminal and exits after an uncaught exception.
 func (l *Lifecycle) UncaughtCrash(err error) {
-	l.mu.Lock()
-	if l.shuttingDown {
-		l.mu.Unlock()
+	if l.shuttingDown.Load() {
 		l.options.Exit(1)
 		return
 	}
-	l.shuttingDown = true
-	l.mu.Unlock()
+	l.shuttingDown.Store(true)
 	l.UnregisterSignalHandlers()
 	if l.options.KillDetachedChildren != nil {
 		l.options.KillDetachedChildren()
@@ -429,10 +406,7 @@ func (l *Lifecycle) UncaughtCrash(err error) {
 
 // CheckShutdownRequested shuts down when a shutdown was requested.
 func (l *Lifecycle) CheckShutdownRequested() {
-	l.mu.Lock()
-	requested := l.shutdownRequested
-	l.mu.Unlock()
-	if !requested {
+	if !l.shutdownRequested.Load() {
 		return
 	}
 	l.Shutdown(false)
@@ -476,7 +450,7 @@ func (l *Lifecycle) RegisterSignalHandlers() {
 			}
 			l.HandleSignal(sig)
 		})
-		l.signalCleanups = append(l.signalCleanups, cleanup)
+		l.addSignalCleanup(cleanup)
 	}
 
 	if l.options.OnTerminalError != nil {
@@ -486,11 +460,11 @@ func (l *Lifecycle) RegisterSignalHandlers() {
 			}
 			panic(err)
 		})
-		l.signalCleanups = append(l.signalCleanups, cleanup)
+		l.addSignalCleanup(cleanup)
 	}
 	if l.options.OnUncaughtException != nil {
 		cleanup := l.options.OnUncaughtException(func(err error) { l.UncaughtCrash(err) })
-		l.signalCleanups = append(l.signalCleanups, cleanup)
+		l.addSignalCleanup(cleanup)
 	}
 }
 
@@ -503,19 +477,43 @@ func (l *Lifecycle) HandleSignal(sig os.Signal) {
 	l.Shutdown(true)
 }
 
+// addSignalCleanup appends to the cleanup registry (lock-free).
+func (l *Lifecycle) addSignalCleanup(cleanup func()) {
+	for {
+		old := l.signalCleanups.Load()
+		var next []func()
+		if old != nil {
+			next = append(next, (*old)...)
+		}
+		next = append(next, cleanup)
+		if l.signalCleanups.CompareAndSwap(old, &next) {
+			return
+		}
+	}
+}
+
 // UnregisterSignalHandlers removes the installed handlers.
 func (l *Lifecycle) UnregisterSignalHandlers() {
-	for _, cleanup := range l.signalCleanups {
+	cleanups := l.signalCleanups.Swap(nil)
+	if cleanups == nil {
+		return
+	}
+	for _, cleanup := range *cleanups {
 		cleanup()
 	}
-	l.signalCleanups = nil
 }
 
 // SignalSink returns the installed signal sink (test helper).
 func (l *Lifecycle) SignalSink() func(os.Signal) { return l.options.SignalSink }
 
 // SignalHandlerCount returns the number of installed handlers (test helper).
-func (l *Lifecycle) SignalHandlerCount() int { return len(l.signalCleanups) }
+func (l *Lifecycle) SignalHandlerCount() int {
+	cleanups := l.signalCleanups.Load()
+	if cleanups == nil {
+		return 0
+	}
+	return len(*cleanups)
+}
 
 func isDeadTerminalErrorText(message string) bool {
 	for _, code := range []string{"EIO", "EPIPE", "ENOTCONN"} {

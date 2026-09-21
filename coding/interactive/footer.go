@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/dat267/pier/ai"
 	"github.com/dat267/pier/coding"
@@ -205,7 +204,6 @@ type FooterComponent struct {
 	// changed; the fingerprint guards the inputs Invalidate cannot cover
 	// (model switches, status edits, cwd moves). Invalidate arrives on the
 	// session's event goroutine while Render runs under the render lock (D141).
-	cacheMu       sync.Mutex
 	cachedWidth   int
 	cachedLines   []string
 	fingerprint   string
@@ -227,8 +225,8 @@ func (f *FooterComponent) SetAutoCompactEnabled(enabled bool) { f.autoCompactEna
 // Invalidate drops the render cache (the dispatcher calls it on every session
 // event).
 func (f *FooterComponent) Invalidate() {
-	f.cacheMu.Lock()
-	defer f.cacheMu.Unlock()
+	// Loop-owned: invalidations arrive as session events and Render runs on the
+	// loop (stage 4: no cache lock).
 	f.hasCachedLine = false
 	f.cachedLines = nil
 }
@@ -265,13 +263,9 @@ func (f *FooterComponent) Render(width int) []string {
 		modelID, strconv.FormatInt(modelWindow, 10), cwd,
 		strconv.Quote(strings.Join(statuses, "\x00")),
 	}, "\x1f")
-	f.cacheMu.Lock()
 	if f.hasCachedLine && f.cachedWidth == width && f.fingerprint == fingerprint {
-		lines := f.cachedLines
-		f.cacheMu.Unlock()
-		return lines
+		return f.cachedLines
 	}
-	f.cacheMu.Unlock()
 
 	line := FooterLine(FooterInput{
 		ContextUsage: f.session.GetContextUsage(),
@@ -280,12 +274,9 @@ func (f *FooterComponent) Render(width int) []string {
 		Cwd:          cwd,
 		Statuses:     statuses,
 	}, width)
-	f.cacheMu.Lock()
 	f.cachedWidth = width
 	f.cachedLines = []string{theme.Fg("dim", line)}
 	f.fingerprint = fingerprint
 	f.hasCachedLine = true
-	cached := f.cachedLines
-	f.cacheMu.Unlock()
-	return cached
+	return f.cachedLines
 }

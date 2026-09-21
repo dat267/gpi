@@ -240,7 +240,7 @@ func TestLifecycleCrashPaths(t *testing.T) {
 
 	// A crash while already shutting down exits without reporting.
 	again, _, exits3, _ := newLifecycleTest(t)
-	again.shuttingDown = true
+	again.shuttingDown.Store(true)
 	again.UncaughtCrash(errorsNew("late"))
 	if len(*exits3) != 1 || (*exits3)[0] != 1 {
 		t.Fatalf("exits = %v", *exits3)

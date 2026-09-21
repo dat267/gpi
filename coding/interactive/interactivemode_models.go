@@ -107,7 +107,7 @@ func (w *ModelWiring) ShowModelSelector(ctx context.Context, initialSearchInput 
 		for _, scoped := range w.Session.ScopedModels() {
 			scopedItems = append(scopedItems, ScopedModelItem{Model: scoped.Model, ThinkingLevel: string(scoped.ThinkingLevel)})
 		}
-		selector := NewModelSelectorComponent(w.UI, w.Session.Model(), runtime, scopedItems,
+		selector := NewModelSelectorComponent(w.UI, w.UI.Post, w.Session.Model(), runtime, scopedItems,
 			func(model *ai.Model) { selectModel(model, false) },
 			func() {
 				done()
@@ -407,6 +407,7 @@ func (w *SessionWiring) ShowSessionSelector() {
 			},
 			func() { w.requestRender() },
 			SessionSelectorOptions{
+				Post: w.Slot.UI.Post,
 				RenameSession: func(sessionPath string, currentName string) error {
 					next := strings.TrimSpace(currentName)
 					if next == "" {

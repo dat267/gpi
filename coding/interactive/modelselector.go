@@ -4,7 +4,6 @@ import (
 	"context"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/dat267/pier/ai"
@@ -56,7 +55,6 @@ type ModelSelectorComponent struct {
 
 	// mu serializes rendering, input handling, and the background refresh
 	// application (the Go port has no single-threaded event loop: D84/D96).
-	mu sync.Mutex
 
 	searchInput *tui.Input
 	focused     bool
@@ -74,6 +72,9 @@ type ModelSelectorComponent struct {
 	onSelectAsDefault func(model *ai.Model)
 	onCancel          func()
 	host              tui.RenderRequester
+	// Post marshals a background result onto the UI loop. Nil runs inline
+	// (tests / no loop). The refresh worker must not mutate selector state.
+	Post func(fn func())
 
 	errorMessage         string
 	refreshStatusMessage string
@@ -90,10 +91,11 @@ type ModelSelectorComponent struct {
 }
 
 // NewModelSelectorComponent creates the selector.
-func NewModelSelectorComponent(host tui.RenderRequester, currentModel *ai.Model, runtime ModelSelectorRuntime, scopedModels []ScopedModelItem, onSelect func(*ai.Model), onCancel func(), initialSearchInput string, onSelectAsDefault func(*ai.Model), defaultModel *DefaultModelReference) *ModelSelectorComponent {
+func NewModelSelectorComponent(host tui.RenderRequester, post func(fn func()), currentModel *ai.Model, runtime ModelSelectorRuntime, scopedModels []ScopedModelItem, onSelect func(*ai.Model), onCancel func(), initialSearchInput string, onSelectAsDefault func(*ai.Model), defaultModel *DefaultModelReference) *ModelSelectorComponent {
 	component := &ModelSelectorComponent{
 		Container:            &tui.Container{},
 		host:                 host,
+		Post:                 post,
 		currentModel:         currentModel,
 		runtime:              runtime,
 		scopedModels:         scopedModels,
@@ -148,7 +150,7 @@ func NewModelSelectorComponent(host tui.RenderRequester, currentModel *ai.Model,
 	// Render the current snapshot immediately, then refresh in the background.
 	component.loadModelsFromSnapshot()
 	if initialSearchInput != "" {
-		component.filterModelsLocked(initialSearchInput)
+		component.filterModels(initialSearchInput)
 	} else {
 		component.updateList()
 	}
@@ -204,48 +206,59 @@ func (c *ModelSelectorComponent) startRefresh() {
 	go func() {
 		defer cancel()
 		result, err := RefreshModelCatalogs(ctx, c.runtime)
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		if c.closed {
-			return
-		}
-		c.refreshStatusMessage = ""
-		switch {
-		case err != nil:
+		// The refresh worker is a pure producer: it hands the outcome to the
+		// loop, which owns the selector state (stage 4).
+		c.postApply(func() {
+			if c.closed {
+				return
+			}
 			c.refreshStatusMessage = ""
-			if ctx.Err() != nil {
+			switch {
+			case err != nil:
+				c.refreshStatusMessage = ""
+				if ctx.Err() != nil {
+					c.errorMessage = "Model refresh timed out; showing cached models."
+				} else {
+					c.errorMessage = "Could not refresh model catalogs: " + err.Error()
+				}
+			case result.Aborted && ctx.Err() != nil:
 				c.errorMessage = "Model refresh timed out; showing cached models."
-			} else {
-				c.errorMessage = "Could not refresh model catalogs: " + err.Error()
+			case len(result.Errors) == 1:
+				key := firstErrorKey(result.Errors)
+				c.errorMessage = "Could not refresh " + key + "; showing cached models."
+			case len(result.Errors) > 1:
+				keys := make([]string, 0, len(result.Errors))
+				for key := range result.Errors {
+					keys = append(keys, key)
+				}
+				sort.Strings(keys)
+				c.errorMessage = "Could not refresh " + itoa(len(result.Errors)) + " model catalogs (" +
+					strings.Join(keys, ", ") + "); showing cached models."
+			default:
+				c.errorMessage = c.runtime.GetError()
+				if c.errorMessage == "" {
+					c.refreshStatusMessage = "Model catalogs refreshed."
+					c.refreshStatusSuccess = true
+				}
 			}
-		case result.Aborted && ctx.Err() != nil:
-			c.errorMessage = "Model refresh timed out; showing cached models."
-		case len(result.Errors) == 1:
-			key := firstErrorKey(result.Errors)
-			c.errorMessage = "Could not refresh " + key + "; showing cached models."
-		case len(result.Errors) > 1:
-			keys := make([]string, 0, len(result.Errors))
-			for key := range result.Errors {
-				keys = append(keys, key)
-			}
-			sort.Strings(keys)
-			c.errorMessage = "Could not refresh " + itoa(len(result.Errors)) + " model catalogs (" +
-				strings.Join(keys, ", ") + "); showing cached models."
-		default:
-			c.errorMessage = c.runtime.GetError()
-			if c.errorMessage == "" {
-				c.refreshStatusMessage = "Model catalogs refreshed."
-				c.refreshStatusSuccess = true
-			}
-		}
 
-		c.loadModelsFromSnapshot()
-		c.filterModelsLocked(c.searchInput.Value())
-		c.updateList()
-		if c.host != nil {
-			c.host.RequestRender(false)
-		}
+			c.loadModelsFromSnapshot()
+			c.filterModels(c.searchInput.Value())
+			c.updateList()
+			if c.host != nil {
+				c.host.RequestRender(false)
+			}
+		})
 	}()
+}
+
+// postApply runs fn on the UI loop when a Post sink is installed, else inline.
+func (c *ModelSelectorComponent) postApply(fn func()) {
+	if c.Post != nil {
+		c.Post(fn)
+		return
+	}
+	fn()
 }
 
 func firstErrorKey(errors map[string]error) string {
@@ -281,14 +294,12 @@ func (c *ModelSelectorComponent) SelectModelAsDefault(model *ai.Model) {
 
 // Dispose stops the background refresh.
 func (c *ModelSelectorComponent) Dispose() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.disposeLocked()
+	c.dispose()
 }
 
 // disposeLocked stops the background refresh for callers that already hold the
 // state mutex (the input handler; D137).
-func (c *ModelSelectorComponent) disposeLocked() {
+func (c *ModelSelectorComponent) dispose() {
 	if c.closed {
 		return
 	}
@@ -361,7 +372,7 @@ func (c *ModelSelectorComponent) setScope(scope modelScopeKind) {
 			break
 		}
 	}
-	c.filterModelsLocked(c.searchInput.Value())
+	c.filterModels(c.searchInput.Value())
 	if c.scopeText != nil {
 		c.scopeText.SetText(c.getScopeText())
 	}
@@ -369,13 +380,11 @@ func (c *ModelSelectorComponent) setScope(scope modelScopeKind) {
 
 // Render renders the selector under the state lock.
 func (c *ModelSelectorComponent) Render(width int) []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	return c.Container.Render(width)
 }
 
 // filterModels is the locked implementation of the filter+list update.
-func (c *ModelSelectorComponent) filterModelsLocked(query string) {
+func (c *ModelSelectorComponent) filterModels(query string) {
 	if query != "" {
 		filtered := tui.FuzzyFilter(c.activeModels, query, func(item modelItem) string {
 			defaultText := ""
@@ -479,7 +488,6 @@ func (c *ModelSelectorComponent) updateList() {
 
 // HandleInput processes input.
 func (c *ModelSelectorComponent) HandleInput(data string) {
-	c.mu.Lock()
 	kb := tui.GetKeybindings()
 	var (
 		selectModel   *ai.Model
@@ -520,22 +528,21 @@ func (c *ModelSelectorComponent) HandleInput(data string) {
 		c.updateList()
 	case kb.Matches(data, "tui.select.confirm"):
 		if c.selectedIndex >= 0 && c.selectedIndex < len(c.filteredModels) {
-			c.disposeLocked()
+			c.dispose()
 			selectModel = c.filteredModels[c.selectedIndex].model
 		}
 	case kb.Matches(data, "tui.select.cancel"):
-		c.disposeLocked()
+		c.dispose()
 		cancelled = true
 	case kb.Matches(data, "app.models.save") && c.onSelectAsDefault != nil:
 		if c.selectedIndex >= 0 && c.selectedIndex < len(c.filteredModels) {
-			c.disposeLocked()
+			c.dispose()
 			selectDefault = c.filteredModels[c.selectedIndex].model
 		}
 	default:
 		c.searchInput.HandleInput(data)
-		c.filterModelsLocked(c.searchInput.Value())
+		c.filterModels(c.searchInput.Value())
 	}
-	c.mu.Unlock()
 
 	// Invoke callbacks outside the state mutex (D137): they mutate the session
 	// and request renders, which can otherwise invert with the renderer lock.
@@ -553,9 +560,7 @@ func (c *ModelSelectorComponent) HandleInput(data string) {
 // selectModel disposes the selector and reports the selection (callers must
 // not hold the state mutex).
 func (c *ModelSelectorComponent) selectModel(model *ai.Model) {
-	c.mu.Lock()
-	c.disposeLocked()
-	c.mu.Unlock()
+	c.dispose()
 	if c.onSelect != nil {
 		c.onSelect(model)
 	}

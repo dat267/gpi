@@ -1,5 +1,9 @@
 package tui
 
+import (
+	"time"
+)
+
 // Port of the renderer surface from src/tui.ts: the TUI interface shared by
 // MainScreen and AltScreen plus the swappable reference.
 //
@@ -42,6 +46,9 @@ type TUI interface {
 	HandleTerminalInput(data string)
 	// RenderCount reports completed paints (test seam).
 	RenderCount() int64
+	// NextAnimation reports whether any mounted component animates and how long
+	// until its next frame (the owner drives frames).
+	NextAnimation() (bool, time.Duration)
 	RequestRender(force bool)
 	SetFocus(component Component)
 	ShowOverlay(component Component, options *OverlayOptions) OverlayHandle
@@ -135,6 +142,9 @@ func (r *TuiReference) HandleTerminalInput(data string) { r.get().HandleTerminal
 
 // RenderCount forwards the active renderer's paint count.
 func (r *TuiReference) RenderCount() int64 { return r.get().RenderCount() }
+
+// NextAnimation forwards the active renderer's animation query.
+func (r *TuiReference) NextAnimation() (bool, time.Duration) { return r.get().NextAnimation() }
 
 // RequestRender requests a render.
 func (r *TuiReference) RequestRender(force bool) { r.get().RequestRender(force) }

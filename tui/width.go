@@ -467,10 +467,19 @@ var spacingMarkRanges = [][2]rune{
 // widthCache caches widths for non-ASCII strings.
 const widthCacheSize = 512
 
-var (
-	widthCacheMu sync.Mutex
-	widthCache   = map[string]int{}
-)
+// widthCache memoizes non-ASCII widths. Stage 4 removed its mutex: sync.Map is
+// safe for the read-mostly, concurrent use from rendering and non-UI callers.
+var widthCache sync.Map
+
+// widthCacheEntryCount counts the memoized entries.
+func widthCacheEntryCount() int {
+	count := 0
+	widthCache.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	return count
+}
 
 // VisibleWidth returns the width of a string in terminal columns: tabs count
 // three, terminal sequences are invisible, grapheme clusters use their
@@ -483,11 +492,8 @@ func VisibleWidth(text string) int {
 		return len(text)
 	}
 
-	widthCacheMu.Lock()
-	cached, ok := widthCache[text]
-	widthCacheMu.Unlock()
-	if ok {
-		return cached
+	if cached, ok := widthCache.Load(text); ok {
+		return cached.(int)
 	}
 
 	clean := text
@@ -502,16 +508,14 @@ func VisibleWidth(text string) int {
 		total += graphemeWidth(segment)
 	}
 
-	widthCacheMu.Lock()
-	if len(widthCache) >= widthCacheSize {
+	if widthCacheEntryCount() >= widthCacheSize {
 		// Evict an arbitrary entry (upstream evicts the insertion-oldest).
-		for key := range widthCache {
-			delete(widthCache, key)
-			break
-		}
+		widthCache.Range(func(key, _ any) bool {
+			widthCache.Delete(key)
+			return false
+		})
 	}
-	widthCache[text] = total
-	widthCacheMu.Unlock()
+	widthCache.Store(text, total)
 	return total
 }
 

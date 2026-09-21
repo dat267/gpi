@@ -437,7 +437,15 @@ func NewApp(options AppOptions) *App {
 		SetupSubmitHandler:    app.SubmitSetup,
 		RenderInitialMessages: func() { app.Transcript.RenderInitialMessages() },
 		OnThemeChange: func(callback func()) func() {
-			OnThemeChange(callback)
+			// The theme watcher fires on its own goroutine; deliver the change
+			// on the UI loop (stage 4).
+			OnThemeChange(func() {
+				if app.UI != nil {
+					app.UI.Post(callback)
+					return
+				}
+				callback()
+			})
 			return func() {}
 		},
 		OnBranchChange: func(callback func()) func() { return app.FooterData.OnBranchChange(callback) },

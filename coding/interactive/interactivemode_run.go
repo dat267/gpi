@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/dat267/pier/coding"
 	"github.com/dat267/pier/tui"
@@ -504,6 +505,34 @@ func (w *RunWiring) renderUI() {
 	}
 }
 
+// armAnimation points the loop's timer at the next component animation frame
+// and returns the channel to select on (nil when nothing animates). An already
+// armed, equal-or-earlier deadline is left alone, so a busy event stream cannot
+// starve the animation.
+func (w *RunWiring) armAnimation(timer *time.Timer, deadline *time.Time) <-chan time.Time {
+	if w.UI == nil {
+		return nil
+	}
+	needs, delay := w.UI.NextAnimation()
+	if !needs {
+		if !deadline.IsZero() {
+			timer.Stop()
+			*deadline = time.Time{}
+		}
+		return nil
+	}
+	if delay <= 0 {
+		delay = time.Millisecond
+	}
+	next := time.Now().Add(delay)
+	if !deadline.IsZero() && !next.Before(*deadline) {
+		return timer.C
+	}
+	timer.Reset(delay)
+	*deadline = next
+	return timer.C
+}
+
 // runnerWorkState is the loop-owned work bookkeeping: at most one blocking
 // unit (a turn, a compaction-queue flush) runs at a time, with the rest
 // queued. Nothing here is shared with other goroutines: only the loop
@@ -562,10 +591,19 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 	inputs := w.Startup.Inputs()
 	w.work.ctx = ctx
 	w.StartWork = w.RunWork
+	// One loop-owned timer drives component animation (loaders, flashes): the
+	// renderer reports the next frame delay and the loop wakes to paint it.
+	animationTimer := time.NewTimer(time.Hour)
+	animationTimer.Stop()
 	defer func() {
+		animationTimer.Stop()
 		w.StartWork = nil
 		w.work.ctx = nil
 	}()
+	var (
+		animationCh       <-chan time.Time
+		animationDeadline time.Time
+	)
 
 	for _, text := range initialWork {
 		text := text
@@ -589,6 +627,7 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 		} else {
 			doneCh = w.work.done
 		}
+		animationCh = w.armAnimation(animationTimer, &animationDeadline)
 
 		select {
 		case <-ctx.Done():
@@ -634,6 +673,9 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 			if w.OnSignal != nil {
 				w.OnSignal(sig)
 			}
+		case <-animationCh:
+			animationDeadline = time.Time{}
+			w.renderUI()
 		case <-w.renderTicks():
 			// Coalesce: apply every event already queued, then paint once, so
 			// a burst of N messages produces one render rather than N.

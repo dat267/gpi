@@ -263,6 +263,47 @@ func (t *Renderer) GetMountedRoots() []Component {
 	return t.Children
 }
 
+// NextAnimation reports whether any mounted component animates and how long
+// until its next frame. Components own no timers: the owner renders and asks
+// again (stage 4).
+func (t *Renderer) NextAnimation() (bool, time.Duration) {
+	now := t.clock()
+	return nextAnimationFor(t.GetMountedRoots(), now)
+}
+
+// nextAnimationFor walks the component tree for the earliest animation frame.
+func nextAnimationFor(components []Component, now time.Time) (bool, time.Duration) {
+	var (
+		needs bool
+		best  time.Duration
+	)
+	var walk func(component Component)
+	walk = func(component Component) {
+		if component == nil {
+			return
+		}
+		if animator, ok := component.(Animator); ok {
+			if want, delay := animator.AnimationFrame(now); want {
+				if delay <= 0 {
+					delay = time.Millisecond
+				}
+				if !needs || delay < best {
+					needs, best = true, delay
+				}
+			}
+		}
+		if holder, ok := component.(childrenHolder); ok {
+			for _, child := range holder.childComponents() {
+				walk(child)
+			}
+		}
+	}
+	for _, component := range components {
+		walk(component)
+	}
+	return needs, best
+}
+
 // Start starts the terminal and requests the first render.
 func (t *Renderer) Start() {
 	t.mu.Lock()

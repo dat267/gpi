@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dat267/pier/coding"
@@ -1041,35 +1041,41 @@ type editPreview struct {
 	Error            string
 }
 
+// editPreviewState carries the async diff preview together with the args key
+// it belongs to, so one atomic swap publishes both (stage 4: the worker and the
+// renderer share state without a lock).
+type editPreviewState struct {
+	argsKey string
+	preview *editPreview
+}
+
 type editCallComponent struct {
 	*tui.Box
-	previewMu      sync.Mutex
-	preview        *editPreview
-	previewArgsKey string
-	previewPending bool
+	// preview is swapped atomically by the preview worker; previewPending is the
+	// claim flag that stops a second worker from starting.
+	preview        atomic.Pointer[editPreviewState]
+	previewPending atomic.Bool
 	settledError   bool
 	builtArgsKey   string
 }
 
-// setPreviewResult stores the async diff preview; the goroutine side of the
-// preview/Render handoff (the read side runs under the render lock).
+// setPreviewResult stores the async diff preview (worker side).
 func (c *editCallComponent) setPreviewResult(requestKey string, preview *editPreview) {
-	c.previewMu.Lock()
-	defer c.previewMu.Unlock()
-	if c.previewArgsKey != requestKey {
+	current := c.preview.Load()
+	if current == nil || current.argsKey != requestKey {
 		return
 	}
-	c.preview = preview
-	c.previewPending = false
+	c.preview.Store(&editPreviewState{argsKey: requestKey, preview: preview})
+	c.previewPending.Store(false)
 }
 
+// snapshotPreview returns a copy of the published preview, or nil.
 func (c *editCallComponent) snapshotPreview() *editPreview {
-	c.previewMu.Lock()
-	defer c.previewMu.Unlock()
-	if c.preview == nil {
+	state := c.preview.Load()
+	if state == nil || state.preview == nil {
 		return nil
 	}
-	snapshot := *c.preview
+	snapshot := *state.preview
 	return &snapshot
 }
 
@@ -1140,18 +1146,18 @@ var editRenderers = ToolRenderers{
 		}
 		previewInput := getRenderablePreviewInput(args)
 		argsKey := argsKeyFor(previewInput)
-		component.previewMu.Lock()
-		if component.previewArgsKey != argsKey {
-			component.preview = nil
-			component.previewArgsKey = argsKey
-			component.previewPending = false
+		current := component.preview.Load()
+		if current == nil || current.argsKey != argsKey {
+			component.preview.Store(nil)
+			component.preview.Store(&editPreviewState{argsKey: argsKey})
+			component.previewPending.Store(false)
 			component.settledError = false
 		}
-		startPreview := context.ArgsComplete && previewInput != nil && component.preview == nil && !component.previewPending
+		startPreview := context.ArgsComplete && previewInput != nil && component.preview.Load().preview == nil &&
+			!component.previewPending.Load()
 		if startPreview {
-			component.previewPending = true
+			component.previewPending.Store(true)
 		}
-		component.previewMu.Unlock()
 		if startPreview {
 			request := previewInput
 			requestKey := argsKey
@@ -1182,14 +1188,14 @@ var editRenderers = ToolRenderers{
 		}
 		if callComponent != nil {
 			changed := false
-			callComponent.previewMu.Lock()
 			if resultDiff != "" {
-				callComponent.preview = &editPreview{Diff: resultDiff, FirstChangedLine: firstChangedLine}
-				callComponent.previewArgsKey = argsKey
-				callComponent.previewPending = false
+				callComponent.preview.Store(&editPreviewState{
+					argsKey: argsKey,
+					preview: &editPreview{Diff: resultDiff, FirstChangedLine: firstChangedLine},
+				})
+				callComponent.previewPending.Store(false)
 				changed = true
 			}
-			callComponent.previewMu.Unlock()
 			if callComponent.settledError != context.IsError {
 				callComponent.settledError = context.IsError
 				changed = true

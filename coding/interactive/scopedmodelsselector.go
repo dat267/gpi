@@ -2,7 +2,6 @@ package interactive
 
 import (
 	"strings"
-	"sync"
 
 	"github.com/dat267/pier/ai"
 	"github.com/dat267/pier/coding"
@@ -202,9 +201,7 @@ type ModelsCallbacks struct {
 
 // ChangeEnabled invokes the change callback (test seam).
 func (c *ScopedModelsSelectorComponent) ChangeEnabled(enabled EnabledIds) {
-	c.mu.Lock()
 	callback := c.callbacks.OnChange
-	c.mu.Unlock()
 	if callback != nil {
 		callback(enabled)
 	}
@@ -212,9 +209,7 @@ func (c *ScopedModelsSelectorComponent) ChangeEnabled(enabled EnabledIds) {
 
 // PersistEnabled invokes the persist callback (test seam).
 func (c *ScopedModelsSelectorComponent) PersistEnabled(enabled EnabledIds) {
-	c.mu.Lock()
 	callback := c.callbacks.OnPersist
-	c.mu.Unlock()
 	if callback != nil {
 		callback(enabled)
 	}
@@ -222,8 +217,6 @@ func (c *ScopedModelsSelectorComponent) PersistEnabled(enabled EnabledIds) {
 
 // RefreshStatus returns the current refresh status text (test seam).
 func (c *ScopedModelsSelectorComponent) RefreshStatus() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.refreshStatus == nil {
 		return ""
 	}
@@ -254,7 +247,6 @@ type ScopedModelsSelectorComponent struct {
 
 	// mu serializes rendering/input against the background catalog refresh
 	// (the Go port has no single-threaded event loop: D119/D96).
-	mu sync.Mutex
 }
 
 // NewScopedModelsSelectorComponent creates the selector.
@@ -302,21 +294,17 @@ func NewScopedModelsSelectorComponent(config ModelsConfig, callbacks ModelsCallb
 	return component
 }
 
-// Render renders the selector under the state lock.
+// Render renders the selector.
 func (c *ScopedModelsSelectorComponent) Render(width int) []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	return c.Container.Render(width)
 }
 
 // UpdateModels replaces the model list and optionally the enabled set.
 func (c *ScopedModelsSelectorComponent) UpdateModels(models []*ai.Model, enabledModelIDs *EnabledIds) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.updateModelsLocked(models, enabledModelIDs)
+	c.updateModels(models, enabledModelIDs)
 }
 
-func (c *ScopedModelsSelectorComponent) updateModelsLocked(models []*ai.Model, enabledModelIDs *EnabledIds) {
+func (c *ScopedModelsSelectorComponent) updateModels(models []*ai.Model, enabledModelIDs *EnabledIds) {
 	selectedID := ""
 	if c.selectedIndex >= 0 && c.selectedIndex < len(c.filteredItems) {
 		selectedID = c.filteredItems[c.selectedIndex].fullID
@@ -345,8 +333,6 @@ func (c *ScopedModelsSelectorComponent) updateModelsLocked(models []*ai.Model, e
 
 // SetRefreshStatus updates the refresh status line.
 func (c *ScopedModelsSelectorComponent) SetRefreshStatus(message string, kind string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.refreshStatus == nil {
 		return
 	}
@@ -492,14 +478,12 @@ func (c *ScopedModelsSelectorComponent) updateList() {
 	}
 }
 
-// HandleInput processes input under the state lock.
+// HandleInput processes input.
 func (c *ScopedModelsSelectorComponent) HandleInput(data string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.handleInputLocked(data)
+	c.handleInput(data)
 }
 
-func (c *ScopedModelsSelectorComponent) handleInputLocked(data string) {
+func (c *ScopedModelsSelectorComponent) handleInput(data string) {
 	kb := tui.GetKeybindings()
 
 	switch {
@@ -650,8 +634,6 @@ func (c *ScopedModelsSelectorComponent) GetSearchInput() *tui.Input { return c.s
 
 // EnabledIDs returns the current enabled set.
 func (c *ScopedModelsSelectorComponent) EnabledIDs() EnabledIds {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	return cloneEnabled(c.enabledIDs)
 }
 

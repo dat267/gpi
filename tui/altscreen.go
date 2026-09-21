@@ -163,20 +163,22 @@ type AltScreen struct {
 	lastClick                    *altClickTarget
 	selectionDragPointer         *struct{ X, Y int }
 	selectionAutoScrollDirection int
-	selectionAutoScrollStop      chan struct{}
-	selectionPressActive         bool
-	scrollbarDrag                *altScrollbarDrag
-	scrollbarHover               *ScrollView
-	scrollToEndRect              *scrollToEndIndicatorRect
-	activeSearch                 *altActiveSearch
-	pressedURL                   string
-	hasPressedURL                bool
-	selectionDragged             bool
-	mouseCapture                 *TuiMouseDispatchTarget
-	mousePressTarget             *TuiMouseDispatchTarget
-	mousePressPoint              *struct{ X, Y int }
-	mousePressMoved              bool
-	lastComponentClick           *struct {
+	// lastSelectionAutoScrollAt paces the clock-driven selection auto-scroll
+	// (stage 4: no ticker goroutine).
+	lastSelectionAutoScrollAt time.Time
+	selectionPressActive      bool
+	scrollbarDrag             *altScrollbarDrag
+	scrollbarHover            *ScrollView
+	scrollToEndRect           *scrollToEndIndicatorRect
+	activeSearch              *altActiveSearch
+	pressedURL                string
+	hasPressedURL             bool
+	selectionDragged          bool
+	mouseCapture              *TuiMouseDispatchTarget
+	mousePressTarget          *TuiMouseDispatchTarget
+	mousePressPoint           *struct{ X, Y int }
+	mousePressMoved           bool
+	lastComponentClick        *struct {
 		Timestamp int64
 		Count     int
 		Component Component
@@ -1538,23 +1540,30 @@ func (s *AltScreen) updateSelectionAutoScrollLocked(event sgrMouseEvent) {
 		s.stopSelectionAutoScrollLocked()
 		return
 	}
-	if s.selectionAutoScrollStop != nil {
-		return
+	// No ticker: AnimationFrame steps the scroll from the render clock while a
+	// drag holds the pointer at an edge (stage 4).
+	s.lastSelectionAutoScrollAt = time.Time{}
+}
+
+// selectionAutoScrollIntervalMS is the legacy ticker period, kept so the
+// clock-driven steps match the previous cadence.
+const selectionAutoScrollIntervalMS = 50
+
+// AnimationFrame implements Animator: a held selection drag scrolls at the
+// legacy cadence.
+func (s *AltScreen) AnimationFrame(now time.Time) (bool, time.Duration) {
+	interval := selectionAutoScrollIntervalMS * time.Millisecond
+	if s.selectionAutoScrollDirection == 0 || s.selectionAnchor == nil || s.selectionDragPointer == nil {
+		return false, 0
 	}
-	stop := make(chan struct{})
-	s.selectionAutoScrollStop = stop
-	go func() {
-		ticker := time.NewTicker(50 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				s.autoScrollSelection()
-			}
-		}
-	}()
+	if s.lastSelectionAutoScrollAt.IsZero() || now.Sub(s.lastSelectionAutoScrollAt) >= interval {
+		s.lastSelectionAutoScrollAt = now
+		s.autoScrollSelection()
+	}
+	if s.selectionAutoScrollDirection == 0 {
+		return false, 0
+	}
+	return true, interval
 }
 
 func (s *AltScreen) autoScrollSelection() {
@@ -1580,10 +1589,6 @@ func (s *AltScreen) autoScrollSelection() {
 }
 
 func (s *AltScreen) stopSelectionAutoScrollLocked() {
-	if s.selectionAutoScrollStop != nil {
-		close(s.selectionAutoScrollStop)
-		s.selectionAutoScrollStop = nil
-	}
 	s.selectionAutoScrollDirection = 0
 	s.selectionDragPointer = nil
 }

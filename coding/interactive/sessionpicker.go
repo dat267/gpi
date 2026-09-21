@@ -63,7 +63,10 @@ func SelectSession(options SelectSessionOptions) string {
 			exit(0)
 		},
 		func() { ui.RequestRender(false) },
-		SessionSelectorOptions{ShowRenameHint: false, Keybindings: tui.GetKeybindings()},
+		// The picker renders on its own timer goroutine; loader results must
+		// apply inside that render pass (Post drains at the start of doRender),
+		// never inline from the loader goroutine (stage 4).
+		SessionSelectorOptions{Post: ui.Post, ShowRenameHint: false, Keybindings: tui.GetKeybindings()},
 	)
 	ui.AddChild(selector)
 	ui.SetFocus(selector.GetSessionList())
