@@ -561,11 +561,25 @@ func (w *CommandWiring) CheckDaxnutsEasterEgg(provider string, modelID string, h
 	}
 }
 
-// HandleCompactCommand compacts the session.
+// HandleCompactCommand compacts the session (upstream shape: clear the
+// indicator, then compact).
 func (w *CommandWiring) HandleCompactCommand(ctx context.Context, customInstructions string) {
+	w.ClearCompactionStatus()
+	w.CompactSession(ctx, customInstructions)
+}
+
+// ClearCompactionStatus clears the active status indicator. It touches UI
+// state, so it must run on the UI loop.
+func (w *CommandWiring) ClearCompactionStatus() {
 	if w.ClearStatusIndicator != nil {
 		w.ClearStatusIndicator()
 	}
+}
+
+// CompactSession runs the compaction. Its only UI effects are the session
+// events it emits, so it is safe to run off the loop (stage 3: a manual
+// compaction no longer blocks input).
+func (w *CommandWiring) CompactSession(ctx context.Context, customInstructions string) {
 	// Errors are emitted as session events.
 	_ = w.Session.CompactSession(ctx, customInstructions)
 }

@@ -3,6 +3,7 @@ package interactive
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/dat267/pier/coding"
@@ -83,6 +84,14 @@ type RunWiring struct {
 	// producer-written, loop-consumed channels.
 	SessionEvents <-chan *coding.SessionEvent
 	PartialEvents <-chan *coding.SessionEvent
+	// InputEvents carries complete terminal sequences from the stdin reader and
+	// ResizeEvents the resize ticks (stage 3). The loop dispatches both.
+	InputEvents  <-chan string
+	ResizeEvents <-chan struct{}
+	// SignalEvents carries process signals (SIGTERM/SIGHUP) to the loop.
+	SignalEvents <-chan os.Signal
+	// OnSignal performs the signal work on the loop goroutine.
+	OnSignal func(sig os.Signal)
 	// StartWork schedules blocking work off the loop (the event dispatcher
 	// uses it to run the compaction-queue flush). The loop installs it while
 	// running; callers must be on the loop goroutine.
@@ -506,8 +515,9 @@ type runnerWorkState struct {
 	pending []func(context.Context) error
 }
 
-// RunWork schedules blocking work on the loop. It is called from loop-side
-// handlers (session-event application) and never blocks.
+// RunWork schedules blocking work on the loop. It never blocks, and it may
+// only be called from the loop goroutine (handlers dispatch work this way);
+// external goroutines must not touch the loop-owned work state.
 func (w *RunWiring) RunWork(fn func(context.Context) error) {
 	if fn == nil {
 		return
@@ -598,6 +608,31 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 			}
 			if w.Events != nil {
 				w.Events.HandleEvent(event)
+			}
+		case data, ok := <-w.InputEvents:
+			if !ok {
+				w.InputEvents = nil
+				continue
+			}
+			// Input is latency-sensitive: dispatch, then paint once.
+			if w.UI != nil {
+				w.UI.HandleTerminalInput(data)
+			}
+			w.drainReadyEvents()
+			w.renderUI()
+		case _, ok := <-w.ResizeEvents:
+			if !ok {
+				w.ResizeEvents = nil
+				continue
+			}
+			w.renderUI()
+		case sig, ok := <-w.SignalEvents:
+			if !ok {
+				w.SignalEvents = nil
+				continue
+			}
+			if w.OnSignal != nil {
+				w.OnSignal(sig)
 			}
 		case <-w.renderTicks():
 			// Coalesce: apply every event already queued, then paint once, so

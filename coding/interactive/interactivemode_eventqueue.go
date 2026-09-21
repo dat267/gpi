@@ -36,6 +36,11 @@ const (
 // worth of queued submissions without blocking the TUI submit handler.
 const inputQueueCapacity = 64
 
+// loopInputCapacity sizes the terminal-sequence channel. One producer (the
+// stdin reader goroutine) writes it; the buffer absorbs a paste burst before
+// the loop drains.
+const loopInputCapacity = 256
+
 type sessionEventQueue struct {
 	lossless chan *coding.SessionEvent
 	partial  chan *coding.SessionEvent

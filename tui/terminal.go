@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/term"
@@ -138,10 +139,15 @@ type ProcessTerminal struct {
 	keyboardProtocolNegotiationBuffer string
 	keyboardProtocolBufferFlushTimer  *time.Timer
 	stdinBuffer                       *StdinBuffer
-	progressInterval                  *time.Ticker
-	progressDone                      chan struct{}
-	writeLogPath                      string
-	closed                            bool
+	// lastInputAt is the unix-nano time of the last delivered sequence. The
+	// stdin reader stamps it (no lock: it is a single atomic), and DrainInput
+	// reads it instead of swapping the buffer's OnData callback from another
+	// goroutine (stage 3).
+	lastInputAt      atomic.Int64
+	progressInterval *time.Ticker
+	progressDone     chan struct{}
+	writeLogPath     string
+	closed           bool
 }
 
 // NewProcessTerminal creates a terminal over the given files (os.Stdin and
@@ -217,6 +223,7 @@ func (t *ProcessTerminal) Start(onInput func(data string), onResize func()) {
 func (t *ProcessTerminal) setupStdinBufferLocked() {
 	t.stdinBuffer = NewStdinBuffer(StdinBufferOptions{EscapeTimeout: ResolveEscapeTimeoutMs(os.Getenv)})
 	t.stdinBuffer.OnData = func(sequence string) {
+		t.lastInputAt.Store(time.Now().UnixNano())
 		t.mu.Lock()
 		negotiationSequence, pendingInput := t.readKeyboardProtocolNegotiationSequenceLocked(sequence)
 		if negotiationSequence.kind == "pending" {
@@ -456,45 +463,16 @@ func (t *ProcessTerminal) DrainInput(maxMs int, idleMs int) error {
 	previousHandler := t.swapInputHandler(nil)
 	defer t.swapInputHandlerRestore(previousHandler)
 
-	var lastData time.Time
-	var lastDataMu sync.Mutex
-	setLastData := func() {
-		lastDataMu.Lock()
-		lastData = time.Now()
-		lastDataMu.Unlock()
-	}
-	// Track late input arriving on the reading goroutine via the buffer.
-	t.mu.Lock()
-	if t.stdinBuffer != nil {
-		previousOnData := t.stdinBuffer.OnData
-		t.stdinBuffer.OnData = func(sequence string) {
-			setLastData()
-			if previousOnData != nil {
-				previousOnData(sequence)
-			}
-		}
-		t.mu.Unlock()
-		defer func() {
-			t.mu.Lock()
-			if t.stdinBuffer != nil {
-				t.stdinBuffer.OnData = previousOnData
-			}
-			t.mu.Unlock()
-		}()
-	} else {
-		t.mu.Unlock()
-	}
-
-	lastData = time.Now()
+	// Late input is tracked through the reader-stamped atomic (the reader
+	// goroutine owns the buffer; DrainInput must not touch it).
+	t.lastInputAt.Store(time.Now().UnixNano())
 	endTime := time.Now().Add(time.Duration(maxMs) * time.Millisecond)
 	for {
 		now := time.Now()
 		if !endTime.After(now) {
 			break
 		}
-		lastDataMu.Lock()
-		idle := now.Sub(lastData)
-		lastDataMu.Unlock()
+		idle := time.Duration(now.UnixNano() - t.lastInputAt.Load())
 		if idle >= time.Duration(idleMs)*time.Millisecond {
 			break
 		}

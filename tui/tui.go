@@ -35,6 +35,11 @@ type TUI interface {
 	RenderTicks() <-chan struct{}
 	// EnableRenderTicks switches the renderer to caller-driven rendering.
 	EnableRenderTicks()
+	// EnableLoopInput routes terminal input and resize to the owner.
+	EnableLoopInput(onInput func(string), onResize func())
+	// HandleTerminalInput dispatches one terminal sequence to the focused
+	// component (loop-owned when loop input is enabled).
+	HandleTerminalInput(data string)
 	// RenderCount reports completed paints (test seam).
 	RenderCount() int64
 	RequestRender(force bool)
@@ -119,6 +124,14 @@ func (r *TuiReference) RenderTicks() <-chan struct{} { return r.get().RenderTick
 
 // EnableRenderTicks switches the active renderer to caller-driven rendering.
 func (r *TuiReference) EnableRenderTicks() { r.get().EnableRenderTicks() }
+
+// EnableLoopInput forwards loop input routing to the active renderer.
+func (r *TuiReference) EnableLoopInput(onInput func(string), onResize func()) {
+	r.get().EnableLoopInput(onInput, onResize)
+}
+
+// HandleTerminalInput forwards terminal input dispatch to the active renderer.
+func (r *TuiReference) HandleTerminalInput(data string) { r.get().HandleTerminalInput(data) }
 
 // RenderCount forwards the active renderer's paint count.
 func (r *TuiReference) RenderCount() int64 { return r.get().RenderCount() }

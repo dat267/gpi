@@ -96,6 +96,22 @@ invented to bridge that gap). Stage 1 has landed:
 - **D143** records the divergence: upstream is single-threaded (await +
   microtask order), the port is an explicit select loop with off-loop work and
   partial coalescing.
+Stage 3 (input and signals on the loop) has landed:
+
+- **Terminal producers.** The stdin reader delivers complete sequences on
+  `loopInputs` (cap 256) and the SIGWINCH watcher posts to `loopResizes`
+  (cap 1); the lifecycle's signal handlers post to `loopSignals` (cap 4,
+  non-blocking so shutdown signals coalesce). `Renderer.EnableLoopInput` (wired
+  in `App.newLoopTui`, so renderer swaps keep it) stops the renderer from
+  dispatching input inline; the run loop calls `HandleTerminalInput`, renders
+  on resize, and runs the signal shutdown work on its own goroutine.
+- The `DrainInput` last-input tracking is an atomic stamp written by the reader
+  instead of an `OnData` swap from another goroutine (one lock retired).
+- **`/compact` no longer blocks the UI**: the command is split into
+  `ClearCompactionStatus` (loop side) and `CompactSession` (off-loop through
+  `RunWiring.RunWork`), so the loop keeps dispatching input — including the
+  advertised ESC cancel — while the summarization runs.
+
 Stage 2 (rendering on the loop) has landed:
 
 - **`Renderer.EnableRenderTicks`** (`tui/render.go`) switches a renderer from
@@ -179,7 +195,7 @@ user code under a lock, snapshot under and deliver outside.
 
 | Lock | Where | Protects | Order | Retirement |
 |---|---|---|---|---|
-| `Renderer.renderMu` | `tui/render.go` | render vs input dispatch (D84) | A | **stage 2: the timer is gone; this lock now only serializes the loop's paint against the TUI input goroutine, so stage 3 removes it with the input move** |
+| `Renderer.renderMu` | `tui/render.go` | render vs input dispatch (D84) | A | **stage 3: loop-mode conditional — in loop mode it is never taken (input and painting share the loop goroutine); only the legacy timer mode (session picker/library) locks** |
 | `Renderer.mu` | `tui/render.go` | focus, input listeners, posted queue, stopped flag, tick channel | B | stage 3/4 (loop-owned once input and the remaining callers move) |
 | `Container.mu` | `tui/component.go:190` | child list + render cache (event goroutines vs render, D136 class) | B, parent→child | stage 1 (events arrive on the loop) |
 | `Editor.mu` | `tui/editor.go:70` | buffer, cursor, history (D136) | B | stage 1 (input on the loop) |
@@ -187,9 +203,9 @@ user code under a lock, snapshot under and deliver outside.
 | `ScrollView.mu` | `tui/scrollview.go:48` | scroll position/follow-end (D138) | B | stage 3 (auto-scroll ticker → loop message) |
 | `Loader.mu` | `tui/selectlist.go:442` | loader animation frames | B | stage 4 (animation timer → loop tick) |
 | `AltScreenFlashContainer.mu` | `tui/selectlist.go:705` | flash entries + expiry timers | B | stage 4 (timer → loop message) |
-| `StdinBuffer.mu` | `tui/stdinbuffer.go:222` | sequence assembly, paste re-wrap, Kitty dedup (D51/D139) | C | stage 3 (reader goroutine owns a stateless decoder) |
-| `ProcessTerminal.mu` | `tui/terminal.go:127` | terminal writes, raw mode, resize bookkeeping | C | stage 3 (terminal writes only on the loop) |
-| `negotiationResult.lastDataMu` | `tui/terminal.go:460` | Kitty negotiation split-response flush timer | C | stage 3 |
+| `StdinBuffer.mu` | `tui/stdinbuffer.go` | sequence assembly, paste re-wrap, Kitty dedup (D51/D139) | C | **stage 3: reduced** — the DrainInput callback swap is gone (the reader stamps an atomic), so the lock now only guards the decoder's own escape/sequence timeout timer; never touches UI state. Stage 4 folds the timer into the reader goroutine (D-row if retained) |
+| `ProcessTerminal.mu` | `tui/terminal.go:127` | terminal writes, raw mode, Kitty negotiation, resize bookkeeping | C | **stage 3: writes are loop-owned, but the stdin reader still shares negotiation state → retained; stage 4 D-row candidate (not UI state)** |
+| ~~`negotiationResult.lastDataMu`~~ | `tui/terminal.go` | DrainInput's last-input tracking | C | **retired in stage 3** (the reader stamps an atomic timestamp instead of swapping the buffer callback) |
 | `ModelSelectorComponent.mu` | `coding/interactive/modelselector.go:59` | selector state + background refresh (D137) | B | stage 4 |
 | `ScopedModelsSelectorComponent.mu` | `coding/interactive/scopedmodelsselector.go:257` | scoped-models state + refresh | B | stage 4 |
 | `SessionSelectorComponent.mu` | `coding/interactive/sessionselector.go:830` | selector state + queued loader applies (D103) | B | stage 4 |
@@ -269,6 +285,11 @@ summarized in the README scoreboard. The range is **D1–D139**. Representative:
   is retired in stage 1 (the submission handoff is a buffered channel); the
   others retire in stages 3-4.
 - D132 — branch summarization is tracked as compaction and abortable.
+- D145 — terminal input, resize and process signals reach the UI loop as
+  channel messages from pure producers (the stdin reader, the SIGWINCH
+  watcher, the signal handlers); the loop dispatches input, paints on resize
+  and runs the shutdown work on its own goroutine, where upstream delivers
+  these on the single JS thread.
 - D144 — the interactive renderer runs in caller-driven tick mode (the run
   loop coalesces render requests and paints once per drain) instead of
   arming its own throttled render timer; the standalone session picker and

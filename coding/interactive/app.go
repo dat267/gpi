@@ -3,6 +3,7 @@ package interactive
 import (
 	"context"
 	"os"
+	"sync"
 
 	"golang.org/x/term"
 	"time"
@@ -140,7 +141,16 @@ type App struct {
 	unsubscribe func()
 	// sessionEvents is the producer→loop queue (interactivemode_eventqueue.go).
 	sessionEvents *sessionEventQueue
-	initialized   bool
+	// loopInputs/loopResizes are the terminal producers' channels: the stdin
+	// reader sends complete sequences and the resize watcher sends ticks; the
+	// run loop dispatches them (stage 3). loopInputsClosed releases a producer
+	// parked on a full channel at shutdown.
+	loopInputs       chan string
+	loopResizes      chan struct{}
+	loopSignals      chan os.Signal
+	loopInputsClosed chan struct{}
+	loopInputsOnce   sync.Once
+	initialized      bool
 }
 
 // NewApp builds the interactive-mode object graph.
@@ -186,7 +196,12 @@ func NewApp(options AppOptions) *App {
 	// Renderer + theme. app.UI is the stable forwarding reference (upstream's
 	// createInteractiveTuiReference(() => this.renderer)): SwitchTuiMode swaps
 	// the lifecycle's renderer and every holder of app.UI follows it.
-	aInitialUI := CreateInteractiveTui(InteractiveTuiOptions{
+	app.loopInputs = make(chan string, loopInputCapacity)
+	app.loopResizes = make(chan struct{}, 1)
+	app.loopSignals = make(chan os.Signal, 4)
+	app.loopInputsClosed = make(chan struct{})
+
+	aInitialUI := app.newLoopTui(InteractiveTuiOptions{
 		TuiMode:                options.TuiMode,
 		ShowHardwareCursor:     options.Settings.GetShowHardwareCursor(),
 		LogDirectory:           options.AgentDir,
@@ -321,7 +336,16 @@ func NewApp(options AppOptions) *App {
 	app.UIState.RenderWidgets()
 
 	app.Lifecycle = NewLifecycle(LifecycleOptions{
-		UI:           aInitialUI,
+		UI: aInitialUI,
+		CreateTui: func(mode string) tui.TUI {
+			return app.newLoopTui(InteractiveTuiOptions{
+				TuiMode:                mode,
+				ShowHardwareCursor:     options.Settings.GetShowHardwareCursor(),
+				LogDirectory:           options.AgentDir,
+				Terminal:               terminal,
+				FullscreenCopyOnSelect: appBoolPtr(options.Settings.GetFullscreenCopyOnSelect()),
+			})
+		},
 		Session:      app.Session,
 		Settings:     app.Settings,
 		Terminal:     terminal,
@@ -335,6 +359,13 @@ func NewApp(options AppOptions) *App {
 		WriteErr:     options.WriteErr,
 		Platform:     options.Platform,
 
+		SignalSink: func(sig os.Signal) {
+			// Non-blocking: shutdown signals coalesce.
+			select {
+			case app.loopSignals <- sig:
+			default:
+			}
+		},
 		RegisterSignal:      options.RegisterSignal,
 		OnTerminalError:     options.OnTerminalError,
 		OnUncaughtException: options.OnUncaughtException,
@@ -387,6 +418,10 @@ func NewApp(options AppOptions) *App {
 		Events:             app.Events,
 		SessionEvents:      app.sessionEvents.Events(),
 		PartialEvents:      app.sessionEvents.Partials(),
+		InputEvents:        app.loopInputs,
+		ResizeEvents:       app.loopResizes,
+		SignalEvents:       app.loopSignals,
+		OnSignal:           app.Lifecycle.HandleSignal,
 		UI:                 app.UI,
 		Settings:           app.Settings,
 		Terminal:           terminal,
@@ -591,7 +626,16 @@ func NewApp(options AppOptions) *App {
 			},
 			HandleClearCommand: func() error { app.Commands.HandleClearCommand(context.Background()); return nil },
 			HandleCompactCommand: func(instructions string) error {
-				app.Commands.HandleCompactCommand(context.Background(), instructions)
+				// The indicator is UI state (loop side); the compaction itself
+				// only emits session events, so it runs off-loop and no longer
+				// blocks input (stage 3).
+				app.Commands.ClearCompactionStatus()
+				if !app.runOffLoop(func(ctx context.Context) error {
+					app.Commands.CompactSession(ctx, instructions)
+					return nil
+				}) {
+					app.Commands.CompactSession(context.Background(), instructions)
+				}
 				return nil
 			},
 			HandleDebugCommand:   func() { app.Commands.HandleDebugCommand("") },
@@ -690,6 +734,7 @@ func (a *App) Close() {
 	if a.Startup != nil {
 		a.Startup.CloseInputs()
 	}
+	a.loopInputsOnce.Do(func() { close(a.loopInputsClosed) })
 	a.Footer.Dispose()
 	a.FooterData.Dispose()
 	StopThemeWatcher()
@@ -697,6 +742,54 @@ func (a *App) Close() {
 
 // LifecycleCheckShutdown performs a requested shutdown.
 func (a *App) LifecycleCheckShutdown() { a.Lifecycle.CheckShutdownRequested() }
+
+// newLoopTui creates a renderer wired to the UI loop: terminal input and
+// resize notifications are delivered as channel messages instead of being
+// dispatched inline (stage 3).
+func (a *App) newLoopTui(options InteractiveTuiOptions) tui.TUI {
+	screen := CreateInteractiveTui(options)
+	if screen == nil {
+		return screen
+	}
+	screen.EnableLoopInput(
+		func(data string) {
+			select {
+			case a.loopInputs <- data:
+			case <-a.loopInputsClosed:
+			}
+		},
+		func() {
+			select {
+			case a.loopResizes <- struct{}{}:
+			default:
+			}
+		},
+	)
+	return screen
+}
+
+// PostTerminalInput delivers a terminal sequence to the loop (test seam).
+func (a *App) PostTerminalInput(data string) {
+	select {
+	case a.loopInputs <- data:
+	case <-a.loopInputsClosed:
+	}
+}
+
+// LoopInputs/LoopResizes expose the producer channels to the run loop.
+func (a *App) LoopInputs() <-chan string    { return a.loopInputs }
+func (a *App) LoopResizes() <-chan struct{} { return a.loopResizes }
+
+// runOffLoop dispatches blocking work to the loop's work goroutine when the
+// loop is running; it reports whether the work was dispatched. Callers use the
+// non-dispatched path for direct/test invocation.
+func (a *App) runOffLoop(fn func(ctx context.Context) error) bool {
+	if a.Runner == nil || a.Runner.StartWork == nil {
+		return false
+	}
+	a.Runner.RunWork(fn)
+	return true
+}
 
 // currentRenderer returns the concrete active renderer (upstream's
 // this.renderer); app.UI is the forwarding reference.

@@ -161,9 +161,16 @@ type Renderer struct {
 
 	clock func() time.Time
 
-	// renderMu serializes component rendering against focused-component input
-	// handling: Go's timer-driven renders run on other goroutines, while
-	// upstream's event loop is single-threaded (divergence D84).
+	// loopInput/loopResize, when set, receive terminal input and resize
+	// notifications instead of the renderer dispatching them inline: the owner
+	// (the interactive UI loop) calls HandleTerminalInput and renders (stage 3).
+	loopInput  func(string)
+	loopResize func()
+
+	// renderMu serializes paints against focused-component input handling for
+	// the renderer's own timer mode (the standalone session picker and library
+	// users). In loop mode (renderTicks set) the owner goroutine both paints and
+	// dispatches input, so the lock is never taken — see the lock inventory.
 	renderMu sync.Mutex
 	// renderTicks, when non-nil, replaces the render timer: requestRender
 	// signals on it (capacity 1, so bursts coalesce) and the owner renders on
@@ -260,11 +267,17 @@ func (t *Renderer) GetMountedRoots() []Component {
 func (t *Renderer) Start() {
 	t.mu.Lock()
 	t.stopped = false
+	loopInput, loopResize := t.loopInput, t.loopResize
 	t.mu.Unlock()
 	if t.OnBeforeTerminalStart != nil {
 		t.OnBeforeTerminalStart()
 	}
-	t.Terminal.Start(func(data string) { t.HandleTerminalInput(data) }, func() { t.RequestRender(false) })
+	if loopInput != nil {
+		// Loop mode (stage 3): the owner dispatches input and renders.
+		t.Terminal.Start(loopInput, loopResize)
+	} else {
+		t.Terminal.Start(func(data string) { t.HandleTerminalInput(data) }, func() { t.RequestRender(false) })
+	}
 	if t.OnAfterTerminalStart != nil {
 		t.OnAfterTerminalStart()
 	}
@@ -370,6 +383,20 @@ func (t *Renderer) RenderNow(force bool) {
 	t.lastRenderAt = t.clock()
 	t.mu.Unlock()
 	t.doRender()
+}
+
+// loopMode reports whether the renderer is driven by the owner's tick channel
+// instead of its own timer (stage 2). Callers must hold t.mu.
+func (t *Renderer) loopMode() bool { return t.renderTicks != nil }
+
+// EnableLoopInput routes terminal input and resize notifications to the given
+// sinks instead of dispatching them inline; the owner must call
+// HandleTerminalInput and render. Call before Start (stage 3).
+func (t *Renderer) EnableLoopInput(onInput func(string), onResize func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.loopInput = onInput
+	t.loopResize = onResize
 }
 
 // RequestRender schedules a throttled render (or an immediate one when forced).
@@ -492,8 +519,10 @@ func (t *Renderer) resetRenderState() {
 }
 
 func (t *Renderer) doRender() {
-	t.renderMu.Lock()
-	defer t.renderMu.Unlock()
+	if !t.loopMode() {
+		t.renderMu.Lock()
+		defer t.renderMu.Unlock()
+	}
 	t.drainPosted()
 	if t.DoRender != nil {
 		t.DoRender()
@@ -512,7 +541,7 @@ func (t *Renderer) Post(fn func()) {
 	t.RequestRender(false)
 }
 
-// drainPosted runs queued callbacks; the caller holds renderMu. Looping
+// drainPosted runs queued callbacks. Looping
 // covers callbacks that post more work.
 func (t *Renderer) drainPosted() {
 	for {
@@ -768,12 +797,18 @@ func (t *Renderer) HandleTerminalInput(data string) {
 			}
 		}
 		// The component handler runs without the renderer lock (it may call
-		// back into the renderer, e.g. requestRender or setFocus) but under
-		// the render lock so it cannot race a timer-driven render (D84).
+		// back into the renderer, e.g. requestRender or setFocus). Input is
+		// serialized against paints only in timer mode: in loop mode the owner
+		// goroutine does both, so no render lock is involved (stage 3).
+		loopMode := t.loopMode()
 		t.mu.Unlock()
-		t.renderMu.Lock()
+		if !loopMode {
+			t.renderMu.Lock()
+		}
 		handler.HandleInput(data)
-		t.renderMu.Unlock()
+		if !loopMode {
+			t.renderMu.Unlock()
+		}
 		t.mu.Lock()
 		// Keyboard input is latency-sensitive: avoid the throttled path.
 		t.requestImmediateRenderLocked()

@@ -90,6 +90,10 @@ type LifecycleOptions struct {
 	// FormatResumeMessage renders the "To resume this session:" prefix.
 	FormatResumeMessage func(command string) string
 
+	// SignalSink, when set, receives process signals instead of the lifecycle
+	// handling them inline: the owner (the UI loop) performs the shutdown work
+	// (stage 3). Nil keeps the inline behaviour.
+	SignalSink func(sig os.Signal)
 	// RegisterSignal registers a signal handler (test seam).
 	RegisterSignal func(sig os.Signal, handler func()) func()
 	// OnTerminalError registers the stdout/stderr error handler (test seam).
@@ -466,10 +470,11 @@ func (l *Lifecycle) RegisterSignalHandlers() {
 	for _, sig := range signals {
 		sig := sig
 		cleanup := register(sig, func() {
-			if l.options.KillDetachedChildren != nil {
-				l.options.KillDetachedChildren()
+			if sink := l.options.SignalSink; sink != nil {
+				sink(sig)
+				return
 			}
-			l.Shutdown(true)
+			l.HandleSignal(sig)
 		})
 		l.signalCleanups = append(l.signalCleanups, cleanup)
 	}
@@ -489,6 +494,15 @@ func (l *Lifecycle) RegisterSignalHandlers() {
 	}
 }
 
+// HandleSignal performs the shutdown work for a process signal. It touches UI
+// state, so the UI loop calls it (stage 3).
+func (l *Lifecycle) HandleSignal(sig os.Signal) {
+	if l.options.KillDetachedChildren != nil {
+		l.options.KillDetachedChildren()
+	}
+	l.Shutdown(true)
+}
+
 // UnregisterSignalHandlers removes the installed handlers.
 func (l *Lifecycle) UnregisterSignalHandlers() {
 	for _, cleanup := range l.signalCleanups {
@@ -496,6 +510,9 @@ func (l *Lifecycle) UnregisterSignalHandlers() {
 	}
 	l.signalCleanups = nil
 }
+
+// SignalSink returns the installed signal sink (test helper).
+func (l *Lifecycle) SignalSink() func(os.Signal) { return l.options.SignalSink }
 
 // SignalHandlerCount returns the number of installed handlers (test helper).
 func (l *Lifecycle) SignalHandlerCount() int { return len(l.signalCleanups) }
