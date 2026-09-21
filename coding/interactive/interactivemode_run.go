@@ -337,6 +337,14 @@ func (w *RunWiring) Init(ctx context.Context, scopedModels []coding.ScopedModel,
 	if w.RenderInitialMessages != nil {
 		w.RenderInitialMessages()
 	}
+	// Upstream sets isInitialized inside startup init, before events flow,
+	// so the first-event fallback never re-runs init mid-session. Without
+	// this, the dispatcher's Init (RenderInitialMessages) fired on the first
+	// session event — the user's first message — re-rendering the whole
+	// transcript without clearing and duplicating every entry on screen.
+	if w.Events != nil {
+		w.Events.Initialized = true
+	}
 
 	// Watchers.
 	if w.OnThemeChange != nil {

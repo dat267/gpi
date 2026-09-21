@@ -120,6 +120,8 @@ func TestRunInit(t *testing.T) {
 	wiring.RebindSession = func(context.Context) error { order = append(order, "rebind"); return nil }
 	wiring.RenderInitialMessages = func() { order = append(order, "messages") }
 	wiring.LoadHighlightLanguages = func() error { return nil }
+	dispatcher := NewEventDispatcher(nil, nil, nil, nil, nil, nil, nil)
+	wiring.Events = dispatcher
 
 	wiring.Init(context.Background(), nil, func() { order = append(order, "signals") },
 		func() { order = append(order, "mount") }, false)
@@ -138,6 +140,14 @@ func TestRunInit(t *testing.T) {
 	wiring.Init(context.Background(), nil, nil, nil, false)
 	if strings.Join(order, ",") != want {
 		t.Fatalf("order after second init = %v", order)
+	}
+	// The dispatcher must be marked initialized during startup (upstream sets
+	// isInitialized inside init, before events flow): otherwise the
+	// first-event fallback re-runs init mid-session — RenderInitialMessages
+	// re-rendered the whole transcript without clearing, duplicating every
+	// message after the user's first submission.
+	if !dispatcher.Initialized {
+		t.Fatal("dispatcher not marked initialized during startup init")
 	}
 }
 
