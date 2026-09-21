@@ -56,7 +56,15 @@ func CreateChatViewport(options ChatViewportOptions) ChatViewport {
 	dock := tui.NewVStack(nil, tui.StackOptions{})
 	for _, entry := range dockEntries {
 		shrink := 1
-		dock.AddChild(entry, tui.StackEntryOptions{Shrink: &shrink})
+		entryOptions := tui.StackEntryOptions{Shrink: &shrink}
+		if entry == options.Editor {
+			// Upstream: { component: editor, shrink: 1, minSize: 3 } — the
+			// editor keeps its top border, one input line, and bottom border
+			// even when the dock is squeezed.
+			minSize := 3
+			entryOptions.MinSize = &minSize
+		}
+		dock.AddChild(entry, entryOptions)
 	}
 
 	root := tui.NewVStack(nil, tui.StackOptions{})
