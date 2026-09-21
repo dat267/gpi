@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/dat267/pier/coding"
@@ -100,6 +101,9 @@ type RunWiring struct {
 
 	// work is the loop-owned work queue (see runLoop).
 	work runnerWorkState
+	// beats counts loop iterations (the watchdog beat: a stalled loop stops
+	// advancing it, so a watchdog can detect a hang).
+	beats atomic.Uint64
 	// ShowStatus/ShowError/ShowWarning report messages.
 	ShowStatus  func(message string)
 	ShowError   func(message string)
@@ -533,6 +537,9 @@ func (w *RunWiring) armAnimation(timer *time.Timer, deadline *time.Time) <-chan 
 	return timer.C
 }
 
+// LoopBeats reports the loop's iteration count (watchdog beat).
+func (w *RunWiring) LoopBeats() uint64 { return w.beats.Load() }
+
 // runnerWorkState is the loop-owned work bookkeeping: at most one blocking
 // unit (a turn, a compaction-queue flush) runs at a time, with the rest
 // queued. Nothing here is shared with other goroutines: only the loop
@@ -618,6 +625,7 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 	}
 
 	for {
+		w.beats.Add(1)
 		var (
 			inputsCh <-chan string
 			doneCh   chan error

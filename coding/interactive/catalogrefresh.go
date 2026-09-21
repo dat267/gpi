@@ -2,7 +2,7 @@ package interactive
 
 import (
 	"context"
-	"sync"
+	"sync/atomic"
 
 	"github.com/dat267/pier/ai"
 	"github.com/dat267/pier/coding"
@@ -16,23 +16,85 @@ type ModelCatalogRuntime interface {
 	Refresh(ctx context.Context, options *coding.ModelsRefreshCallOptions) (ai.ModelsRefreshResult, error)
 }
 
+type refreshOutcome struct {
+	result ai.ModelsRefreshResult
+	err    error
+}
+
 type activeCatalogRefresh struct {
-	cancel  context.CancelFunc
-	done    chan struct{}
-	mu      sync.Mutex
-	result  ai.ModelsRefreshResult
-	err     error
-	waiters int
-	// canceled marks a shared refresh whose last waiter gave up, so a later
-	// caller starts a fresh refresh instead of joining the doomed one (D98).
-	canceled bool
+	cancel context.CancelFunc
+	done   chan struct{}
+
+	// Stage 4 gap: no mutex. The outcome is published atomically, waiters and
+	// the canceled flag are atomics, and the coordinator's map is republished
+	// copy-on-write.
+	outcome  atomic.Pointer[refreshOutcome]
+	waiters  atomic.Int64
+	canceled atomic.Bool
+	settled  atomic.Bool
 }
 
 // ModelCatalogRefreshCoordinator deduplicates concurrent refreshes per
-// runtime.
+// runtime (the registry is shared by the model/scoped selectors, the auth
+// flows and cmd/pier's create-time refresh).
 type ModelCatalogRefreshCoordinator struct {
-	mu     sync.Mutex
-	active map[ModelCatalogRuntime]*activeCatalogRefresh
+	active atomic.Pointer[map[ModelCatalogRuntime]*activeCatalogRefresh]
+}
+
+// loadActive returns a snapshot of the registry.
+func (c *ModelCatalogRefreshCoordinator) loadActive() map[ModelCatalogRuntime]*activeCatalogRefresh {
+	if published := c.active.Load(); published != nil {
+		return *published
+	}
+	return nil
+}
+
+// publishIfAbsent inserts the entry unless another caller published one for
+// the runtime first; the compare-and-swap loop keeps the check and the store
+// atomic.
+func (c *ModelCatalogRefreshCoordinator) publishIfAbsent(runtime ModelCatalogRuntime, entry *activeCatalogRefresh) bool {
+	for {
+		previous := c.active.Load()
+		var current map[ModelCatalogRuntime]*activeCatalogRefresh
+		if previous != nil {
+			current = *previous
+		}
+		if _, exists := current[runtime]; exists {
+			return false
+		}
+		next := make(map[ModelCatalogRuntime]*activeCatalogRefresh, len(current)+1)
+		for key, value := range current {
+			next[key] = value
+		}
+		next[runtime] = entry
+		if c.active.CompareAndSwap(previous, &next) {
+			return true
+		}
+	}
+}
+
+// unpublish removes the runtime's entry only while it still points at entry.
+func (c *ModelCatalogRefreshCoordinator) unpublish(runtime ModelCatalogRuntime, entry *activeCatalogRefresh) {
+	for {
+		previous := c.active.Load()
+		if previous == nil {
+			return
+		}
+		current := *previous
+		if current[runtime] != entry {
+			return
+		}
+		next := make(map[ModelCatalogRuntime]*activeCatalogRefresh, len(current))
+		for key, value := range current {
+			if key == runtime {
+				continue
+			}
+			next[key] = value
+		}
+		if c.active.CompareAndSwap(previous, &next) {
+			return
+		}
+	}
 }
 
 // RefreshModelCatalogs refreshes the model catalogs, sharing an in-flight
@@ -49,79 +111,84 @@ func (c *ModelCatalogRefreshCoordinator) Refresh(ctx context.Context, runtime Mo
 		return ai.ModelsRefreshResult{}, ctx.Err()
 	}
 
-	c.mu.Lock()
-	if c.active == nil {
-		c.active = map[ModelCatalogRuntime]*activeCatalogRefresh{}
-	}
-	active, ok := c.active[runtime]
-	if ok {
-		active.mu.Lock()
-		canceled := active.canceled
-		active.mu.Unlock()
-		if canceled {
-			delete(c.active, runtime)
-			ok = false
-		}
-	}
-	if !ok {
-		refreshContext, cancel := context.WithCancel(context.Background())
-		active = &activeCatalogRefresh{cancel: cancel, done: make(chan struct{})}
-		c.active[runtime] = active
-		go func() {
-			result, err := runtime.Refresh(refreshContext, nil)
-			active.mu.Lock()
-			active.result = result
-			active.err = err
-			active.mu.Unlock()
-			// Unpublish before signalling completion (D98): the Go port has
-			// real concurrency, so a caller arriving after the shared refresh
-			// finished must start a fresh refresh instead of joining the
-			// completed one and observing its (possibly cancelled) error.
-			c.mu.Lock()
-			if c.active[runtime] == active {
-				delete(c.active, runtime)
-			}
-			c.mu.Unlock()
-			close(active.done)
-		}()
-	}
-	active.waiters++
-	c.mu.Unlock()
+	active := c.join(runtime)
 
 	select {
 	case <-ctx.Done():
 		c.releaseWaiter(runtime, active)
 		return ai.ModelsRefreshResult{}, ctx.Err()
 	case <-active.done:
-		active.mu.Lock()
-		result := active.result
-		err := active.err
-		active.mu.Unlock()
+		outcome := active.outcome.Load()
 		c.releaseWaiter(runtime, active)
-		return result, err
+		if outcome == nil {
+			return ai.ModelsRefreshResult{}, nil
+		}
+		return outcome.result, outcome.err
 	}
+}
+
+// join returns the in-flight refresh for the runtime, starting one when none is
+// published (or when the previous one was cancelled), and claims a waiter slot
+// only once the entry is confirmed published and unsettled.
+func (c *ModelCatalogRefreshCoordinator) join(runtime ModelCatalogRuntime) *activeCatalogRefresh {
+	for {
+		current := c.loadActive()[runtime]
+		if current != nil && !current.canceled.Load() && !current.settled.Load() {
+			current.waiters.Add(1)
+			// Re-validate: a concurrent caller may have replaced the entry
+			// between the load and the claim.
+			if c.loadActive()[runtime] == current && !current.canceled.Load() && !current.settled.Load() {
+				return current
+			}
+			current.waiters.Add(-1)
+			continue
+		}
+		refreshContext, cancel := context.WithCancel(context.Background())
+		created := &activeCatalogRefresh{cancel: cancel, done: make(chan struct{})}
+		if !c.publishIfAbsent(runtime, created) {
+			// Another caller published first: join theirs on the next pass.
+			cancel()
+			continue
+		}
+		created.waiters.Add(1)
+		go c.run(runtime, created, refreshContext)
+		return created
+	}
+}
+
+// run performs the refresh and publishes its outcome.
+func (c *ModelCatalogRefreshCoordinator) run(runtime ModelCatalogRuntime, active *activeCatalogRefresh, ctx context.Context) {
+	result, err := runtime.Refresh(ctx, nil)
+	active.outcome.Store(&refreshOutcome{result: result, err: err})
+	// Unpublish before signalling completion (D98): the Go port has real
+	// concurrency, so a caller arriving after the shared refresh finished must
+	// start a fresh refresh instead of joining the completed one and observing
+	// its (possibly cancelled) error.
+	c.unpublish(runtime, active)
+	active.settled.Store(true)
+	close(active.done)
 }
 
 // activeWaiters reports the number of waiters on the in-flight refresh for a
 // runtime (test observation helper).
 func (c *ModelCatalogRefreshCoordinator) activeWaiters(runtime ModelCatalogRuntime) int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if active, ok := c.active[runtime]; ok {
-		return active.waiters
+	if active, ok := c.loadActive()[runtime]; ok {
+		return int(active.waiters.Load())
 	}
 	return 0
 }
 
 func (c *ModelCatalogRefreshCoordinator) releaseWaiter(runtime ModelCatalogRuntime, active *activeCatalogRefresh) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	active.waiters--
-	if active.waiters == 0 && c.active[runtime] == active {
-		// The last waiter gave up: cancel the shared operation.
-		active.mu.Lock()
-		active.canceled = true
-		active.mu.Unlock()
+	if active.waiters.Add(-1) > 0 {
+		return
+	}
+	// The last waiter gave up: cancel the shared operation and let a later
+	// caller start fresh (D98). done is closed by run.
+	if active.settled.Load() {
+		return
+	}
+	if active.canceled.CompareAndSwap(false, true) {
+		c.unpublish(runtime, active)
 		active.cancel()
 	}
 }

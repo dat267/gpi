@@ -321,3 +321,92 @@ func TestDrainReadyEventsRendersOncePerBurst(t *testing.T) {
 		t.Fatalf("renders for one burst = %d, want 1", got)
 	}
 }
+
+// TestLoopBeatAdvances is the watchdog gap: the loop beats once per iteration
+// while it runs and stops beating after cancellation, so a watchdog can detect
+// a stalled loop.
+func TestLoopBeatAdvances(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		app.Run(ctx)
+	}()
+	waitForConditionWithin(t, func() bool { return app.Lifecycle.IsInitialized() }, 6*time.Second)
+
+	// Events wake the loop and advance the beat.
+	for i := 0; i < 5; i++ {
+		app.sessionEvents.enqueue(&coding.SessionEvent{Type: coding.SessionAgentSettled})
+	}
+	waitForConditionWithin(t, func() bool { return app.LoopBeats() >= 5 }, 6*time.Second)
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("loop did not exit within 2s of cancellation")
+	}
+	stopped := app.LoopBeats()
+	time.Sleep(150 * time.Millisecond)
+	if beat := app.LoopBeats(); beat != stopped {
+		t.Fatalf("loop kept beating after cancellation: %d -> %d", stopped, beat)
+	}
+}
+
+// TestProducerSendUnblocksOnContextCancel asserts the ctx.Done() arm: a
+// producer parked on a full queue is released by cancelling the run context,
+// without Close.
+func TestProducerSendUnblocksOnContextCancel(t *testing.T) {
+	queue := newSessionEventQueue()
+	ctx, cancel := context.WithCancel(context.Background())
+	queue.SetContext(ctx)
+	for i := 0; i < sessionEventLosslessCapacity; i++ {
+		queue.enqueue(&coding.SessionEvent{Type: coding.SessionMessageEnd})
+	}
+	producerExited := make(chan struct{})
+	go func() {
+		defer close(producerExited)
+		queue.enqueue(&coding.SessionEvent{Type: coding.SessionMessageEnd})
+	}()
+	select {
+	case <-producerExited:
+		t.Fatal("producer should be parked while the queue is full")
+	case <-time.After(100 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case <-producerExited:
+	case <-time.After(2 * time.Second):
+		t.Fatal("context cancellation did not release the parked producer")
+	}
+	queue.Close()
+}
+
+// TestSubmitSendUnblocksOnContextCancel covers the submission channel.
+func TestSubmitSendUnblocksOnContextCancel(t *testing.T) {
+	wiring := &StartupWiring{}
+	ctx, cancel := context.WithCancel(context.Background())
+	wiring.SetContext(ctx)
+	for i := 0; i < inputQueueCapacity; i++ {
+		wiring.QueueUserInput("queued")
+	}
+	producerExited := make(chan struct{})
+	go func() {
+		defer close(producerExited)
+		wiring.QueueUserInput("blocked")
+	}()
+	select {
+	case <-producerExited:
+		t.Fatal("producer should be parked while the queue is full")
+	case <-time.After(100 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case <-producerExited:
+	case <-time.After(2 * time.Second):
+		t.Fatal("context cancellation did not release the parked submit")
+	}
+}

@@ -1,6 +1,6 @@
 package tui
 
-import "sync"
+import "sync/atomic"
 
 // Port of src/keybindings.ts: the keybinding definitions, the manager with
 // user overrides and conflict detection, and the global accessor.
@@ -137,9 +137,14 @@ func normalizeKeys(keys []string) []string {
 	return result
 }
 
-// KeybindingsManager resolves keybindings with user overrides.
+// KeybindingsManager resolves keybindings with user overrides. Stage 4 removed
+// its mutex: the resolved snapshot is published atomically (copy-on-write on
+// SetUserBindings), so input, rendering and the test seams read without a lock.
 type KeybindingsManager struct {
-	mu           sync.Mutex
+	state atomic.Pointer[keybindingsSnapshot]
+}
+
+type keybindingsSnapshot struct {
 	definitions  map[Keybinding]KeybindingDefinition
 	userBindings map[string][]string
 	keysByID     map[Keybinding][]string
@@ -158,20 +163,163 @@ func NewKeybindingsManager(definitions map[Keybinding]KeybindingDefinition, user
 // NewKeybindingsManagerOrdered creates a manager with an explicit key order
 // (used by the coding-agent keybinding table, which extends the TUI one).
 func NewKeybindingsManagerOrdered(definitions map[Keybinding]KeybindingDefinition, order []Keybinding, userBindings map[string][]string) *KeybindingsManager {
-	manager := &KeybindingsManager{
-		definitions:  definitions,
-		userBindings: userBindings,
-		keysByID:     map[Keybinding][]string{},
-	}
 	filtered := make([]Keybinding, 0, len(order))
 	for _, key := range order {
 		if _, ok := definitions[key]; ok {
 			filtered = append(filtered, key)
 		}
 	}
-	manager.order = filtered
-	manager.rebuild()
+	manager := &KeybindingsManager{}
+	snapshot := buildKeybindingsSnapshot(definitions, filtered, userBindings)
+	manager.state.Store(&snapshot)
 	return manager
+}
+
+// buildKeybindingsSnapshot resolves the keys and conflicts for a definition
+// set, key order and user overrides (pure; the result is published atomically).
+func buildKeybindingsSnapshot(definitions map[Keybinding]KeybindingDefinition, order []Keybinding, userBindings map[string][]string) keybindingsSnapshot {
+	snapshot := keybindingsSnapshot{
+		definitions:  definitions,
+		userBindings: userBindings,
+		order:        order,
+		keysByID:     map[Keybinding][]string{},
+	}
+	if order == nil {
+		snapshot.order = canonicalBindingOrder(definitions)
+	}
+
+	userClaims := map[string]map[Keybinding]bool{}
+	for _, keybinding := range snapshot.order {
+		keys, ok := userBindings[keybinding]
+		if !ok {
+			continue
+		}
+		if _, defined := definitions[keybinding]; !defined {
+			continue
+		}
+		for _, key := range normalizeKeys(keys) {
+			claimants, ok := userClaims[key]
+			if !ok {
+				claimants = map[Keybinding]bool{}
+				userClaims[key] = claimants
+			}
+			claimants[keybinding] = true
+		}
+	}
+
+	claimedKeys := make([]string, 0, len(userClaims))
+	for key := range userClaims {
+		claimedKeys = append(claimedKeys, key)
+	}
+	sortStrings(claimedKeys)
+	for _, key := range claimedKeys {
+		claimants := userClaims[key]
+		if len(claimants) > 1 {
+			names := make([]string, 0, len(claimants))
+			for name := range claimants {
+				names = append(names, name)
+			}
+			sortStrings(names)
+			snapshot.conflicts = append(snapshot.conflicts, KeybindingConflict{Key: key, Keybindings: names})
+		}
+	}
+
+	for _, id := range snapshot.order {
+		definition := definitions[id]
+		userKeys, hasUserKeys := userBindings[id]
+		if hasUserKeys {
+			snapshot.keysByID[id] = normalizeKeys(userKeys)
+		} else {
+			snapshot.keysByID[id] = normalizeKeys(definition.DefaultKeys)
+		}
+	}
+	return snapshot
+}
+
+func (m *KeybindingsManager) snapshot() *keybindingsSnapshot { return m.state.Load() }
+
+// Matches reports whether the input matches any key bound to the keybinding.
+func (m *KeybindingsManager) Matches(data string, keybinding Keybinding) bool {
+	snapshot := m.snapshot()
+	if snapshot == nil {
+		return false
+	}
+	for _, key := range snapshot.keysByID[keybinding] {
+		if MatchesKey(data, key) {
+			return true
+		}
+	}
+	return false
+}
+
+// GetKeys returns the resolved keys for a keybinding.
+func (m *KeybindingsManager) GetKeys(keybinding Keybinding) []string {
+	snapshot := m.snapshot()
+	if snapshot == nil {
+		return nil
+	}
+	return append([]string(nil), snapshot.keysByID[keybinding]...)
+}
+
+// GetDefinition returns a keybinding's definition.
+func (m *KeybindingsManager) GetDefinition(keybinding Keybinding) KeybindingDefinition {
+	snapshot := m.snapshot()
+	if snapshot == nil {
+		return KeybindingDefinition{}
+	}
+	return snapshot.definitions[keybinding]
+}
+
+// GetConflicts returns the user keybinding conflicts.
+func (m *KeybindingsManager) GetConflicts() []KeybindingConflict {
+	snapshot := m.snapshot()
+	if snapshot == nil {
+		return nil
+	}
+	out := make([]KeybindingConflict, 0, len(snapshot.conflicts))
+	for _, conflict := range snapshot.conflicts {
+		out = append(out, KeybindingConflict{
+			Key:         conflict.Key,
+			Keybindings: append([]string(nil), conflict.Keybindings...),
+		})
+	}
+	return out
+}
+
+// SetUserBindings replaces the user bindings and republishes the snapshot.
+func (m *KeybindingsManager) SetUserBindings(userBindings map[string][]string) {
+	snapshot := m.snapshot()
+	if snapshot == nil {
+		return
+	}
+	next := buildKeybindingsSnapshot(snapshot.definitions, snapshot.order, userBindings)
+	m.state.Store(&next)
+}
+
+// GetUserBindings returns a copy of the user bindings.
+func (m *KeybindingsManager) GetUserBindings() map[string][]string {
+	snapshot := m.snapshot()
+	out := map[string][]string{}
+	if snapshot == nil {
+		return out
+	}
+	for key, value := range snapshot.userBindings {
+		out[key] = append([]string(nil), value...)
+	}
+	return out
+}
+
+// GetResolvedBindings returns every keybinding's resolved keys.
+func (m *KeybindingsManager) GetResolvedBindings() map[string][]string {
+	snapshot := m.snapshot()
+	resolved := map[string][]string{}
+	if snapshot == nil {
+		return resolved
+	}
+	for _, id := range snapshot.order {
+		resolved[id] = append([]string(nil), snapshot.keysByID[id]...)
+	}
+	return resolved
 }
 
 // canonicalBindingOrder returns a stable iteration order for a definition
@@ -206,128 +354,6 @@ func canonicalBindingOrder(definitions map[Keybinding]KeybindingDefinition) []Ke
 	return order
 }
 
-func (m *KeybindingsManager) rebuild() {
-	m.keysByID = map[Keybinding][]string{}
-	m.conflicts = nil
-
-	userClaims := map[string]map[Keybinding]bool{}
-	for _, keybinding := range m.order {
-		keys, ok := m.userBindings[keybinding]
-		if !ok {
-			continue
-		}
-		if _, defined := m.definitions[keybinding]; !defined {
-			continue
-		}
-		for _, key := range normalizeKeys(keys) {
-			claimants, ok := userClaims[key]
-			if !ok {
-				claimants = map[Keybinding]bool{}
-				userClaims[key] = claimants
-			}
-			claimants[keybinding] = true
-		}
-	}
-
-	claimedKeys := make([]string, 0, len(userClaims))
-	for key := range userClaims {
-		claimedKeys = append(claimedKeys, key)
-	}
-	sortStrings(claimedKeys)
-	for _, key := range claimedKeys {
-		claimants := userClaims[key]
-		if len(claimants) > 1 {
-			names := make([]string, 0, len(claimants))
-			for name := range claimants {
-				names = append(names, name)
-			}
-			sortStrings(names)
-			m.conflicts = append(m.conflicts, KeybindingConflict{Key: key, Keybindings: names})
-		}
-	}
-
-	for _, id := range m.order {
-		definition := m.definitions[id]
-		userKeys, hasUserKeys := m.userBindings[id]
-		if hasUserKeys {
-			m.keysByID[id] = normalizeKeys(userKeys)
-		} else {
-			m.keysByID[id] = normalizeKeys(definition.DefaultKeys)
-		}
-	}
-}
-
-// Matches reports whether the input matches any key bound to the keybinding.
-func (m *KeybindingsManager) Matches(data string, keybinding Keybinding) bool {
-	m.mu.Lock()
-	keys := append([]string(nil), m.keysByID[keybinding]...)
-	m.mu.Unlock()
-	for _, key := range keys {
-		if MatchesKey(data, key) {
-			return true
-		}
-	}
-	return false
-}
-
-// GetKeys returns the resolved keys for a keybinding.
-func (m *KeybindingsManager) GetKeys(keybinding Keybinding) []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]string(nil), m.keysByID[keybinding]...)
-}
-
-// GetDefinition returns a keybinding's definition.
-func (m *KeybindingsManager) GetDefinition(keybinding Keybinding) KeybindingDefinition {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.definitions[keybinding]
-}
-
-// GetConflicts returns the user keybinding conflicts.
-func (m *KeybindingsManager) GetConflicts() []KeybindingConflict {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make([]KeybindingConflict, 0, len(m.conflicts))
-	for _, conflict := range m.conflicts {
-		out = append(out, KeybindingConflict{
-			Key:         conflict.Key,
-			Keybindings: append([]string(nil), conflict.Keybindings...),
-		})
-	}
-	return out
-}
-
-// SetUserBindings replaces the user bindings and rebuilds.
-func (m *KeybindingsManager) SetUserBindings(userBindings map[string][]string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.userBindings = userBindings
-	m.rebuild()
-}
-
-// GetUserBindings returns a copy of the user bindings.
-func (m *KeybindingsManager) GetUserBindings() map[string][]string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := map[string][]string{}
-	for key, value := range m.userBindings {
-		out[key] = append([]string(nil), value...)
-	}
-	return out
-}
-
-// GetResolvedBindings returns every keybinding's resolved keys.
-func (m *KeybindingsManager) GetResolvedBindings() map[string][]string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	resolved := map[string][]string{}
-	for _, id := range m.order {
-		resolved[id] = append([]string(nil), m.keysByID[id]...)
-	}
-	return resolved
-}
-
 func sortStrings(values []string) {
 	for i := 1; i < len(values); i++ {
 		for j := i; j > 0 && values[j] < values[j-1]; j-- {
@@ -337,24 +363,21 @@ func sortStrings(values []string) {
 }
 
 var globalKeybindingsState struct {
-	mu          sync.Mutex
-	keybindings *KeybindingsManager
+	keybindings atomic.Pointer[KeybindingsManager]
 }
 
 // SetKeybindings installs the global keybindings manager.
 func SetKeybindings(keybindings *KeybindingsManager) {
-	globalKeybindingsState.mu.Lock()
-	defer globalKeybindingsState.mu.Unlock()
-	globalKeybindingsState.keybindings = keybindings
+	globalKeybindingsState.keybindings.Store(keybindings)
 }
 
 // GetKeybindings returns the global keybindings manager, creating the default
 // one on first use.
 func GetKeybindings() *KeybindingsManager {
-	globalKeybindingsState.mu.Lock()
-	defer globalKeybindingsState.mu.Unlock()
-	if globalKeybindingsState.keybindings == nil {
-		globalKeybindingsState.keybindings = NewKeybindingsManager(TUIKeybindings, nil)
+	if manager := globalKeybindingsState.keybindings.Load(); manager != nil {
+		return manager
 	}
-	return globalKeybindingsState.keybindings
+	manager := NewKeybindingsManager(TUIKeybindings, nil)
+	globalKeybindingsState.keybindings.Store(manager)
+	return manager
 }

@@ -92,7 +92,12 @@ invented to bridge that gap). Stage 1 has landed:
   upstream's awaited prompt. Initial messages are seeded as pending loop work
   ahead of submissions.
 - Every channel is buffered; every consumer select has a `ctx.Done()` arm;
-  producers blocked on a full channel are released at shutdown.
+  producers blocked on a full channel are released by the run context's
+  cancellation or by the queue's `Close` (the terminal reader and event
+  subscribers never receive a context, so both arms are present).
+- The loop calls a **watchdog beat** once per iteration
+  (`RunWiring.LoopBeats`, exposed as `App.LoopBeats`): a stalled loop stops
+  advancing it, so a watchdog can detect a hang.
 - **D143** records the divergence: upstream is single-threaded (await +
   microtask order), the port is an explicit select loop with off-loop work and
   partial coalescing.
@@ -226,8 +231,14 @@ user code under a lock, snapshot under and deliver outside.
 | `lastEventTypeState.mu` | `tui/keys.go:342` | last parsed key event type (fidelity port) | D | stage 4 |
 | `widthCacheMu` | `tui/width.go:471` | memoized `VisibleWidth` cache | C | stage 4 (loop-confined; D-row if non-UI callers remain) |
 
-Stage 4's target is that this table is empty (or reduced to D-rowed exceptions
-where a shared non-UI caller genuinely requires a lock).
+Stage 4 result: **20 of the original 30 locks are retired** (input handoff,
+model/scoped/session selectors, footer cache, lifecycle flags, edit preview,
+theme registry + three seams, loader, flash container, kitty globals,
+keybindings manager + global registry, width cache, DrainInput tracking). The
+remaining 8 are the D-rowed exceptions above (D146 timer mode, D147 terminal
+and decoder); the interactive app itself runs
+lock-free — `grep 'sync.Mutex' tui/ coding/interactive/` outside tests returns
+only those documented locks.
 - **Go 1.27 quirk.** Function literals passed as arguments need an explicit
   result type when the parameter's function type has one.
 - **RE2 regex** (no lookaround/backreferences). Put `-` first in a character
@@ -285,6 +296,26 @@ summarized in the README scoreboard. The range is **D1–D139**. Representative:
   is retired in stage 1 (the submission handoff is a buffered channel); the
   others retire in stages 3-4.
 - D132 — branch summarization is tracked as compaction and abortable.
+- D146 — the timer-mode UI locks are kept: `Renderer.mu` (main/alt screen render
+  state), `Renderer.renderMu`, `Container.mu`, `Editor.mu`, `AltScreen.mu` and
+  `ScrollView.mu` serialize input against timer-driven renders for the
+  standalone `-r` session picker and library users. The interactive app runs in
+  loop mode (`EnableRenderTicks`), where the loop is the only renderer and the
+  only mutator, so those locks are always uncontended there; `renderMu` is
+  taken only when `!loopMode()`.
+- D147 — terminal and decoder locks are kept: `ProcessTerminal.mu` guards raw
+  mode, the Kitty/modifyOtherKeys negotiation state and write bookkeeping that
+  the stdin reader goroutine shares with loop-side writers, and
+  `StdinBuffer.mu` guards the decoder's escape/sequence timeout timer. Neither
+  touches UI state; removing them would rework the decoder's timer into the
+  reader and hand terminal negotiation state to the loop.
+- D148 — **closed**: the model-catalog refresh registry is lock-free (atomic
+  copy-on-write map with insert-if-absent/unpublish-if-matching, atomic per
+  refresh outcome, waiter count and canceled flag). Two races were fixed on the
+  way: publishing must not overwrite an entry that appeared after the load, and
+  a waiter slot is only claimed once the entry is confirmed published.
+- D135's footer-watcher half (`coding/footerdata.go`) sits outside the refactor's
+  edit scope and is documented rather than retired.
 - D145 — terminal input, resize and process signals reach the UI loop as
   channel messages from pure producers (the stdin reader, the SIGWINCH
   watcher, the signal handlers); the loop dispatches input, paints on resize

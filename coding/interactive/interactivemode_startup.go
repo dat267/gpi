@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dat267/pier/agent"
@@ -76,6 +77,9 @@ type StartupWiring struct {
 	inputsClosed chan struct{}
 	// inputsClosedOnce makes Close idempotent.
 	inputsClosedOnce sync.Once
+	// ctx is the run context; submission sends also unblock on its cancellation
+	// (stage 4 gap).
+	ctx atomic.Pointer[context.Context]
 	// anthropicSubscriptionWarningShown dedupes the warning.
 	anthropicSubscriptionWarningShown bool
 	// MainScreenRenderState is the captured main-screen state.
@@ -108,9 +112,25 @@ func (w *StartupWiring) InitInputs() {
 // Inputs exposes the submission channel to the run loop.
 func (w *StartupWiring) Inputs() <-chan string { return w.inputs }
 
+// SetContext installs the run context for ctx-aware producer sends.
+func (w *StartupWiring) SetContext(ctx context.Context) {
+	if w == nil {
+		return
+	}
+	w.ctx.Store(&ctx)
+}
+
+// done is the channel a producer send unblocks on (run cancellation or Close).
+func (w *StartupWiring) done() <-chan struct{} {
+	if ctx := w.ctx.Load(); ctx != nil {
+		return (*ctx).Done()
+	}
+	return w.inputsClosed
+}
+
 // QueueUserInput delivers a submission to the run loop. The send is buffered;
 // it only blocks when the queue is full (a turn's worth of pending
-// submissions) and unblocks at shutdown.
+// submissions) and unblocks at shutdown or context cancellation.
 func (w *StartupWiring) QueueUserInput(text string) {
 	if w.inputs == nil {
 		w.InitInputs()
@@ -118,6 +138,7 @@ func (w *StartupWiring) QueueUserInput(text string) {
 	select {
 	case w.inputs <- text:
 	case <-w.inputsClosed:
+	case <-w.done():
 	}
 }
 

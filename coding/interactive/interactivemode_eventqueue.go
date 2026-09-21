@@ -1,7 +1,9 @@
 package interactive
 
 import (
+	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/dat267/pier/coding"
 )
@@ -46,6 +48,10 @@ type sessionEventQueue struct {
 	partial  chan *coding.SessionEvent
 	closed   chan struct{}
 
+	// ctx is the run context; producers also unblock on its cancellation
+	// (stage 4 gap: every send selects on ctx.Done() as well as Close).
+	ctx atomic.Pointer[context.Context]
+
 	once sync.Once
 }
 
@@ -55,6 +61,23 @@ func newSessionEventQueue() *sessionEventQueue {
 		partial:  make(chan *coding.SessionEvent, sessionEventPartialCapacity),
 		closed:   make(chan struct{}),
 	}
+}
+
+// SetContext installs the run context producers select on.
+func (q *sessionEventQueue) SetContext(ctx context.Context) {
+	if q == nil {
+		return
+	}
+	q.ctx.Store(&ctx)
+}
+
+// done returns a channel closed when the queue shuts down or the run context
+// is cancelled.
+func (q *sessionEventQueue) done() <-chan struct{} {
+	if ctx := q.ctx.Load(); ctx != nil {
+		return (*ctx).Done()
+	}
+	return q.closed
 }
 
 // Events/Lossless/Partials expose the consumer sides to the run loop.
@@ -87,6 +110,8 @@ func (q *sessionEventQueue) enqueue(event *coding.SessionEvent) {
 	case q.lossless <- event:
 	case <-q.closed:
 		// Shutting down: the consumer is gone, so unblock the producer.
+	case <-q.done():
+		// The run context was cancelled (shutdown without Close).
 	}
 }
 

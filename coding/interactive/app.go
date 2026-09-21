@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/term"
 	"time"
@@ -145,6 +146,7 @@ type App struct {
 	// reader sends complete sequences and the resize watcher sends ticks; the
 	// run loop dispatches them (stage 3). loopInputsClosed releases a producer
 	// parked on a full channel at shutdown.
+	runCtx           atomic.Pointer[context.Context]
 	loopInputs       chan string
 	loopResizes      chan struct{}
 	loopSignals      chan os.Signal
@@ -713,8 +715,27 @@ func (a *App) Init(ctx context.Context) {
 	a.Autocomplete.SetupAutocompleteProvider()
 }
 
+// runContext is the active run's context (producers select on it).
+var _ = 0
+
+// runDone returns the run context's Done channel (closed when Run's context is
+// cancelled); a background context when no run is active.
+func (a *App) runDone() <-chan struct{} {
+	if ctx := a.runCtx.Load(); ctx != nil {
+		return (*ctx).Done()
+	}
+	return context.Background().Done()
+}
+
 // Run initializes and runs the interactive loop.
 func (a *App) Run(ctx context.Context) {
+	a.runCtx.Store(&ctx)
+	if a.sessionEvents != nil {
+		a.sessionEvents.SetContext(ctx)
+	}
+	if a.Startup != nil {
+		a.Startup.SetContext(ctx)
+	}
 	a.Init(ctx)
 	a.Runner.Run(ctx, InitOptions{
 		ScopedModels:    a.Session.ScopedModels(),
@@ -764,12 +785,14 @@ func (a *App) newLoopTui(options InteractiveTuiOptions) tui.TUI {
 			select {
 			case a.loopInputs <- data:
 			case <-a.loopInputsClosed:
+			case <-a.runDone():
 			}
 		},
 		func() {
 			select {
 			case a.loopResizes <- struct{}{}:
 			default:
+			case <-a.runDone():
 			}
 		},
 	)
@@ -782,6 +805,14 @@ func (a *App) PostTerminalInput(data string) {
 	case a.loopInputs <- data:
 	case <-a.loopInputsClosed:
 	}
+}
+
+// LoopBeats reports the run loop's watchdog beat.
+func (a *App) LoopBeats() uint64 {
+	if a.Runner == nil {
+		return 0
+	}
+	return a.Runner.LoopBeats()
 }
 
 // LoopInputs/LoopResizes expose the producer channels to the run loop.
