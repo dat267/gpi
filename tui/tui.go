@@ -130,3 +130,5 @@ func (r *TuiReference) RemoveChild(component Component) { r.get().RemoveChild(co
 func (r *TuiReference) Clear() { r.get().Clear() }
 
 var _ TUI = (*TuiReference)(nil)
+
+var _ TUI = (*TuiReference)(nil)

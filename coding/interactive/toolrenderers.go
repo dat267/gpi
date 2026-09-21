@@ -586,10 +586,11 @@ func formatShellCall(args map[string]any, prompt string, theme *Theme) string {
 
 // bashResultState caches the collapsed preview per width.
 type bashResultState struct {
-	cachedWidth   int
-	hasCached     bool
-	cachedLines   []string
-	cachedSkipped int
+	cachedWidth    int
+	hasCached      bool
+	cachedLines    []string
+	cachedSkipped  int
+	cachedRendered []string
 }
 
 func bashStateFor(context *ToolRenderContext) *bashResultState {
@@ -671,7 +672,14 @@ type bashPreviewComponent struct {
 	theme  *Theme
 }
 
+// bashResultState additionally caches the fully rendered preview lines (the
+// hint included), so a warm frame reuses them (upstream caches visualLines the
+// same way, bash-execution.ts).
+
 func (c *bashPreviewComponent) Render(width int) []string {
+	if c.state.hasCached && c.state.cachedWidth == width && c.state.cachedRendered != nil {
+		return c.state.cachedRendered
+	}
 	if !c.state.hasCached || c.state.cachedWidth != width {
 		preview := TruncateToVisualLines(c.output, bashPreviewLines, width, 0)
 		c.state.cachedLines = preview.VisualLines
@@ -686,13 +694,16 @@ func (c *bashPreviewComponent) Render(width int) []string {
 			" " + KeyHint("app.tools.expand", "to expand") + c.theme.Fg("muted", ")")
 		lines = append(lines, tui.TruncateToWidth(hint, width, "...", false))
 	}
-	return append(lines, c.state.cachedLines...)
+	lines = append(lines, c.state.cachedLines...)
+	c.state.cachedRendered = lines
+	return lines
 }
 
 func (c *bashPreviewComponent) Invalidate() {
 	c.state.hasCached = false
 	c.state.cachedWidth = 0
 	c.state.cachedLines = nil
+	c.state.cachedRendered = nil
 	c.state.cachedSkipped = 0
 }
 

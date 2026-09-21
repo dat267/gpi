@@ -130,6 +130,14 @@ summarized in the README scoreboard. The range is **D1–D139**. Representative:
 - D140 — the user's provider extensions (hyper, commandcode) are compiled in as
   `providers.ExtensionProviders()` instead of being loaded from
   `~/.pi/agent/extensions` (extension loading is out of scope).
+- D141 — the builtin footer renders the user's footer-extension format (one dim
+  line `3.5%/1M · <statuses> · model · cwd`) instead of upstream's two-line
+  footer: upstream's render walks every session entry per frame, which in Go
+  means a json.Unmarshal per message per frame (O(session size); measured 445ms
+  per frame on a 10k-entry session). The footer render is cached and invalidated
+  on every session event; FormatTokens/FormatCwdForFooter keep upstream
+  behavior. app.UI is the TuiReference forwarder (D105) so the /tui and
+  exit-replay renderer swaps reach every holder.
 - D44/D47 — Go uses function fields instead of overridable methods; listeners
   are compared by code pointer.
 - D51 — `StdinBuffer` uses callbacks instead of `EventEmitter`.

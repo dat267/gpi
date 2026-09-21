@@ -85,6 +85,9 @@ func (s *InteractiveUIState) SetExtensionStatus(key string, text *string) {
 	if s.FooterData != nil {
 		s.FooterData.SetExtensionStatus(key, text)
 	}
+	if s.Footer != nil {
+		s.Footer.Invalidate()
+	}
 	s.requestRender()
 }
 

@@ -251,6 +251,10 @@ func (l *Lifecycle) SwitchTuiMode(mode string, restoreProgress bool, startRender
 	return true
 }
 
+// CurrentUI returns the active renderer (the mode swaps it on /tui switches
+// and on the exit replay).
+func (l *Lifecycle) CurrentUI() tui.TUI { return l.options.UI }
+
 // layoutRoot is set by the mode after building the chat viewport.
 func (l *Lifecycle) layoutRoot() tui.Component { return l.LayoutRoot }
 

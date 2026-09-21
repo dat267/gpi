@@ -59,7 +59,7 @@ func NewFooterDataProvider(cwd string, options FooterDataProviderOptions) *Foote
 		if interval > 0 {
 			provider.stopWatch = make(chan struct{})
 			provider.watchDone = make(chan struct{})
-			go provider.watchLoop(provider.stopWatch, interval)
+			go provider.watchLoop(provider.stopWatch, provider.watchDone, interval)
 		}
 	}
 	return provider
@@ -212,8 +212,10 @@ func (f *FooterDataProvider) Refresh() {
 	}
 }
 
-func (f *FooterDataProvider) watchLoop(stopWatch chan struct{}, interval time.Duration) {
-	defer close(f.watchDone)
+// watchLoop polls the git head. The channels are passed in because Dispose
+// nils the fields (a double dispose must not close a nil channel).
+func (f *FooterDataProvider) watchLoop(stopWatch, watchDone chan struct{}, interval time.Duration) {
+	defer close(watchDone)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	lastHead := f.readHeadContent()

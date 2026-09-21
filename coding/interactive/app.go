@@ -177,13 +177,23 @@ func NewApp(options AppOptions) *App {
 		Keybindings: keybindings,
 	}
 
-	// Renderer + theme.
-	app.UI = CreateInteractiveTui(InteractiveTuiOptions{
+	// Renderer + theme. app.UI is the stable forwarding reference (upstream's
+	// createInteractiveTuiReference(() => this.renderer)): SwitchTuiMode swaps
+	// the lifecycle's renderer and every holder of app.UI follows it.
+	initialUI := CreateInteractiveTui(InteractiveTuiOptions{
 		TuiMode:                options.TuiMode,
 		ShowHardwareCursor:     options.Settings.GetShowHardwareCursor(),
 		LogDirectory:           options.AgentDir,
 		Terminal:               terminal,
 		FullscreenCopyOnSelect: appBoolPtr(options.Settings.GetFullscreenCopyOnSelect()),
+	})
+	app.UI = tui.NewTuiReference(func() tui.TUI {
+		if app.Lifecycle != nil {
+			if current := app.Lifecycle.CurrentUI(); current != nil {
+				return current
+			}
+		}
+		return initialUI
 	})
 	app.UI.SetClearOnShrink(options.Settings.GetClearOnShrink())
 	app.Theme = NewInteractiveThemeController(ThemeControllerOptions{
@@ -287,8 +297,14 @@ func NewApp(options AppOptions) *App {
 
 	app.Slot = NewSelectorSlot(app.UI, app.EditorContainer, app.DefaultEditor)
 
+	// Upstream initializes the widget containers with their default spacers
+	// before mounting ("renderWidgets(); // Initialize with default spacer"):
+	// the empty widgets-above container renders the blank line on top of the
+	// divider above the input box.
+	app.UIState.RenderWidgets()
+
 	app.Lifecycle = NewLifecycle(LifecycleOptions{
-		UI:           app.UI,
+		UI:           initialUI,
 		Session:      app.Session,
 		Settings:     app.Settings,
 		Terminal:     terminal,
