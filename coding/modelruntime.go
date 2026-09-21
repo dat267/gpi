@@ -163,6 +163,11 @@ func CreateModelRuntime(options CreateModelRuntimeOptions) (*ModelRuntime, error
 	for _, provider := range providers.BuiltinProviders() {
 		runtime.defaults[provider.ID] = provider
 	}
+	// The user's provider extensions register alongside the built-ins so the
+	// settings' default model resolves (D140).
+	for _, provider := range providers.ExtensionProviders() {
+		runtime.defaults[provider.ID] = provider
+	}
 	for id, provider := range runtime.defaults {
 		runtime.builtins[id] = provider
 	}

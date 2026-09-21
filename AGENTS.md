@@ -127,6 +127,9 @@ summarized in the README scoreboard. The range is **D1–D139**. Representative:
   runner, package/tools managers); seams are function values or return nil.
 - D133 — tool renderers always resolve to the built-in set (no extension
   definitions); `computeEditsPreview` is synchronous.
+- D140 — the user's provider extensions (hyper, commandcode) are compiled in as
+  `providers.ExtensionProviders()` instead of being loaded from
+  `~/.pi/agent/extensions` (extension loading is out of scope).
 - D44/D47 — Go uses function fields instead of overridable methods; listeners
   are compared by code pointer.
 - D51 — `StdinBuffer` uses callbacks instead of `EventEmitter`.

@@ -55,6 +55,9 @@ func main() {
 
 func run(appName string, args *coding.Args) error {
 	ctx := context.Background()
+	// Bounds the create-time catalog refresh (upstream leaves it unbounded; the
+	// Go refresh is synchronous, so it needs a ceiling).
+	modelRefreshTimeoutMS := int64(15000)
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -84,12 +87,16 @@ func run(appName string, args *coding.Args) error {
 		sessions = coding.NewSessionManager(cwd, options)
 	}
 
-	// Model runtime backed by auth.json.
-	refreshOnCreate := false
+	// Model runtime backed by auth.json. Upstream refreshes the catalogs at
+	// create (refreshOnCreate defaults to true), which is what populates the
+	// availability snapshot and the configured-provider set used to resolve the
+	// default model; skipping it left every provider unconfigured.
+	allowNetwork := !args.Offline
 	runtime, err := coding.CreateModelRuntime(coding.CreateModelRuntimeOptions{
-		AuthPath:        agentDir + "/auth.json",
-		RefreshOnCreate: &refreshOnCreate,
-		Signal:          ctx,
+		AuthPath:              agentDir + "/auth.json",
+		AllowModelNetwork:     allowNetwork,
+		ModelRefreshTimeoutMS: &modelRefreshTimeoutMS,
+		Signal:                ctx,
 	})
 	if err != nil {
 		return err
