@@ -288,6 +288,7 @@ func NewApp(options AppOptions) *App {
 	app.Queue = NewQueueController(app.UI, app.Session, app.Settings, app.DefaultEditor, app.Chat, app.PendingMessages)
 
 	app.Events = NewEventDispatcher(app.Transcript, app.UIState, app.Footer, app.Settings, app.Session, app.SessionMgr, app.DefaultEditor)
+	app.Events.ShowError = func(message string) { app.showError(message) }
 	app.Events.HideThinkingBlock = options.Settings.GetHideThinkingBlock()
 	app.Events.HiddenThinkingLabel = app.UIState.DefaultHiddenThinkingLabel
 	app.Events.OutputPad = options.Settings.GetOutputPad()

@@ -2,7 +2,9 @@ package coding
 
 import (
 	ctxpkg "context"
+	"encoding/json"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -286,5 +288,101 @@ func summarizingStreamFn(t *testing.T, runs *atomic.Int64, text string) agent.St
 			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: ai.StopStop, Message: message})
 		}()
 		return stream
+	}
+}
+
+func unreachableStreamFn(*ai.Model, ai.TranscriptContext, *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+	panic("streamFn must not be called on this path")
+}
+
+// collectCompactionEvents subscribes and returns a function that drains the
+// start/end events seen so far.
+func collectCompactionEvents(session *AgentSession) func() (starts, ends int, lastEnd *SessionEvent) {
+	var mu sync.Mutex
+	starts, ends := 0, 0
+	var lastEnd *SessionEvent
+	session.Subscribe(func(event *SessionEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch event.Type {
+		case SessionCompactionStart:
+			starts++
+		case SessionCompactionEnd:
+			ends++
+			clone := *event
+			lastEnd = &clone
+		}
+	})
+	return func() (int, int, *SessionEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		return starts, ends, lastEnd
+	}
+}
+
+// TestCompactSessionTooSmallEmitsEnd asserts the impossible-compaction paths
+// still emit compaction_end after compaction_start (upstream routes every
+// error through the catch that emits compaction_end); missing it left the
+// compaction status indicator mounted forever.
+func TestCompactSessionTooSmallEmitsEnd(t *testing.T) {
+	session := compactionTestSession(t, &ai.Model{ID: "m", Provider: "anthropic", API: ai.APIAnthropicMessages}, unreachableStreamFn, smallCompactionSettings())
+	drain := collectCompactionEvents(session)
+
+	_, err := session.CompactSession(ctxpkg.Background(), "")
+	if err == nil {
+		t.Fatal("expected an error for a too-small session")
+	}
+	starts, ends, lastEnd := drain()
+	if starts != 1 || ends != 1 {
+		t.Fatalf("events: %d starts, %d ends; want 1 of each", starts, ends)
+	}
+	if lastEnd == nil || !strings.Contains(lastEnd.ErrorMessage, "Nothing to compact") {
+		t.Fatalf("last end %+v, want a Nothing-to-compact error message", lastEnd)
+	}
+	if !session.IsIdle() {
+		t.Fatal("session must be idle after a failed compaction")
+	}
+}
+
+// TestCompactSessionAlreadyCompactedEmitsEnd covers the already-compacted path.
+func TestCompactSessionAlreadyCompactedEmitsEnd(t *testing.T) {
+	session := compactionTestSession(t, &ai.Model{ID: "m", Provider: "anthropic", API: ai.APIAnthropicMessages}, unreachableStreamFn, smallCompactionSettings())
+	drain := collectCompactionEvents(session)
+	seedBranch(t, session)
+
+	// Force a compaction entry so PrepareCompaction reports "already compacted".
+	session.Sessions.AppendCompaction("summary of everything", "", 100, json.RawMessage("{}"), false, nil)
+
+	_, err := session.CompactSession(ctxpkg.Background(), "")
+	if err == nil || !strings.Contains(err.Error(), "Already compacted") {
+		t.Fatalf("error %v, want Already compacted", err)
+	}
+	starts, ends, lastEnd := drain()
+	if starts != 1 || ends != 1 {
+		t.Fatalf("events: %d starts, %d ends; want 1 of each", starts, ends)
+	}
+	if lastEnd == nil || !strings.Contains(lastEnd.ErrorMessage, "Already compacted") {
+		t.Fatalf("last end %+v, want an Already-compacted error message", lastEnd)
+	}
+	if !session.IsIdle() {
+		t.Fatal("session must be idle after a failed compaction")
+	}
+}
+
+// TestCompactSessionNoModelEmitsEnd covers the missing-model path.
+func TestCompactSessionNoModelEmitsEnd(t *testing.T) {
+	session := compactionTestSession(t, nil, unreachableStreamFn, smallCompactionSettings())
+	drain := collectCompactionEvents(session)
+
+	_, err := session.CompactSession(ctxpkg.Background(), "")
+	if err == nil {
+		t.Fatal("expected an error without a model")
+	}
+	starts, ends, lastEnd := drain()
+	if starts != 1 || ends != 1 {
+		t.Fatalf("events: %d starts, %d ends; want 1 of each", starts, ends)
+	}
+	if lastEnd == nil || lastEnd.ErrorMessage == "" {
+		t.Fatalf("last end %+v, want an error message", lastEnd)
 	}
 }

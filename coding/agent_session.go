@@ -470,16 +470,50 @@ func (s *AgentSession) CompactSession(ctx context.Context, customInstructions st
 	s.compactionCancel = cancel
 	s.compactionActive = true
 	s.mu.Unlock()
-	defer func() {
+
+	s.emit(&SessionEvent{Type: SessionCompactionStart, Reason: CompactionManual})
+
+	// Upstream routes every compaction error through the catch that emits
+	// compaction_end; skipping the end event left the compaction status
+	// indicator mounted forever. Clear the state before notifying so end
+	// listeners observe an idle session and may submit queued prompts.
+	cleaned := false
+	cleanup := func() {
+		if cleaned {
+			return
+		}
+		cleaned = true
 		s.mu.Lock()
 		s.compactionActive = false
 		s.compactionCancel = nil
 		s.mu.Unlock()
 		cancel()
-	}()
+	}
+	defer cleanup()
 
-	s.emit(&SessionEvent{Type: SessionCompactionStart, Reason: CompactionManual})
+	result, err := s.runManualCompaction(compactionCtx, customInstructions)
+	// Aborted means the compaction context was cancelled (ESC/user abort);
+	// compute it before cleanup's own cancel() runs.
+	aborted := compactionCtx.Err() != nil
+	cleanup()
+	if err != nil {
+		errorMessage := ""
+		if !aborted {
+			errorMessage = "Compaction failed: " + err.Error()
+		}
+		s.emit(&SessionEvent{
+			Type: SessionCompactionEnd, Reason: CompactionManual, Aborted: aborted,
+			ErrorMessage: errorMessage,
+		})
+		return nil, err
+	}
+	s.emit(&SessionEvent{Type: SessionCompactionEnd, Reason: CompactionManual, Result: result})
+	return result, nil
+}
 
+// runManualCompaction runs the manual compaction after compaction_start was
+// emitted. All errors are reported through compaction_end by the caller.
+func (s *AgentSession) runManualCompaction(ctx context.Context, customInstructions string) (*CompactionResult, error) {
 	model := s.Model()
 	if !s.HasModel() || model == nil {
 		return nil, fmt.Errorf("%s", FormatNoModelSelectedMessage())
@@ -489,16 +523,16 @@ func (s *AgentSession) CompactSession(ctx context.Context, customInstructions st
 	pathEntries := s.Sessions.GetBranch("")
 	preparation := PrepareCompaction(pathEntries, settings)
 	if preparation == nil {
-		// Distinguish why compaction is impossible.
-		lastEntry := pathEntries[len(pathEntries)-1]
-		if lastEntry.Type == "compaction" {
+		// Distinguish why compaction is impossible (upstream uses optional
+		// chaining: an empty branch reports Nothing-to-compact, not a panic).
+		if len(pathEntries) > 0 && pathEntries[len(pathEntries)-1].Type == "compaction" {
 			return nil, fmt.Errorf("Already compacted")
 		}
 		return nil, fmt.Errorf("Nothing to compact (session too small)")
 	}
 
 	options := CompactionOptions{
-		Model: model, Ctx: compactionCtx, CustomInstructions: customInstructions,
+		Model: model, Ctx: ctx, CustomInstructions: customInstructions,
 		StreamFn: s.compactionStreamFn(), Retry: s.retrySettings(),
 		SessionID: s.Sessions.GetSessionID(),
 	}
@@ -519,34 +553,15 @@ func (s *AgentSession) CompactSession(ctx context.Context, customInstructions st
 	s.applyCompactModelOverride(&options)
 	result, err := Compact(preparation, options)
 	if err != nil {
-		aborted := compactionCtx.Err() != nil
-		errorMessage := ""
-		if !aborted {
-			errorMessage = "Compaction failed: " + err.Error()
-		}
-		s.emit(&SessionEvent{
-			Type: SessionCompactionEnd, Reason: CompactionManual, Aborted: aborted,
-			ErrorMessage: errorMessage,
-		})
 		return nil, err
 	}
-	if compactionCtx.Err() != nil {
-		s.emit(&SessionEvent{Type: SessionCompactionEnd, Reason: CompactionManual, Aborted: true})
+	if ctx.Err() != nil {
 		return nil, fmt.Errorf("Compaction cancelled")
 	}
 
 	s.Sessions.AppendCompaction(result.Summary, result.FirstKeptEntryID, result.TokensBefore, result.Details, false, result.Usage)
 	sessionContext := s.Sessions.BuildSessionContext()
 	s.Agent.SetMessages(sessionContext.Messages)
-
-	// compaction_end listeners may submit queued prompts, so expose idle state
-	// before notifying them.
-	s.mu.Lock()
-	s.compactionActive = false
-	s.compactionCancel = nil
-	s.mu.Unlock()
-	cancel()
-	s.emit(&SessionEvent{Type: SessionCompactionEnd, Reason: CompactionManual, Result: result})
 	return result, nil
 }
 

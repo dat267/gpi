@@ -224,6 +224,10 @@ func (s *MainScreen) resetRenderState() {
 }
 
 func (s *MainScreen) beforeTerminalStop(options TuiStopOptions) {
+	// The transcript-replay reads render-mutated state; serialize against an
+	// in-flight timer render, which writes the same fields under s.mu.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if options.PreserveScreen || len(s.previousLines) == 0 {
 		return
 	}
