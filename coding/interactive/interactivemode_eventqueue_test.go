@@ -194,7 +194,7 @@ func TestRunLoopConcurrentProducerKeepsDraining(t *testing.T) {
 
 	var terminal, partial int64
 	app.Events.CheckShutdownRequested = func() { atomic.AddInt64(&terminal, 1) }
-	app.Events.Init = func() { atomic.AddInt64(&partial, 1) }
+	app.Runner.OnPartialEventApplied = func() { atomic.AddInt64(&partial, 1) }
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

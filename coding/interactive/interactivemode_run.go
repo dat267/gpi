@@ -59,6 +59,10 @@ type RunWiring struct {
 	RebindSession func(ctx context.Context) error
 	// RenderInitialMessages renders the initial transcript.
 	RenderInitialMessages func()
+	// OnPartialEventApplied observes one applied partial-channel event
+	// (test seam: partial events are otherwise superseded no-ops without a
+	// streaming assistant component).
+	OnPartialEventApplied func()
 	// OnThemeChange registers the theme-file watcher callback.
 	OnThemeChange func(callback func()) func()
 	// OnBranchChange registers the git-branch watcher callback.
@@ -503,6 +507,9 @@ func (w *RunWiring) drainReadyEvents() {
 			if w.Events != nil {
 				w.Events.HandleEvent(event)
 			}
+			if w.OnPartialEventApplied != nil {
+				w.OnPartialEventApplied()
+			}
 			continue
 		default:
 		}
@@ -667,6 +674,9 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 			}
 			if w.Events != nil {
 				w.Events.HandleEvent(event)
+			}
+			if w.OnPartialEventApplied != nil {
+				w.OnPartialEventApplied()
 			}
 		case data, ok := <-w.InputEvents:
 			if !ok {
