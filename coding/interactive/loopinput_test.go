@@ -186,3 +186,80 @@ func TestCompactCommandDoesNotBlockInput(t *testing.T) {
 
 	close(session.release)
 }
+
+// compactWhileBusySession records when the compaction starts.
+type compactWhileBusySession struct {
+	CommandSession
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (c *compactWhileBusySession) CompactSession(context.Context, string) error {
+	c.once.Do(func() { close(c.started) })
+	<-c.release
+	return nil
+}
+
+// TestCompactCommandDuringTurnDoesNotQueueBehindIt is the regression for the
+// reported "compact does not work": a manual /compact while a turn occupies
+// RunWork's single work slot used to be queued behind that turn (RunWork
+// appends to work.pending), so nothing happened until the turn finished on
+// its own. Upstream session.compact() aborts the active run and compacts
+// immediately; the compaction is event-only, so it must run detached.
+func TestCompactCommandDuringTurnDoesNotQueueBehindIt(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+
+	session := &compactWhileBusySession{started: make(chan struct{}), release: make(chan struct{})}
+	session.CommandSession = app.Commands.Session
+	app.Commands.Session = session
+
+	// Occupy the work slot through the loop's own prompt path with a turn
+	// that never finishes on its own.
+	releaseTurn := make(chan struct{})
+	turnStarted := make(chan struct{})
+	previousPrompt := app.Runner.Prompt
+	app.Runner.Prompt = func(ctx context.Context, text string) error {
+		close(turnStarted)
+		<-releaseTurn
+		return previousPrompt(ctx, text)
+	}
+
+	stop := startLoopApp(t, app)
+	defer stop()
+
+	app.PostTerminalInput("long running turn")
+	waitForConditionWithin(t, func() bool {
+		return strings.Contains(app.DefaultEditor.GetText(), "long running turn")
+	}, 6*time.Second)
+	app.PostTerminalInput("\r")
+	select {
+	case <-turnStarted:
+	case <-time.After(700 * time.Millisecond):
+		// The autocomplete may consume the first Enter; retry once.
+		app.PostTerminalInput("\r")
+		select {
+		case <-turnStarted:
+		case <-time.After(3 * time.Second):
+			t.Fatal("turn never started")
+		}
+	}
+
+	// /compact while the turn is active: the compaction must start now, not
+	// after the turn is released.
+	app.PostTerminalInput("/compact\r")
+	select {
+	case <-session.started:
+	case <-time.After(700 * time.Millisecond):
+		// The autocomplete may consume the first Enter; retry once.
+		app.PostTerminalInput("\r")
+		select {
+		case <-session.started:
+		case <-time.After(3 * time.Second):
+			t.Fatal("manual /compact during an active turn was queued behind it and never started")
+		}
+	}
+
+	close(releaseTurn)
+}

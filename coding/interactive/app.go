@@ -637,15 +637,16 @@ func NewApp(options AppOptions) *App {
 			HandleClearCommand: func() error { app.Commands.HandleClearCommand(context.Background()); return nil },
 			HandleCompactCommand: func(instructions string) error {
 				// The indicator is UI state (loop side); the compaction itself
-				// only emits session events, so it runs off-loop and no longer
-				// blocks input (stage 3).
+				// only emits session events. It runs detached, not through
+				// RunWork's single slot: upstream session.compact() aborts the
+				// active run and compacts immediately, while a queued work item
+				// would leave a mid-run /compact inert until the turn finished
+				// on its own.
 				app.Commands.ClearCompactionStatus()
-				if !app.runOffLoop(func(ctx context.Context) error {
+				app.runDetached(func(ctx context.Context) error {
 					app.Commands.CompactSession(ctx, instructions)
 					return nil
-				}) {
-					app.Commands.CompactSession(context.Background(), instructions)
-				}
+				})
 				return nil
 			},
 			HandleDebugCommand:   func() { app.Commands.HandleDebugCommand("") },
@@ -822,12 +823,17 @@ func (a *App) LoopResizes() <-chan struct{} { return a.loopResizes }
 // runOffLoop dispatches blocking work to the loop's work goroutine when the
 // loop is running; it reports whether the work was dispatched. Callers use the
 // non-dispatched path for direct/test invocation.
-func (a *App) runOffLoop(fn func(ctx context.Context) error) bool {
-	if a.Runner == nil || a.Runner.StartWork == nil {
-		return false
+// runDetached runs event-only work in its own goroutine without occupying
+// RunWork's single work slot, so it cannot queue behind the active turn. It
+// uses the run loop's context so shutdown cancellation still reaches it.
+func (a *App) runDetached(fn func(ctx context.Context) error) {
+	ctx := context.Background()
+	if a.Runner != nil {
+		if loopCtx := a.Runner.LoopContext(); loopCtx != nil {
+			ctx = loopCtx
+		}
 	}
-	a.Runner.RunWork(fn)
-	return true
+	go func() { _ = fn(ctx) }()
 }
 
 // currentRenderer returns the concrete active renderer (upstream's

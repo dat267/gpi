@@ -565,6 +565,10 @@ func (w *RunWiring) RunWork(fn func(context.Context) error) {
 	w.work.pending = append(w.work.pending, fn)
 }
 
+// LoopContext returns the run loop's work context. Only the loop goroutine
+// may call it (the context is loop-owned state).
+func (w *RunWiring) LoopContext() context.Context { return w.work.ctx }
+
 // startWork launches fn in its own goroutine and records the completion
 // channel. A panic is surfaced like a returned error instead of killing the
 // process.
