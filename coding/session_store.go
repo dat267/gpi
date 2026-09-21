@@ -487,13 +487,10 @@ func BuildSessionContext(entries []SessionEntry, leafID *string, byID map[string
 	return SessionContext{Messages: messages, ThinkingLevel: thinkingLevel, Model: model}
 }
 
-// DefaultAgentDir is ~/.pi/agent.
+// DefaultAgentDir is the agent config directory (upstream getDefaultAgentDir
+// aliases getAgentDir, which honors PI_CODING_AGENT_DIR).
 func DefaultAgentDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".pi", "agent")
+	return GetAgentDir()
 }
 
 // DefaultSessionsDir is ~/.pi/agent/sessions.

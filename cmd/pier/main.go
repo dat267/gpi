@@ -195,11 +195,76 @@ func run(appName string, args *coding.Args) error {
 	return nil
 }
 
-// resumeSession opens the newest session for the cwd, or an explicit one.
+// resolvedSession is upstream main.ts's ResolvedSession (kind + payload).
+type resolvedSession struct {
+	kind string // "path" | "local" | "global" | "not_found"
+	path string
+	arg  string
+	cwd  string
+}
+
+// resolveSessionPath resolves a --session/--fork argument (upstream
+// main.ts resolveSessionPath): path-looking arguments open directly,
+// otherwise the argument matches session IDs — exact first, then prefix —
+// against the local project and then globally across all projects.
+func resolveSessionPath(sessionArg, cwd, sessionDir string) resolvedSession {
+	if strings.Contains(sessionArg, "/") || strings.Contains(sessionArg, "\\") || strings.HasSuffix(sessionArg, ".jsonl") {
+		return resolvedSession{kind: "path", path: coding.ResolvePath(sessionArg, cwd, coding.PathInputOptions{})}
+	}
+
+	local := coding.ListSessions(cwd, sessionDir)
+	for _, info := range local {
+		if info.ID == sessionArg {
+			return resolvedSession{kind: "local", path: info.Path}
+		}
+	}
+	for _, info := range local {
+		if strings.HasPrefix(info.ID, sessionArg) {
+			return resolvedSession{kind: "local", path: info.Path}
+		}
+	}
+
+	all := coding.ListAllSessions(sessionDir)
+	for _, info := range all {
+		if info.ID == sessionArg {
+			return resolvedSession{kind: "global", path: info.Path, cwd: info.Cwd}
+		}
+	}
+	for _, info := range all {
+		if strings.HasPrefix(info.ID, sessionArg) {
+			return resolvedSession{kind: "global", path: info.Path, cwd: info.Cwd}
+		}
+	}
+
+	return resolvedSession{kind: "not_found", arg: sessionArg}
+}
+
+// resumeSession opens the session requested by the CLI flags (upstream
+// createSessionManager's session selection).
 func resumeSession(args *coding.Args, cwd string, agentDir string) (*coding.SessionManager, error) {
 	sessionDir := ""
 	if args.SessionDir != nil {
 		sessionDir = *args.SessionDir
+	}
+	// Upstream validateSessionIdFlags: --session-id rejects conflicting flags
+	// and invalid id formats before any session is opened.
+	if args.SessionID != nil {
+		var conflicts []string
+		if args.Session != nil {
+			conflicts = append(conflicts, "--session")
+		}
+		if args.Continue {
+			conflicts = append(conflicts, "--continue")
+		}
+		if args.Resume {
+			conflicts = append(conflicts, "--resume")
+		}
+		if len(conflicts) > 0 {
+			return nil, fmt.Errorf("--session-id cannot be combined with %s", strings.Join(conflicts, ", "))
+		}
+		if err := coding.AssertValidSessionID(*args.SessionID); err != nil {
+			return nil, err
+		}
 	}
 	if args.Continue {
 		// Upstream -c uses SessionManager.continueRecent(cwd, sessionDir), which
@@ -207,7 +272,19 @@ func resumeSession(args *coding.Args, cwd string, agentDir string) (*coding.Sess
 		return coding.ContinueRecentSession(cwd, sessionDir), nil
 	}
 	if args.Session != nil {
-		return coding.OpenSession(*args.Session, sessionDir, "")
+		resolved := resolveSessionPath(*args.Session, cwd, sessionDir)
+		switch resolved.kind {
+		case "path", "local":
+			return coding.OpenSession(resolved.path, sessionDir, "")
+		case "global":
+			// Upstream prompts to fork the session into the current directory
+			// (promptConfirm + forkSessionOrExit); fork is not ported, so the
+			// session resumes in its own project instead.
+			fmt.Printf("\033[33mSession found in different project: %s\033[0m\n", resolved.cwd)
+			return coding.OpenSession(resolved.path, sessionDir, "")
+		default:
+			return nil, fmt.Errorf("No session found matching '%s'", resolved.arg)
+		}
 	}
 	if args.SessionID != nil {
 		for _, info := range coding.ListSessions(cwd, sessionDir) {
@@ -215,8 +292,15 @@ func resumeSession(args *coding.Args, cwd string, agentDir string) (*coding.Sess
 				return coding.OpenSession(info.Path, sessionDir, "")
 			}
 		}
-		return nil, fmt.Errorf("session %s not found", *args.SessionID)
+		// Upstream (createSessionManager): warn, then create a new session
+		// carrying the requested id.
+		fmt.Printf("\033[33mWarning: No project session found with id '%s'; creating a new session with that id.\033[0m\n", *args.SessionID)
+		sm := coding.NewSessionManager(cwd, &coding.SessionManagerOptions{SessionDir: sessionDir})
+		sm.NewSession(&coding.NewSessionOptions{ID: *args.SessionID})
+		return sm, nil
 	}
+	// -r/--resume: upstream opens the interactive session picker
+	// (cli/session-picker.ts, not ported); open the newest session instead.
 	listed := coding.ListSessions(cwd, sessionDir)
 	if len(listed) == 0 {
 		return nil, fmt.Errorf("no sessions to resume")

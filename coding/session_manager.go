@@ -3,6 +3,7 @@ package coding
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -978,7 +979,9 @@ func (m *SessionManager) UsesDefaultSessionDir() bool {
 // directory) sorted by modification time (port of SessionManager.listAll).
 func ListAllSessions(sessionDir string) []SessionInfo {
 	if sessionDir != "" {
-		return ListSessions("", sessionDir)
+		// Upstream listAll(customSessionDir) scans the directory without a cwd
+		// filter (listSessionsFromDir), never through list().
+		return listSessionsFromDir(sessionDir)
 	}
 	sessionsDir := DefaultSessionsDir()
 	entries, err := os.ReadDir(sessionsDir)
@@ -987,15 +990,37 @@ func ListAllSessions(sessionDir string) []SessionInfo {
 	}
 	var sessions []SessionInfo
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		// Upstream keeps directories and symlinks.
+		if !entry.IsDir() && entry.Type()&fs.ModeSymlink == 0 {
 			continue
 		}
-		sessions = append(sessions, ListSessions("", filepath.Join(sessionsDir, entry.Name()))...)
+		sessions = append(sessions, listSessionsFromDir(filepath.Join(sessionsDir, entry.Name()))...)
 	}
-	for i := 1; i < len(sessions); i++ {
-		for j := i; j > 0 && sessions[j].Modified.After(sessions[j-1].Modified); j-- {
-			sessions[j], sessions[j-1] = sessions[j-1], sessions[j]
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].Modified.After(sessions[j].Modified)
+	})
+	return sessions
+}
+
+// listSessionsFromDir scans one directory for session files without applying
+// any cwd filter (upstream listSessionsFromDir).
+func listSessionsFromDir(dir string) []SessionInfo {
+	var sessions []SessionInfo
+	dirEntries, err := os.ReadDir(dir)
+	if err != nil {
+		return sessions
+	}
+	for _, dirEntry := range dirEntries {
+		if !strings.HasSuffix(dirEntry.Name(), ".jsonl") {
+			continue
+		}
+		full := filepath.Join(dir, dirEntry.Name())
+		if info := buildSessionInfo(full); info != nil {
+			sessions = append(sessions, *info)
 		}
 	}
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].Modified.After(sessions[j].Modified)
+	})
 	return sessions
 }
