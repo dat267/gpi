@@ -64,6 +64,7 @@ func (a *App) applySessionReplacement(sessionManager *coding.SessionManager) (*S
 	// embedded AgentSession rebinds them all at once.
 	a.Session.AgentSession = created.Session
 	a.SessionMgr = sessionManager
+	a.FooterData.SetCwd(sessionManager.GetCwd())
 	a.Transcript.SessionInfo = sessionManager
 	a.Events.SessionInfo = sessionManager
 	a.Startup.SessionInfo = sessionManager

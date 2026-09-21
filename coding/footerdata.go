@@ -65,6 +65,13 @@ func NewFooterDataProvider(cwd string, options FooterDataProviderOptions) *Foote
 	return provider
 }
 
+// Cwd returns the provider's working directory.
+func (f *FooterDataProvider) Cwd() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.cwd
+}
+
 // GetGitBranch returns the current branch, "" for detached HEAD, or nil when
 // not in a repository (the bool is false for nil).
 func (f *FooterDataProvider) GetGitBranch() (string, bool) {

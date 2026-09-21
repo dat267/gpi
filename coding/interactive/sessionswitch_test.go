@@ -113,3 +113,19 @@ func TestSessionNewStartsFreshSession(t *testing.T) {
 			len(app.Chat.Children))
 	}
 }
+
+func TestSwitchSessionUpdatesFooterCwd(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+
+	targetCwd := t.TempDir()
+	target := makePersistedSession(t, targetCwd, "other project")
+
+	if _, err := app.SwitchSession(context.Background(), target.GetSessionFile(), ""); err != nil {
+		t.Fatalf("SwitchSession: %v", err)
+	}
+	if app.FooterData.Cwd() != targetCwd {
+		t.Fatalf("footer cwd %s, want %s", app.FooterData.Cwd(), targetCwd)
+	}
+}

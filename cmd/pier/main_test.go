@@ -83,27 +83,6 @@ func TestResumeSessionByPathStillWorks(t *testing.T) {
 	}
 }
 
-func TestResumeSessionGlobalMatchOpensInPlace(t *testing.T) {
-	isolatedAgentDir(t)
-	cwd := t.TempDir()
-	otherCwd := t.TempDir()
-	// Header cwd differs from the caller's cwd, so the local listing filters
-	// it out; only the global scan finds it.
-	source := makeSessionFile(t, otherCwd)
-
-	args := &coding.Args{Session: strPtr(source.GetSessionID())}
-	sm, err := resumeSession(args, cwd, t.TempDir(), nil)
-	if err != nil {
-		t.Fatalf("resumeSession: %v", err)
-	}
-	if sm.GetSessionID() != source.GetSessionID() {
-		t.Fatalf("resumed id %s, want %s", sm.GetSessionID(), source.GetSessionID())
-	}
-	if sm.GetCwd() != otherCwd {
-		t.Fatalf("resumed cwd %s, want %s", sm.GetCwd(), otherCwd)
-	}
-}
-
 func TestResumeSessionNotFound(t *testing.T) {
 	isolatedAgentDir(t)
 	cwd := t.TempDir()
@@ -257,5 +236,46 @@ func TestResumeSessionPickerSelection(t *testing.T) {
 	}
 	if sm.GetSessionID() != source.GetSessionID() {
 		t.Fatalf("resumed id %s, want %s", sm.GetSessionID(), source.GetSessionID())
+	}
+}
+
+func TestResumeSessionGlobalPromptsForkOnConfirm(t *testing.T) {
+	isolatedAgentDir(t)
+	cwd := t.TempDir()
+	otherCwd := t.TempDir()
+	source := makeSessionFile(t, otherCwd)
+	previous := promptConfirm
+	promptConfirm = func(message string) bool { return true }
+	defer func() { promptConfirm = previous }()
+
+	args := &coding.Args{Session: strPtr(source.GetSessionID())}
+	sm, err := resumeSession(args, cwd, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("resumeSession: %v", err)
+	}
+	if sm.GetSessionID() == source.GetSessionID() {
+		t.Fatal("confirming the fork prompt must fork, not resume")
+	}
+	if sm.GetCwd() != cwd {
+		t.Fatalf("forked cwd %s, want the current cwd %s", sm.GetCwd(), cwd)
+	}
+	header := sm.GetHeader()
+	if header == nil || header.ParentSession == nil || *header.ParentSession != source.GetSessionFile() {
+		t.Fatalf("fork header parentSession %+v, want %s", header, source.GetSessionFile())
+	}
+}
+
+func TestResumeSessionGlobalPromptsForkOnDecline(t *testing.T) {
+	isolatedAgentDir(t)
+	cwd := t.TempDir()
+	otherCwd := t.TempDir()
+	source := makeSessionFile(t, otherCwd)
+	previous := promptConfirm
+	promptConfirm = func(message string) bool { return false }
+	defer func() { promptConfirm = previous }()
+
+	args := &coding.Args{Session: strPtr(source.GetSessionID())}
+	if _, err := resumeSession(args, cwd, t.TempDir(), nil); !errors.Is(err, errSessionAborted) {
+		t.Fatalf("error %v, want errSessionAborted", err)
 	}
 }

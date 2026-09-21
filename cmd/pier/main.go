@@ -7,6 +7,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -84,6 +85,10 @@ func run(appName string, args *coding.Args) error {
 		if err != nil {
 			if errors.Is(err, errNoSessionSelected) {
 				fmt.Println("\x1b[2mNo session selected\x1b[0m")
+				return nil
+			}
+			if errors.Is(err, errSessionAborted) {
+				fmt.Println("\x1b[2mAborted.\x1b[0m")
 				return nil
 			}
 			return err
@@ -247,6 +252,20 @@ func resolveSessionPath(sessionArg, cwd, sessionDir string) resolvedSession {
 // errNoSessionSelected is returned when the -r picker is dismissed.
 var errNoSessionSelected = errors.New("no session selected")
 
+// errSessionAborted is returned when a prompt is declined (upstream prints
+// dim "Aborted." and exits 0).
+var errSessionAborted = errors.New("session aborted")
+
+// promptConfirm reads a yes/no answer (upstream promptConfirm's
+// `${message} [y/N] ` readline question). A var so tests can stub it.
+var promptConfirm = func(message string) bool {
+	fmt.Printf("%s [y/N] ", message)
+	reader := bufio.NewReader(os.Stdin)
+	line, _ := reader.ReadString('\n')
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes"
+}
+
 // selectResumeSession shows the interactive session picker (upstream
 // cli/session-picker.ts selectSession). A var so tests can stub it.
 var selectResumeSession = func(cwd string, sessionDir string, settings *coding.SettingsManager) (string, bool) {
@@ -344,10 +363,12 @@ func resumeSession(args *coding.Args, cwd string, agentDir string, settings *cod
 			return coding.OpenSession(resolved.path, sessionDir, "")
 		case "global":
 			// Upstream prompts to fork the session into the current directory
-			// (promptConfirm + forkSessionOrExit); fork is not ported, so the
-			// session resumes in its own project instead.
+			// (promptConfirm + forkSessionOrExit); declining aborts.
 			fmt.Printf("\033[33mSession found in different project: %s\033[0m\n", resolved.cwd)
-			return coding.OpenSession(resolved.path, sessionDir, "")
+			if !promptConfirm("Fork this session into current directory?") {
+				return nil, errSessionAborted
+			}
+			return coding.ForkSession(resolved.path, cwd, sessionDir, nil)
 		default:
 			return nil, fmt.Errorf("No session found matching '%s'", resolved.arg)
 		}
