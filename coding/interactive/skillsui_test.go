@@ -96,7 +96,7 @@ func TestToolsExpandTogglesLoadedResources(t *testing.T) {
 
 	app.Key.OnToolsExpand()
 
-	if !app.UIState.ToolOutputExpanded {
+	if !app.Display.ToolOutputExpanded {
 		t.Fatal("ToolOutputExpanded not set")
 	}
 	if !strings.Contains(renderLoaded(), "/skills/tdd/SKILL.md") {

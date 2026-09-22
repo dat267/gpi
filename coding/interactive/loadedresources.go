@@ -252,7 +252,7 @@ func (a *App) ShowLoadedResources(force bool) {
 
 	theme := ActiveTheme()
 	sectionHeader := func(name string) string { return theme.Fg("mdHeading", "["+name+"]") }
-	expanded := a.options.Verbose || a.UIState.ToolOutputExpanded
+	expanded := a.options.Verbose || a.Display.ToolOutputExpanded
 	addLoadedSection := func(name string, collapsed string, expandedBody string) {
 		a.LoadedResourcesContainer.AddChild(NewExpandableText(
 			func() string { return sectionHeader(name) + "\n" + collapsed },

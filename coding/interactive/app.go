@@ -121,8 +121,11 @@ type App struct {
 	DefaultEditor *CustomEditor
 	Footer        *FooterComponent
 	FooterData    *coding.FooterDataProvider
-	UIState       *InteractiveUIState
-	Transcript    *TranscriptRenderer
+	// Display is the single owner of the display options shared by the
+	// transcript, event dispatcher, run wiring, trust wiring and UI state.
+	Display    *DisplayOptions
+	UIState    *InteractiveUIState
+	Transcript *TranscriptRenderer
 	// TranscriptScrollView is the fullscreen transcript scroll view (upstream's
 	// transcriptScrollView).
 	TranscriptScrollView *tui.ScrollView
@@ -273,6 +276,15 @@ func NewApp(options AppOptions) *App {
 	app.Footer.SetAutoCompactEnabled(options.Session.AutoCompactionEnabled())
 	app.FooterContainer.AddChild(app.Footer)
 
+	// Display options: one value shared by the transcript, event dispatcher,
+	// run wiring, trust wiring and UI state (see DisplayOptions). It must
+	// exist before the wirings that reference it.
+	app.Display = &DisplayOptions{
+		OutputPad:           options.Settings.GetOutputPad(),
+		HideThinkingBlock:   options.Settings.GetHideThinkingBlock(),
+		HiddenThinkingLabel: defaultHiddenThinkingLabel,
+	}
+
 	// Trust/crash helpers (used by the event dispatcher and lifecycle).
 	app.Trust = newTrustCrashWiring(app)
 
@@ -286,6 +298,8 @@ func NewApp(options AppOptions) *App {
 
 	// UI state + transcript.
 	app.UIState = NewInteractiveUIState(app.UI)
+
+	app.UIState.Display = app.Display
 	app.UIState.FooterData = app.FooterData
 	app.UIState.Footer = app.Footer
 	app.UIState.StatusContainer = app.StatusContainer
@@ -297,14 +311,11 @@ func NewApp(options AppOptions) *App {
 	app.UIState.DefaultEditor = app.DefaultEditor
 	app.UIState.Editor = app.DefaultEditor
 	app.UIState.WorkingMessage = app.UIState.DefaultWorkingMessage
-	app.UIState.ToolOutputExpanded = false
 
 	app.Transcript = NewTranscriptRenderer(app.Chat, app.UI, app.Settings, app.Session, app.SessionMgr)
 	app.Transcript.Footer = app.Footer
 	app.Transcript.Editor = app.DefaultEditor
-	app.Transcript.OutputPad = options.Settings.GetOutputPad()
-	app.Transcript.HideThinkingBlock = options.Settings.GetHideThinkingBlock()
-	app.Transcript.HiddenThinkingLabel = app.UIState.DefaultHiddenThinkingLabel
+	app.Transcript.Display = app.Display
 	app.Transcript.MarkdownTheme = app.markdownTheme()
 
 	app.Queue = NewQueueController(app.UI, app.Session, app.Settings, app.DefaultEditor, app.Chat, app.PendingMessages)
@@ -312,9 +323,7 @@ func NewApp(options AppOptions) *App {
 	app.Events = NewEventDispatcher(app.Transcript, app.UIState, app.Footer, app.Settings, app.Session, app.SessionMgr, app.DefaultEditor)
 	app.Events.ShowError = func(message string) { app.showError(message) }
 	app.Events.UpdatePendingMessagesDisplay = app.Queue.UpdatePendingMessagesDisplay
-	app.Events.HideThinkingBlock = options.Settings.GetHideThinkingBlock()
-	app.Events.HiddenThinkingLabel = app.UIState.DefaultHiddenThinkingLabel
-	app.Events.OutputPad = options.Settings.GetOutputPad()
+	app.Events.Display = app.Display
 	app.Events.MarkdownTheme = app.markdownTheme()
 	app.Events.TerminalProgress = func(active bool) { terminal.SetProgress(active) }
 	app.Events.FlushCompactionQueue = func(willRetry bool) {
@@ -730,8 +739,8 @@ func (a *App) applyReloadedSettings() {
 	hidden := a.Settings.GetHideThinkingBlock()
 	pad := a.Settings.GetOutputPad()
 	a.updateThinkingBlockVisibility(hidden)
-	a.Transcript.OutputPad = pad
-	a.Events.OutputPad = pad
+	a.Display.OutputPad = pad
+	a.Display.OutputPad = pad
 	// Upstream rebuildChatFromMessages (the reload's beforeSessionStart hook).
 	if a.Startup != nil {
 		a.Startup.RebuildChatFromMessages()
@@ -739,7 +748,7 @@ func (a *App) applyReloadedSettings() {
 	// Header expansion (upstream activeHeader.setExpanded).
 	if a.UIState != nil {
 		if expandable, ok := IsExpandable(a.UIState.BuiltInHeader); ok {
-			expandable.SetExpanded(a.UIState.ToolOutputExpanded)
+			expandable.SetExpanded(a.Display.ToolOutputExpanded)
 		}
 	}
 	// Reloaded resources (upstream showLoadedResources after /reload).
@@ -768,8 +777,7 @@ func (a *App) applyReloadedSettings() {
 }
 
 func (a *App) updateThinkingBlockVisibility(hidden bool) {
-	a.Transcript.HideThinkingBlock = hidden
-	a.Events.HideThinkingBlock = hidden
+	a.Display.HideThinkingBlock = hidden
 }
 
 func (a *App) markdownTheme() *tui.MarkdownTheme {

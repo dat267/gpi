@@ -27,6 +27,7 @@ func newHelpersTestWiring(t *testing.T) (*TrustCrashWiring, *coding.SettingsMana
 		SessionInfo: manager,
 		AppName:     "pi",
 		AgentDir:    t.TempDir(),
+		Display:     &DisplayOptions{},
 	}
 	return wiring, settings, manager
 }

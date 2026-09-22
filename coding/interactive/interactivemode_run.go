@@ -40,10 +40,8 @@ type RunWiring struct {
 	BuiltInHeader tui.Component
 	// Chat is the transcript container.
 	Chat *tui.Container
-	// OutputPad is the error-message padding.
-	OutputPad int
-	// ToolOutputExpanded seeds the header expansion.
-	ToolOutputExpanded bool
+	// Display is the shared display options (error padding, header expansion).
+	Display *DisplayOptions
 	// Verbose forces the expanded header and the startup notices.
 	Verbose bool
 	// AppName is the product name.
@@ -173,7 +171,7 @@ func (w *RunWiring) ShowChatError(message string) {
 	}
 	theme := ActiveTheme()
 	w.Chat.AddChild(tui.NewSpacer(1))
-	w.Chat.AddChild(tui.NewText(theme.Fg("error", "Error: "+message), w.OutputPad, 0, nil))
+	w.Chat.AddChild(tui.NewText(theme.Fg("error", "Error: "+message), w.Display.OutputPad, 0, nil))
 	w.requestRender()
 }
 
@@ -251,7 +249,7 @@ func (w *RunWiring) markdownTheme() tui.MarkdownTheme {
 
 // GetStartupExpansionState reports whether the header starts expanded.
 func (w *RunWiring) GetStartupExpansionState() bool {
-	return w.Verbose || w.ToolOutputExpanded
+	return w.Verbose || w.Display.ToolOutputExpanded
 }
 
 // BuildStartupHeader builds the logo + instructions header.
@@ -808,27 +806,26 @@ type StartupDiagnostic struct {
 // newRunWiring assembles the RunWiring (port of the corresponding InteractiveMode wiring).
 func newRunWiring(app *App) *RunWiring {
 	return &RunWiring{
-		OnBeat:             func() { app.Transcript.MaterializeDeferred() },
-		RawTerminal:        app.rawTerminal,
-		RawInputs:          app.loopRawInputs,
-		Startup:            app.Startup,
-		Events:             app.Events,
-		SessionEvents:      app.sessionEvents.Events(),
-		PartialEvents:      app.sessionEvents.Partials(),
-		InputEvents:        app.loopInputs,
-		ResizeEvents:       app.loopResizes,
-		SignalEvents:       app.loopSignals,
-		OnSignal:           app.Lifecycle.HandleSignal,
-		UI:                 app.UI,
-		Settings:           app.Settings,
-		Terminal:           app.UI.GetTerminal(),
-		HeaderContainer:    app.HeaderContainer,
-		Chat:               app.Chat,
-		OutputPad:          app.options.Settings.GetOutputPad(),
-		ToolOutputExpanded: app.UIState.ToolOutputExpanded,
-		Verbose:            app.options.Verbose,
-		AppName:            app.options.AppName,
-		Version:            app.options.Version,
+		OnBeat:          func() { app.Transcript.MaterializeDeferred() },
+		RawTerminal:     app.rawTerminal,
+		RawInputs:       app.loopRawInputs,
+		Startup:         app.Startup,
+		Events:          app.Events,
+		SessionEvents:   app.sessionEvents.Events(),
+		PartialEvents:   app.sessionEvents.Partials(),
+		InputEvents:     app.loopInputs,
+		ResizeEvents:    app.loopResizes,
+		SignalEvents:    app.loopSignals,
+		OnSignal:        app.Lifecycle.HandleSignal,
+		UI:              app.UI,
+		Settings:        app.Settings,
+		Terminal:        app.UI.GetTerminal(),
+		HeaderContainer: app.HeaderContainer,
+		Chat:            app.Chat,
+		Display:         app.Display,
+		Verbose:         app.options.Verbose,
+		AppName:         app.options.AppName,
+		Version:         app.options.Version,
 
 		SetupKeyHandlers:      app.KeySetup,
 		SetupSubmitHandler:    app.SubmitSetup,

@@ -26,7 +26,7 @@ type TrustCrashWiring struct {
 	Settings    *coding.SettingsManager
 	SessionInfo *coding.SessionManager
 	AppName     string
-	OutputPad   int
+	Display     *DisplayOptions
 	AgentDir    string
 
 	// SessionFile is the current session file ("" = in-memory).
@@ -98,7 +98,7 @@ func (w *TrustCrashWiring) HandleFatalRuntimeError(ctx context.Context, prefix s
 	}
 	if w.RecordCrash("fatal_error", err) && w.Chat != nil {
 		theme := ActiveTheme()
-		w.Chat.AddChild(tui.NewText(theme.Fg("muted", w.CrashReportInstructions()), w.OutputPad, 0, nil))
+		w.Chat.AddChild(tui.NewText(theme.Fg("muted", w.CrashReportInstructions()), w.Display.OutputPad, 0, nil))
 	}
 	if w.StopThemeWatcher != nil {
 		w.StopThemeWatcher()
@@ -400,7 +400,7 @@ func newTrustCrashWiring(app *App) *TrustCrashWiring {
 		Settings:         app.Settings,
 		SessionInfo:      app.SessionMgr,
 		AppName:          app.options.AppName,
-		OutputPad:        app.options.Settings.GetOutputPad(),
+		Display:          app.Display,
 		AgentDir:         app.options.AgentDir,
 		SessionFile:      func() string { return app.Session.SessionFile() },
 		ShowError:        func(message string) { app.showError(message) },

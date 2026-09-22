@@ -56,12 +56,9 @@ type EventDispatcher struct {
 	// Initialized reports whether init already ran.
 	Initialized bool
 
-	ToolOutputExpanded  bool
-	HideThinkingBlock   bool
-	HiddenThinkingLabel string
-	OutputPad           int
-	MarkdownTheme       *tui.MarkdownTheme
-	Transformers        []MarkdownTransformer
+	Display       *DisplayOptions
+	MarkdownTheme *tui.MarkdownTheme
+	Transformers  []MarkdownTransformer
 
 	streamingComponent *AssistantMessageComponent
 	streamingMessage   *ai.AssistantMessage
@@ -83,6 +80,7 @@ func NewEventDispatcher(transcript *TranscriptRenderer, uiState *InteractiveUISt
 		Session:      session,
 		SessionInfo:  sessionInfo,
 		Editor:       editor,
+		Display:      &DisplayOptions{},
 		pendingTools: map[string]*ToolExecutionComponent{},
 	}
 }
@@ -305,8 +303,8 @@ func (d *EventDispatcher) handleMessageStart(event *coding.SessionEvent) {
 		if d.Transcript == nil {
 			return
 		}
-		d.streamingComponent = NewAssistantMessageComponent(nil, d.HideThinkingBlock, d.MarkdownTheme,
-			d.HiddenThinkingLabel, d.OutputPad, d.Transformers)
+		d.streamingComponent = NewAssistantMessageComponent(nil, d.Display.HideThinkingBlock, d.MarkdownTheme,
+			d.Display.HiddenThinkingLabel, d.Display.OutputPad, d.Transformers)
 		d.streamingMessage = typed
 		d.Transcript.Chat.AddChild(d.streamingComponent)
 		d.Transcript.StreamingComponent = d.streamingComponent
@@ -366,7 +364,7 @@ func (d *EventDispatcher) newToolComponent(toolName string, toolCallID string, a
 		cwd = d.SessionInfo.GetCwd()
 	}
 	component := NewToolExecutionComponent(toolName, toolCallID, args, options, definition, d.Transcript.UI, cwd)
-	component.SetExpanded(d.ToolOutputExpanded)
+	component.SetExpanded(d.Display.ToolOutputExpanded)
 	d.Transcript.Chat.AddChild(component)
 	return component
 }

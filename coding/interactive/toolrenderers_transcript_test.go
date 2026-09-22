@@ -58,10 +58,10 @@ func TestTranscriptRendersSessionLoadedEditDiff(t *testing.T) {
 		t.Fatalf("agent session: %v", err)
 	}
 	r := &TranscriptRenderer{
-		Chat:                &tui.Container{},
-		SessionInfo:         mgr,
-		Session:             &AppSession{AgentSession: agentSession.Session},
-		HiddenThinkingLabel: "thinking",
+		Chat:        &tui.Container{},
+		SessionInfo: mgr,
+		Session:     &AppSession{AgentSession: agentSession.Session},
+		Display:     &DisplayOptions{HiddenThinkingLabel: "thinking"},
 	}
 	r.RenderSessionEntries(mgr.BuildContextEntriesForLeaf(), false, false)
 	time.Sleep(200 * time.Millisecond) // let the async preview settle

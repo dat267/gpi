@@ -46,7 +46,7 @@ type InteractiveUIState struct {
 	WorkingIndicatorOptions *tui.LoaderIndicatorOptions
 	WorkingVisible          bool
 
-	ToolOutputExpanded bool
+	Display *DisplayOptions
 
 	ActiveStatusIndicator StatusIndicatorLike
 
@@ -70,7 +70,8 @@ func NewInteractiveUIState(ui tui.TUI) *InteractiveUIState {
 		extensionWidgetsBelow:      map[string]tui.Component{},
 		inputSubscriptions:         map[int]func(){},
 		DefaultWorkingMessage:      "Working",
-		DefaultHiddenThinkingLabel: "Thinking...",
+		DefaultHiddenThinkingLabel: defaultHiddenThinkingLabel,
+		Display:                    &DisplayOptions{},
 	}
 }
 
@@ -398,7 +399,7 @@ func (s *InteractiveUIState) SetExtensionHeader(factory func() tui.Component) {
 	if factory != nil {
 		s.customHeader = factory()
 		if expandable, ok := IsExpandable(s.customHeader); ok {
-			expandable.SetExpanded(s.ToolOutputExpanded)
+			expandable.SetExpanded(s.Display.ToolOutputExpanded)
 		}
 		if s.HeaderContainer != nil {
 			if index != -1 {
@@ -410,7 +411,7 @@ func (s *InteractiveUIState) SetExtensionHeader(factory func() tui.Component) {
 	} else {
 		s.customHeader = nil
 		if expandable, ok := IsExpandable(s.BuiltInHeader); ok {
-			expandable.SetExpanded(s.ToolOutputExpanded)
+			expandable.SetExpanded(s.Display.ToolOutputExpanded)
 		}
 		if s.HeaderContainer != nil && index != -1 {
 			s.HeaderContainer.Children[index] = s.BuiltInHeader

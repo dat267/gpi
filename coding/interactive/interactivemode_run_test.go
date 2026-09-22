@@ -36,7 +36,7 @@ func newRunTestWiring(t *testing.T) (*RunWiring, *coding.SettingsManager) {
 		Version:         "1.0.0",
 		Chat:            &tui.Container{},
 		HeaderContainer: &tui.Container{},
-		OutputPad:       1,
+		Display:         &DisplayOptions{OutputPad: 1},
 	}
 	return wiring, settings
 }

@@ -235,7 +235,7 @@ func TestUIStateFooterAndHeader(t *testing.T) {
 	state.BuiltInHeader = builtIn
 	state.HeaderContainer.AddChild(builtIn)
 	customHeader := NewExpandableText(func() string { return "collapsed" }, func() string { return "expanded" }, false, 0, 0)
-	state.ToolOutputExpanded = true
+	state.Display = &DisplayOptions{ToolOutputExpanded: true}
 	state.SetExtensionHeader(func() tui.Component { return customHeader })
 	if len(state.HeaderContainer.Children) != 1 || state.HeaderContainer.Children[0] != tui.Component(customHeader) {
 		t.Fatal("custom header not installed")

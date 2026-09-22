@@ -494,13 +494,13 @@ func newKeyWiring(app *App) *KeyWiring {
 		OnModelCycleBackward: func() { _, _ = app.Queue.CycleModel(context.Background(), "backward") },
 		OnModelSelect:        func() { app.Models.ShowModelSelector(context.Background(), "") },
 		OnToolsExpand: func() {
-			expanded := app.UIState.ToolOutputExpanded
+			expanded := app.Display.ToolOutputExpanded
 			app.Queue.ToggleToolOutputExpansion(&expanded, func(value bool) {
-				app.Queue.SetToolsExpanded(value, &app.UIState.ToolOutputExpanded, app.UIState.BuiltInHeader, app.LoadedResourcesContainer)
+				app.Queue.SetToolsExpanded(value, &app.Display.ToolOutputExpanded, app.UIState.BuiltInHeader, app.LoadedResourcesContainer)
 			})
 		},
 		OnThinkingToggle: func() {
-			hidden := app.Transcript.HideThinkingBlock
+			hidden := app.Display.HideThinkingBlock
 			app.Queue.ToggleThinkingBlockVisibility(&hidden)
 		},
 		OnSessionTree:   func() { app.Selectors.ShowTreeSelector(context.Background(), "", false) },

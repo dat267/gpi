@@ -53,10 +53,7 @@ type TranscriptRenderer struct {
 	Footer *FooterComponent
 	Editor *CustomEditor
 
-	ToolOutputExpanded  bool
-	OutputPad           int
-	HideThinkingBlock   bool
-	HiddenThinkingLabel string
+	Display *DisplayOptions
 
 	MarkdownTheme *tui.MarkdownTheme
 	Transformers  []MarkdownTransformer
@@ -92,6 +89,7 @@ func NewTranscriptRenderer(chat *tui.Container, ui tui.RenderRequester, settings
 		Settings:     settings,
 		Session:      session,
 		SessionInfo:  sessionInfo,
+		Display:      &DisplayOptions{},
 		pendingTools: map[string]*ToolExecutionComponent{},
 	}
 }
@@ -169,7 +167,7 @@ func (r *TranscriptRenderer) AddCustomEntryToChat(entry *coding.SessionEntry) {
 		return
 	}
 	component := NewCustomEntryComponent(CustomEntry{CustomType: entry.CustomType, Data: entry.Raw()}, renderer)
-	component.SetExpanded(r.ToolOutputExpanded)
+	component.SetExpanded(r.Display.ToolOutputExpanded)
 	if !component.HasContent() {
 		return
 	}
@@ -212,13 +210,13 @@ func (r *TranscriptRenderer) AddMessageToChat(message ai.Message, populateHistor
 			summary, tokensBefore := decodeCompactionSummary(typed.Content)
 			r.Chat.AddChild(tui.NewSpacer(1))
 			component := NewCompactionSummaryMessageComponent(summary, tokensBefore, r.MarkdownTheme)
-			component.SetExpanded(r.ToolOutputExpanded)
+			component.SetExpanded(r.Display.ToolOutputExpanded)
 			r.Chat.AddChild(component)
 		case coding.RoleBranchSummary:
 			summary := decodeBranchSummary(typed.Content)
 			r.Chat.AddChild(tui.NewSpacer(1))
 			component := NewBranchSummaryMessageComponent(summary, r.MarkdownTheme)
-			component.SetExpanded(r.ToolOutputExpanded)
+			component.SetExpanded(r.Display.ToolOutputExpanded)
 			r.Chat.AddChild(component)
 		default:
 			customType, content, display := decodeCustomMessage(typed.Content)
@@ -230,8 +228,8 @@ func (r *TranscriptRenderer) AddMessageToChat(message ai.Message, populateHistor
 				renderer = r.MessageRenderer(customType)
 			}
 			component := NewCustomMessageComponent(CustomMessagePayload{CustomType: customType, Text: content},
-				renderer, r.MarkdownTheme, r.OutputPad)
-			component.SetExpanded(r.ToolOutputExpanded)
+				renderer, r.MarkdownTheme, r.Display.OutputPad)
+			component.SetExpanded(r.Display.ToolOutputExpanded)
 			r.Chat.AddChild(component)
 		}
 	case *ai.UserMessage:
@@ -245,21 +243,21 @@ func (r *TranscriptRenderer) AddMessageToChat(message ai.Message, populateHistor
 		skillBlock := coding.ParseSkillBlock(textContent)
 		if skillBlock != nil {
 			component := NewSkillInvocationMessageComponent(skillBlock.Name, skillBlock.Content, r.MarkdownTheme)
-			component.SetExpanded(r.ToolOutputExpanded)
+			component.SetExpanded(r.Display.ToolOutputExpanded)
 			r.Chat.AddChild(component)
 			if skillBlock.UserMessage != "" {
 				r.Chat.AddChild(tui.NewSpacer(1))
-				r.Chat.AddChild(NewUserMessageComponent(skillBlock.UserMessage, r.MarkdownTheme, r.OutputPad, r.Transformers))
+				r.Chat.AddChild(NewUserMessageComponent(skillBlock.UserMessage, r.MarkdownTheme, r.Display.OutputPad, r.Transformers))
 			}
 		} else {
-			r.Chat.AddChild(NewUserMessageComponent(textContent, r.MarkdownTheme, r.OutputPad, r.Transformers))
+			r.Chat.AddChild(NewUserMessageComponent(textContent, r.MarkdownTheme, r.Display.OutputPad, r.Transformers))
 		}
 		if populateHistory && r.Editor != nil {
 			r.Editor.AddToHistory(textContent)
 		}
 	case *ai.AssistantMessage:
-		component := NewAssistantMessageComponent(typed, r.HideThinkingBlock, r.MarkdownTheme,
-			r.HiddenThinkingLabel, r.OutputPad, r.Transformers)
+		component := NewAssistantMessageComponent(typed, r.Display.HideThinkingBlock, r.MarkdownTheme,
+			r.Display.HiddenThinkingLabel, r.Display.OutputPad, r.Transformers)
 		r.Chat.AddChild(component)
 	case *ai.ToolResultMessage:
 		// Tool results render inline with their tool calls.
@@ -462,7 +460,7 @@ func (r *TranscriptRenderer) renderSessionItems(items []RenderSessionItem, updat
 				}
 				component := NewToolExecutionComponent(toolCall.Name, toolCall.ID, toolCall.Arguments,
 					options, definition, r.UI, cwd)
-				component.SetExpanded(r.ToolOutputExpanded)
+				component.SetExpanded(r.Display.ToolOutputExpanded)
 				r.Chat.AddChild(component)
 
 				if assistant.StopReason == ai.StopAborted || assistant.StopReason == ai.StopError {
