@@ -166,6 +166,17 @@ into narrow, injectable wirings (all in `coding/interactive`):
 `stdinbuffer.go`) is the differential renderer core. Its lock discipline is
 load-bearing (see below).
 
+**Large-session rendering.** `RenderSessionItems` (`transcript.go`) renders a
+session eagerly below 400 items; above the threshold it collects the items into
+a collector container and attaches only the trailing window (120 components),
+materializing the rest 64 per loop beat via `RunWiring.OnBeat` →
+`MaterializeDeferred` (`Container.InsertChildAt`). A 30 MB / 15k-entry session
+paints its first frame in ~20 ms instead of ~400 ms. Resizing a huge session
+still costs ~350–430 ms per new width because the layout renders the whole
+attached scroll content at the content width (`ScrollContentLines` calls the
+component render) — this matches upstream `layout.ts` and is deliberately not
+staggered (a partial-width render would show stale text).
+
 ## Conventions and gotchas
 
 - **Locking (hard-won).** `tui.Container` methods lock `Container.mu`
@@ -193,57 +204,51 @@ load-bearing (see below).
 
 ### Lock inventory
 
-Every `sync.Mutex`/`sync.RWMutex` in `tui/` and `coding/interactive/`
-(non-test), what it protects, its ordering position, and the UI-loop refactor
-stage that retires it. Ordering classes: **(A)** `Renderer.renderMu` serializes
-rendering against input dispatch and is the outermost UI lock; **(B)** UI
-component/metadata locks nest inside (A), parents before children; **(C)** leaf
-state/registry locks never wrap component, renderer or callback calls; **(D)**
-independent of the UI locks. The invariant above still holds throughout: no
-user code under a lock, snapshot under and deliver outside.
+The `tui/` and `coding/interactive/` refactor retired every UI mutex. What
+remains in non-test code is two pure handoff locks plus one documented
+`coding/` exception:
 
-| Lock | Where | Protects | Order | Retirement |
-|---|---|---|---|---|
-| `Renderer.renderMu` | `tui/render.go` | render vs input dispatch (D84) | A | **stage 3: loop-mode conditional — in loop mode it is never taken (input and painting share the loop goroutine); only the legacy timer mode (session picker/library) locks** |
-| `Renderer.mu` | `tui/render.go` | focus, input listeners, posted queue, stopped flag, tick channel | B | stage 3/4 (loop-owned once input and the remaining callers move) |
-| `Container.mu` | `tui/component.go:190` | child list + render cache (event goroutines vs render, D136 class) | B, parent→child | stage 1 (events arrive on the loop) |
-| `Editor.mu` | `tui/editor.go:70` | buffer, cursor, history (D136) | B | stage 1 (input on the loop) |
-| `AltScreen.mu` | `tui/altscreen.go:142` | fullscreen scroll/selection/scrollback (D138) | B | stage 3 (input + tick on the loop) |
-| `ScrollView.mu` | `tui/scrollview.go:48` | scroll position/follow-end (D138) | B | stage 3 (auto-scroll ticker → loop message) |
-| `Loader.mu` | `tui/selectlist.go:442` | loader animation frames | B | stage 4 (animation timer → loop tick) |
-| `AltScreenFlashContainer.mu` | `tui/selectlist.go:705` | flash entries + expiry timers | B | stage 4 (timer → loop message) |
-| `StdinBuffer.mu` | `tui/stdinbuffer.go` | sequence assembly, paste re-wrap, Kitty dedup (D51/D139) | C | **stage 3: reduced** — the DrainInput callback swap is gone (the reader stamps an atomic), so the lock now only guards the decoder's own escape/sequence timeout timer; never touches UI state. Stage 4 folds the timer into the reader goroutine (D-row if retained) |
-| `ProcessTerminal.mu` | `tui/terminal.go:127` | terminal writes, raw mode, Kitty negotiation, resize bookkeeping | C | **stage 3: writes are loop-owned, but the stdin reader still shares negotiation state → retained; stage 4 D-row candidate (not UI state)** |
-| ~~`negotiationResult.lastDataMu`~~ | `tui/terminal.go` | DrainInput's last-input tracking | C | **retired in stage 3** (the reader stamps an atomic timestamp instead of swapping the buffer callback) |
-| ~~`ModelSelectorComponent.mu`~~ | `coding/interactive/modelselector.go` | selector state + background refresh (D137) | B | **retired in stage 4** (refresh results delivered with `Post`; no state lock) |
-| ~~`ScopedModelsSelectorComponent.mu`~~ | `coding/interactive/scopedmodelsselector.go` | scoped-models state + refresh | B | **retired in stage 4** (loop-owned) |
-| ~~`SessionSelectorComponent.mu`~~ | `coding/interactive/sessionselector.go` | selector state + queued loader applies (D103) | B | **retired in stage 4** (loader results delivered with `Post`, cancellation via the load context) |
-| ~~`scheduleOnce` local `mu`~~ | `coding/interactive/sessionselector.go` | cancelled flag of the auto-cancel timer | D | **retired in stage 4** (atomic flag) |
-| ~~`editCallComponent.previewMu`~~ | `coding/interactive/toolrenderers.go` | async edit-preview handoff | B | **retired in stage 4** (atomic preview pointer + claim flag) |
-| ~~`FooterComponent.cacheMu`~~ | `coding/interactive/footer.go` | footer render cache (D141) | C | **retired in stage 4** (invalidations are session events; Render is loop-side) |
-| `ModelCatalogRefreshCoordinator.mu` | `coding/interactive/catalogrefresh.go:34` | per-runtime refresh dedup (D98) | C | stage 4 |
-| `activeCatalogRefresh.mu` | `coding/interactive/catalogrefresh.go:22` | one refresh's result/cancel state | C | stage 4 |
-| ~~`Lifecycle.mu`~~ | `coding/interactive/interactivemode_lifecycle.go` | shutdown/suspend/lifecycle flags (D135) | C | **retired in stage 4** (atomics; the emergency terminal path stays lock-free) |
-| ~~`StartupWiring.mu`~~ | `coding/interactive/interactivemode_startup.go` | pending user inputs + telemetry-once flag (D123) | C | **retired in stage 1** (input handoff is a channel) |
-| ~~`Theme.mu` (style colors)~~ | `coding/interactive/theme.go` | style-color enable flag (test seam) | C | **retired in stage 4** (atomic) |
-| ~~`themeState.mu`~~ | `coding/interactive/theme.go` | global theme registry + watcher (D85) | C | **retired in stage 4** (atomics, copy-on-write registry; watcher callbacks are posted to the loop) |
-| ~~`trueColorState.mu`~~ | `coding/interactive/theme.go` | truecolor capability (test seam) | C | **retired in stage 4** (atomic) |
-| ~~`customThemesDirState.mu`~~ | `coding/interactive/theme.go` | custom themes dir (test seam) | C | **retired in stage 4** (atomic) |
-| `KeybindingsManager.mu` | `tui/keybindings.go:142` | user override definitions | C | stage 4 |
-| `globalKeybindingsState.mu` | `tui/keybindings.go:340` | global manager accessor (`SetKeybindings` seam) | C | stage 4 |
-| `kittyProtocolState.mu` | `tui/keys.go:21` | global Kitty active flag | C/D | stage 4 |
-| `lastEventTypeState.mu` | `tui/keys.go:342` | last parsed key event type (fidelity port) | D | stage 4 |
-| `widthCacheMu` | `tui/width.go:471` | memoized `VisibleWidth` cache | C | stage 4 (loop-confined; D-row if non-UI callers remain) |
+| Lock | Where | Protects | Retirement |
+|---|---|---|---|
+| `Renderer.postMu` | `tui/render.go:143` | the posted-callback queue (`Post` is called from off-loop goroutines: loaders, watchers) | **retained (D146)**: serializes the handoff only; the owner drains it in the render pass and never runs a callback under it |
+| `ProcessTerminal.writeMu` | `tui/terminal.go:160` | terminal writes, raw-mode transitions, Kitty negotiation bookkeeping shared with the reader | **retained (D147)**: not UI state |
+| `FooterDataProvider.mu` | `coding/footerdata.go` | cwd/git/status + listener registry, shared with its 500 ms git-HEAD watcher | **retained (D149)**: closing it needs the poll result posted to the loop and the listener fan-out delivered outside the lock; a `coding/` change outside this refactor |
 
-Stage 4 result: **20 of the original 30 locks are retired** (input handoff,
-model/scoped/session selectors, footer cache, lifecycle flags, edit preview,
-theme registry + three seams, loader, flash container, kitty globals,
-keybindings manager + global registry, width cache, DrainInput tracking). The
-remaining exceptions are the D147 `writeMu`, the D146 `postMu` (posted-
-callback queue serialization — Post is called from off-loop goroutines and
-drained by the owner's render pass) and the D149 `FooterDataProvider.mu`;
-`grep 'sync.Mutex' tui/ coding/interactive/` outside tests returns only
-those documented locks.
+Retired along the way (all struck from the code; `grep 'sync.Mutex'
+tui/ coding/interactive/` outside tests returns only the two above):
+
+| Lock | Where | Retired in |
+|---|---|---|
+| `Renderer.renderMu` | `tui/render.go` | D146 (input and painting share the owner goroutine) |
+| `Renderer.mu` | `tui/render.go` | D146 (loop-owned) |
+| `Container.mu` | `tui/component.go` | D146 (loop-owned) |
+| `Editor.mu` | `tui/editor.go` | D146 (loop-owned) |
+| `AltScreen.mu` | `tui/altscreen.go` | D146 (loop-owned) |
+| `ScrollView.mu` | `tui/scrollview.go` | D146; the scrollbar hide timer is a lazy deadline |
+| `Loader.mu` | `tui/selectlist.go` | stage 4 |
+| `AltScreenFlashContainer.mu` | `tui/selectlist.go` | stage 4 |
+| `StdinBuffer.mu` | `tui/stdinbuffer.go` | D147 (consumer-driven flush) |
+| `negotiationResult.lastDataMu` | `tui/terminal.go` | stage 3 (reader stamps an atomic) |
+| `KeybindingsManager.mu` | `tui/keybindings.go` | stage 4 |
+| `globalKeybindingsState.mu` | `tui/keybindings.go` | stage 4 |
+| `kittyProtocolState.mu` | `tui/keys.go` | stage 4 |
+| `lastEventTypeState.mu` | `tui/keys.go` | stage 4 |
+| `widthCacheMu` | `tui/width.go` | stage 4 |
+| `ModelSelectorComponent.mu` | `coding/interactive/modelselector.go` | stage 4 |
+| `ScopedModelsSelectorComponent.mu` | `coding/interactive/scopedmodelsselector.go` | stage 4 |
+| `SessionSelectorComponent.mu` | `coding/interactive/sessionselector.go` | stage 4 |
+| `scheduleOnce` local `mu` | `coding/interactive/sessionselector.go` | stage 4 |
+| `editCallComponent.previewMu` | `coding/interactive/toolrenderers.go` | stage 4 |
+| `FooterComponent.cacheMu` | `coding/interactive/footer.go` | stage 4 |
+| `ModelCatalogRefreshCoordinator.mu` | `coding/interactive/catalogrefresh.go` | stage 4 (D148) |
+| `activeCatalogRefresh.mu` | `coding/interactive/catalogrefresh.go` | stage 4 (D148) |
+| `Lifecycle.mu` | `coding/interactive/interactivemode_lifecycle.go` | stage 4 |
+| `StartupWiring.mu` | `coding/interactive/interactivemode_startup.go` | stage 1 (input handoff is a channel) |
+| `Theme.mu`, `themeState.mu`, `trueColorState.mu`, `customThemesDirState.mu` | `coding/interactive/theme.go` | stage 4 (atomics / copy-on-write) |
+
+When retiring a lock, the invariant is unchanged: no user code under a lock;
+snapshot under and deliver outside.
+
 - **Go 1.27 quirk.** Function literals passed as arguments need an explicit
   result type when the parameter's function type has one.
 - **RE2 regex** (no lookaround/backreferences). Put `-` first in a character
@@ -255,8 +260,10 @@ those documented locks.
 - **Nil vs empty slices**: normalize in render comparisons.
 - **Test seams already wired**: `SetCustomThemesDir`, `SetRegisteredThemes`,
   `tui.SetKeybindings`, `SetSessionFileDeleter`, `SetClipboardCopier`,
-  `SetBrowserOpener`, `coding.SetPackageDir`. The interactive test screens call
-  `DisableAutoRender()` so tests can drive rendering deterministically.
+  `SetClipboardReader`, `SetBrowserOpener`, `coding.SetPackageDir`. The
+  interactive test screens call `DisableAutoRender()` (now a no-op: every
+  renderer is caller-driven since D146) so tests drive rendering with
+  `RenderNow`.
 - **Goldens**: `tui/testdata/`, `coding/interactive/testdata/`,
   `coding/testdata/` hold `label => JSON` lines generated by driving the
   upstream TypeScript with Node; Go replays the same scripted input.
@@ -292,10 +299,11 @@ summarized in the README scoreboard. The range is **D1–D139**. Representative:
   are compared by code pointer.
 - D51 — `StdinBuffer` uses callbacks instead of `EventEmitter`.
 - D71 — the editor requests autocomplete synchronously (upstream debounces).
-- D83 — `DisableAutoRender` test seam for the Go render timer.
+- D83 — `DisableAutoRender` test seam; obsolete since D146 (every renderer is
+  caller-driven, so it is a no-op kept for the test/API surface).
 - D90 — narrow runtime interfaces for testability across the wirings.
 - D105/D106 — the ES `Proxy` renderer reference becomes an explicit forwarder;
-  clipboard copying is injected (native clipboard out of scope).
+  clipboard copying and reading are injected (native clipboard out of scope).
 - D121/D123/D135 — cross-goroutine state made mutex-safe (model refresh,
   startup input/telemetry, lifecycle flags, footer watcher). D123's input lock
   is retired in stage 1 (the submission handoff is a buffered channel); the
