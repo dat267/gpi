@@ -660,7 +660,6 @@ func NewApp(options AppOptions) *App {
 			HandleThinkingCommand:   app.Selectors.HandleThinkingCommand,
 			HandleExportCommand:     func(text string) error { app.Commands.HandleExportCommand(context.Background(), text); return nil },
 			HandleImportCommand:     func(text string) error { app.Commands.HandleImportCommand(context.Background(), text); return nil },
-			HandleShareCommand:      func() error { app.Commands.HandleShareCommand(context.Background()); return nil },
 			HandleCopyCommand:       func() error { app.Commands.HandleCopyCommand(false, false); return nil },
 			HandleNameCommand:       app.Commands.HandleNameCommand,
 			HandleSessionCommand:    func() { app.Commands.HandleSessionCommand(time.Now().UnixMilli()) },

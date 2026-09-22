@@ -35,7 +35,6 @@ var BuiltinSlashCommands = []BuiltinSlashCommand{
 	{Name: "scoped-models", Description: "Enable/disable models for Ctrl+P cycling"},
 	{Name: "export", Description: "Export session (HTML default, or specify path: .html/.jsonl)"},
 	{Name: "import", Description: "Import and resume a session from a JSONL file"},
-	{Name: "share", Description: "Share session as a secret GitHub gist"},
 	{Name: "copy", Description: "Copy last agent message to clipboard"},
 	{Name: "name", Description: "Set session display name"},
 	{Name: "session", Description: "Show session info and stats"},

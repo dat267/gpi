@@ -14,8 +14,9 @@ import (
 
 // Port of the remaining command handlers of
 // src/modes/interactive/interactive-mode.ts (getPathCommandArgument,
-// handleExport/Import/Share/Bug/Copy/Name/Session/Changelog/Hotkeys/Clear/
-// Debug/Compact commands, the easter eggs and stop).
+// handleExport/Import/Copy/Name/Session/Hotkeys/Clear/Debug/Compact/Reload
+// commands, the easter eggs and stop). The share and bug-report flows and
+// the changelog command were removed; they are not part of this port.
 //
 // Divergences: the runtime/clipboard/report collaborators are injected (D125);
 // the extension seams stay out of scope (D41).
@@ -62,8 +63,6 @@ type CommandWiring struct {
 	ShowExtensionConfirm func(ctx context.Context, title string, message string) (bool, error)
 	// PromptForMissingCwd resolves a missing-cwd error.
 	PromptForMissingCwd func(ctx context.Context, message string) (string, bool)
-	// ShareSession runs the session-share flow.
-	ShareSession func(ctx context.Context) error
 	// CopyToClipboard copies text, returning (ok, message).
 	CopyToClipboard func(text string) (bool, string)
 	// CopyActiveSelection copies the alt-screen selection.
@@ -220,16 +219,6 @@ func (w *CommandWiring) HandleImportCommand(ctx context.Context, text string) {
 		}
 	}
 	w.showError("Failed to import session: " + err.Error())
-}
-
-// HandleShareCommand runs the share flow.
-func (w *CommandWiring) HandleShareCommand(ctx context.Context) {
-	if w.ShareSession == nil {
-		return
-	}
-	if err := w.ShareSession(ctx); err != nil {
-		w.showError(err.Error())
-	}
 }
 
 // HandleReloadCommand runs /reload (upstream handleReloadCommand): guard

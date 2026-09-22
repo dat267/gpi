@@ -164,7 +164,6 @@ type SubmitHandlers struct {
 	HandleThinkingCommand   func(searchTerm string)
 	HandleExportCommand     func(text string) error
 	HandleImportCommand     func(text string) error
-	HandleShareCommand      func() error
 	HandleCopyCommand       func() error
 	HandleNameCommand       func(text string)
 	HandleSessionCommand    func()
@@ -277,12 +276,6 @@ func (w *SubmitWiring) HandleSubmit(ctx context.Context, text string) {
 	case text == "/import" || strings.HasPrefix(text, "/import "):
 		if w.Handlers.HandleImportCommand != nil {
 			_ = w.Handlers.HandleImportCommand(text)
-		}
-		clearEditor()
-		return
-	case text == "/share":
-		if w.Handlers.HandleShareCommand != nil {
-			_ = w.Handlers.HandleShareCommand()
 		}
 		clearEditor()
 		return
