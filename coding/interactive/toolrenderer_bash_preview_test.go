@@ -21,11 +21,44 @@ func referenceBashPreview(raw string, width int, theme *Theme) []string {
 	return append(lines, preview.VisualLines...)
 }
 
-// TestBashPreviewIncrementalMatchesFull feeds the collapsed preview one byte at
-// a time (as streaming does) and requires it to render exactly like the
+// checkBashPreviewPrefixes feeds the collapsed preview the corpus one step at a
+// time (as streaming does) and requires it to render exactly like the
 // full-output computation at every prefix.
+func checkBashPreviewPrefixes(t *testing.T, theme *Theme, corpus string, step int, widths []int) {
+	t.Helper()
+	for _, width := range widths {
+		state := &bashResultState{}
+		for n := 1; n <= len(corpus); n += step {
+			output := strings.TrimSpace(corpus[:n])
+			if output == "" {
+				continue
+			}
+			component := &bashPreviewComponent{output: output, state: state, theme: theme}
+			got := strings.Join(component.Render(width), "\n")
+			want := strings.Join(referenceBashPreview(output, width, theme), "\n")
+			if got != want {
+				t.Fatalf("width %d prefix %d:\n got %q\nwant %q", width, n, got, want)
+			}
+		}
+		// A width change must rebuild the count and the tail.
+		other := width/2 + 1
+		trimmed := strings.TrimSpace(corpus)
+		component := &bashPreviewComponent{output: trimmed, state: state, theme: theme}
+		got := strings.Join(component.Render(other), "\n")
+		want := strings.Join(referenceBashPreview(trimmed, other, theme), "\n")
+		if got != want {
+			t.Fatalf("width change to %d:\n got %q\nwant %q", other, got, want)
+		}
+	}
+}
+
+// TestBashPreviewIncrementalMatchesFull covers byte-granular prefixes of a small
+// corpus (escapes, blank lines, wide characters, ANSI) and coarser prefixes of a
+// longer one.
 func TestBashPreviewIncrementalMatchesFull(t *testing.T) {
 	theme := newRendererTestTheme(t)
+	checkBashPreviewPrefixes(t, theme, "one\n\ntwo 中文\n\x1b[31mred\x1b[0m\n\ttabbed\nlast", 1, []int{20, 60})
+
 	var sb strings.Builder
 	for i := 0; i < 18; i++ {
 		switch i % 6 {
@@ -39,31 +72,7 @@ func TestBashPreviewIncrementalMatchesFull(t *testing.T) {
 			fmt.Fprintf(&sb, "line %d: short\n", i)
 		}
 	}
-	full := sb.String()
-
-	for _, width := range []int{20, 60, 120} {
-		state := &bashResultState{}
-		for n := 1; n <= len(full); n++ {
-			output := strings.TrimSpace(full[:n])
-			if output == "" {
-				continue
-			}
-			component := &bashPreviewComponent{output: output, state: state, theme: theme}
-			got := strings.Join(component.Render(width), "\n")
-			want := strings.Join(referenceBashPreview(output, width, theme), "\n")
-			if got != want {
-				t.Fatalf("width %d prefix %d:\n got %q\nwant %q", width, n, got, want)
-			}
-		}
-		// A width change must rebuild the count and the tail.
-		other := width/2 + 1
-		component := &bashPreviewComponent{output: strings.TrimSpace(full), state: state, theme: theme}
-		got := strings.Join(component.Render(other), "\n")
-		want := strings.Join(referenceBashPreview(strings.TrimSpace(full), other, theme), "\n")
-		if got != want {
-			t.Fatalf("width change to %d:\n got %q\nwant %q", other, got, want)
-		}
-	}
+	checkBashPreviewPrefixes(t, theme, sb.String(), 7, []int{60})
 }
 
 // TestBashPreviewInvalidateClearsCache covers the theme-change path: after

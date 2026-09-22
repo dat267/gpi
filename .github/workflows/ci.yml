@@ -35,4 +35,7 @@ jobs:
       - name: test
         env:
           PIER_TEST_BIN: ${{ github.workspace }}/pier
-        run: go test -race -count=2 -timeout 60s ./...
+        # -race -count=2 doubles the work; the timeout is a hang guard, not a
+        # budget. At 60s the suite sat at ~55s (ai) and ~35s
+        # (coding/interactive), so any added test tripped it.
+        run: go test -race -count=2 -timeout 300s ./...

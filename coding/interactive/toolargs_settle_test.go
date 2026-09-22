@@ -27,9 +27,12 @@ func (builtinRendererSession) GetModelPriceSource() coding.ModelPriceSource { re
 // execution-start event; the header must settle on the full path instead of
 // keeping the truncated one.
 func TestToolCallArgsSettleWhenComplete(t *testing.T) {
-	const full = `{"limit":60,"offset":285,"path":"/home/dat/repos/pier/tui/component.go"}`
-	const partial = `{"limit":60,"offset":285,"path":"/home/dat/repos/p"}`
-	const wantFull = "~/repos/pier/tui/component.go:285-344"
+	// The paths are absolute and the expectation goes through ShortenPath, so
+	// the test does not depend on where the home directory is.
+	const filePath = "/srv/work/pier/tui/component.go"
+	const full = `{"limit":60,"offset":285,"path":"` + filePath + `"}`
+	const partial = `{"limit":60,"offset":285,"path":"/srv/work/pier/tui/comp"}`
+	wantFull := ShortenPath(filePath) + ":285-344"
 
 	assistant := func(raw string) *ai.AssistantMessage {
 		return &ai.AssistantMessage{
