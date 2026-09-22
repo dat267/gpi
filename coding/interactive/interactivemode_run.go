@@ -59,6 +59,8 @@ type RunWiring struct {
 	RebindSession func(ctx context.Context) error
 	// RenderInitialMessages renders the initial transcript.
 	RenderInitialMessages func()
+	// ShowLoadedResources renders the loaded-resource sections (skills).
+	ShowLoadedResources func(force bool)
 	// OnPartialEventApplied observes one applied partial-channel event
 	// (test seam: partial events are otherwise superseded no-ops without a
 	// streaming assistant component).
@@ -350,6 +352,9 @@ func (w *RunWiring) Init(ctx context.Context, scopedModels []coding.ScopedModel,
 	}
 	if w.RenderInitialMessages != nil {
 		w.RenderInitialMessages()
+	}
+	if w.ShowLoadedResources != nil {
+		w.ShowLoadedResources(false)
 	}
 	// Upstream sets isInitialized inside startup init, before events flow,
 	// so the first-event fallback never re-runs init mid-session. Without

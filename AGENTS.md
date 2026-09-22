@@ -271,7 +271,7 @@ snapshot under and deliver outside.
 ## Divergences
 
 Numbered D-rows live in code comments at the point of divergence and are
-summarized in the README scoreboard. The range is **D1–D139**. Representative:
+summarized in the README scoreboard. The range is **D1–D150**. Representative:
 
 - D41 — extension mechanics are out of scope (resource loader, extension
   runner, package/tools managers); seams are function values or return nil.
@@ -334,6 +334,17 @@ summarized in the README scoreboard. The range is **D1–D139**. Representative:
   refresh outcome, waiter count and canceled flag). Two races were fixed on the
   way: publishing must not overwrite an entry that appeared after the load, and
   a waiter slot is only claimed once the entry is confirmed published.
+- D150 — the startup "loaded resources" area ports only the **Skills**
+  section (upstream `showLoadedResources`): collapsed name list plus the
+  expanded project/user/path scope groups, and the ctrl+o expand toggle now
+  drives the header and section expandables (`SetToolsExpanded`). Context,
+  Prompts, Themes, Extensions and the diagnostics blocks are not rendered yet
+  (the Go loader exposes no themes/extensions; extensions stay out of scope,
+  D41/D140). `coding.LoadSkills` now matches upstream's loader: paths resolve
+  (`~`/relative, `ResolvePath`), skills dedupe by canonical real path, and
+  name collisions keep the first and record a `collision` diagnostic — the
+  prior port appended both the default agent-dir skills and a settings path
+  pointing at the same directory, duplicating every skill.
 - D149 — `FooterDataProvider.mu` (`coding/footerdata.go`) is the one lock the
   refactor leaves in place, by design. It guards the provider's cwd, git paths,
   branch, extension statuses and listener registry, which its own 500 ms

@@ -82,15 +82,42 @@ type Skill struct {
 	Description string
 	FilePath    string
 	BaseDir     string
+	// SourceInfo describes where the skill came from (upstream sourceInfo).
+	SourceInfo SourceInfo
 	// DisableModelInvocation hides the skill from the model prompt.
 	DisableModelInvocation bool
 }
 
-// ResourceDiagnostic is a skill validation warning.
+// createSkillSourceInfo maps a loader source to its SourceInfo (upstream
+// createSkillSourceInfo).
+func createSkillSourceInfo(filePath string, baseDir string, source string) SourceInfo {
+	switch source {
+	case "user":
+		return CreateSyntheticSourceInfo(filePath, "local", SourceScopeUser, SourceOriginTopLevel, baseDir)
+	case "project":
+		return CreateSyntheticSourceInfo(filePath, "local", SourceScopeProject, SourceOriginTopLevel, baseDir)
+	case "path":
+		return CreateSyntheticSourceInfo(filePath, "local", SourceScopeTemporary, SourceOriginTopLevel, baseDir)
+	default:
+		return CreateSyntheticSourceInfo(filePath, source, SourceScopeTemporary, SourceOriginTopLevel, baseDir)
+	}
+}
+
+// ResourceCollision records which resource won a name collision (upstream
+// ResourceDiagnostic.collision).
+type ResourceCollision struct {
+	ResourceType string
+	Name         string
+	WinnerPath   string
+	LoserPath    string
+}
+
+// ResourceDiagnostic is a skill validation warning or name collision.
 type ResourceDiagnostic struct {
-	Type    string
-	Message string
-	Path    string
+	Type      string
+	Message   string
+	Path      string
+	Collision *ResourceCollision
 }
 
 // LoadSkillsResult bundles skills and diagnostics.
@@ -120,7 +147,7 @@ func validateSkillName(name string) []string {
 }
 
 // loadSkillFromFile parses one skill file.
-func loadSkillFromFile(filePath string) (*Skill, []ResourceDiagnostic) {
+func loadSkillFromFile(filePath string, source string) (*Skill, []ResourceDiagnostic) {
 	var diagnostics []ResourceDiagnostic
 	isDeclaredSkill := filepath.Base(filePath) == "SKILL.md"
 
@@ -165,14 +192,21 @@ func loadSkillFromFile(filePath string) (*Skill, []ResourceDiagnostic) {
 		Description:            description,
 		FilePath:               filePath,
 		BaseDir:                skillDir,
+		SourceInfo:             createSkillSourceInfo(filePath, skillDir, source),
 		DisableModelInvocation: parsed.Booleans["disable-model-invocation"],
 	}, diagnostics
 }
 
 // LoadSkillsFromDir scans a directory tree: a root SKILL.md wins, then
 // subdirectories are scanned recursively; dotfiles and node_modules are
-// skipped (port of loadSkillsFromDir).
+// skipped (port of loadSkillsFromDir). The source identifier defaults to the
+// temporary scope.
 func LoadSkillsFromDir(dir string) LoadSkillsResult {
+	return loadSkillsFromDir(dir, "")
+}
+
+// loadSkillsFromDir is LoadSkillsFromDir with the loader source identifier.
+func loadSkillsFromDir(dir string, source string) LoadSkillsResult {
 	var skills []Skill
 	var diagnostics []ResourceDiagnostic
 	if _, err := os.Stat(dir); err != nil {
@@ -193,7 +227,7 @@ func LoadSkillsFromDir(dir string) LoadSkillsResult {
 		if entry.IsDir() {
 			continue
 		}
-		skill, diag := loadSkillFromFile(fullPath)
+		skill, diag := loadSkillFromFile(fullPath, source)
 		if skill != nil {
 			skills = append(skills, *skill)
 		}
@@ -207,7 +241,7 @@ func LoadSkillsFromDir(dir string) LoadSkillsResult {
 		}
 		fullPath := filepath.Join(dir, entry.Name())
 		if entry.IsDir() {
-			sub := LoadSkillsFromDir(fullPath)
+			sub := loadSkillsFromDir(fullPath, source)
 			skills = append(skills, sub.Skills...)
 			diagnostics = append(diagnostics, sub.Diagnostics...)
 			continue
@@ -215,7 +249,7 @@ func LoadSkillsFromDir(dir string) LoadSkillsResult {
 		if !strings.HasSuffix(entry.Name(), ".md") {
 			continue
 		}
-		skill, diag := loadSkillFromFile(fullPath)
+		skill, diag := loadSkillFromFile(fullPath, source)
 		if skill != nil {
 			skills = append(skills, *skill)
 		}
@@ -236,33 +270,102 @@ type LoadSkillsOptions struct {
 // `.pi/skills` is only scanned when trustProject is set (upstream's
 // project-trust rule; pi answers "untrusted" headless by default).
 func LoadSkills(options LoadSkillsOptions, trustProject bool) LoadSkillsResult {
+	resolvedCwd := ResolvePath(options.Cwd, "", PathInputOptions{})
+	resolvedAgentDir := ResolvePath(options.AgentDir, "", PathInputOptions{})
+
+	// Insertion-ordered name map (upstream's Map preserves insertion order).
 	var skills []Skill
-	var diagnostics []ResourceDiagnostic
+	skillIndex := map[string]int{}
+	realPathSet := map[string]bool{}
+	var allDiagnostics []ResourceDiagnostic
+	var collisionDiagnostics []ResourceDiagnostic
+
+	addSkills := func(result LoadSkillsResult) {
+		allDiagnostics = append(allDiagnostics, result.Diagnostics...)
+		for _, skill := range result.Skills {
+			// Resolve symlinks so the same file loaded twice is skipped silently.
+			realPath := CanonicalizePath(skill.FilePath)
+			if realPathSet[realPath] {
+				continue
+			}
+			if existingIndex, ok := skillIndex[skill.Name]; ok {
+				existing := skills[existingIndex]
+				collisionDiagnostics = append(collisionDiagnostics, ResourceDiagnostic{
+					Type: "collision", Message: "name \"" + skill.Name + "\" collision", Path: skill.FilePath,
+					Collision: &ResourceCollision{
+						ResourceType: "skill", Name: skill.Name,
+						WinnerPath: existing.FilePath, LoserPath: skill.FilePath,
+					},
+				})
+				continue
+			}
+			skillIndex[skill.Name] = len(skills)
+			skills = append(skills, skill)
+			realPathSet[realPath] = true
+		}
+	}
+
+	userSkillsDir := filepath.Join(resolvedAgentDir, "skills")
+	projectSkillsDir := filepath.Join(resolvedCwd, ".pi", "skills")
+	isUnderPath := func(target string, root string) bool {
+		normalizedRoot := filepath.Clean(root)
+		if target == normalizedRoot {
+			return true
+		}
+		prefix := normalizedRoot + string(filepath.Separator)
+		return strings.HasPrefix(target, prefix)
+	}
 
 	if options.IncludeDefaults {
-		userSkills := LoadSkillsFromDir(filepath.Join(options.AgentDir, "skills"))
-		skills = append(skills, userSkills.Skills...)
-		diagnostics = append(diagnostics, userSkills.Diagnostics...)
+		addSkills(loadSkillsFromDir(userSkillsDir, "user"))
 	}
+	// The project skills dir stays gated on project trust (the Go loader's
+	// added parameter; upstream gates it in the resource loader).
 	if trustProject {
-		projectSkills := LoadSkillsFromDir(filepath.Join(options.Cwd, ".pi", "skills"))
-		skills = append(skills, projectSkills.Skills...)
-		diagnostics = append(diagnostics, projectSkills.Diagnostics...)
+		addSkills(loadSkillsFromDir(projectSkillsDir, "project"))
 	}
-	for _, skillPath := range options.SkillPaths {
-		if info, err := os.Stat(skillPath); err == nil && info.IsDir() {
-			fromDir := LoadSkillsFromDir(skillPath)
-			skills = append(skills, fromDir.Skills...)
-			diagnostics = append(diagnostics, fromDir.Diagnostics...)
+
+	getSource := func(resolvedPath string) string {
+		if !options.IncludeDefaults {
+			if isUnderPath(resolvedPath, userSkillsDir) {
+				return "user"
+			}
+			if isUnderPath(resolvedPath, projectSkillsDir) {
+				return "project"
+			}
+		}
+		return "path"
+	}
+
+	for _, rawPath := range options.SkillPaths {
+		resolvedPath := ResolvePath(rawPath, resolvedCwd, PathInputOptions{Trim: true})
+		info, err := os.Stat(resolvedPath)
+		if err != nil {
+			allDiagnostics = append(allDiagnostics, ResourceDiagnostic{
+				Type: "warning", Message: "skill path does not exist", Path: resolvedPath,
+			})
 			continue
 		}
-		skill, diag := loadSkillFromFile(skillPath)
-		if skill != nil {
-			skills = append(skills, *skill)
+		source := getSource(resolvedPath)
+		if info.IsDir() {
+			addSkills(loadSkillsFromDir(resolvedPath, source))
+			continue
 		}
-		diagnostics = append(diagnostics, diag...)
+		if info.Mode().IsRegular() && strings.HasSuffix(resolvedPath, ".md") {
+			skill, diag := loadSkillFromFile(resolvedPath, source)
+			if skill != nil {
+				addSkills(LoadSkillsResult{Skills: []Skill{*skill}})
+			} else {
+				allDiagnostics = append(allDiagnostics, diag...)
+			}
+			continue
+		}
+		allDiagnostics = append(allDiagnostics, ResourceDiagnostic{
+			Type: "warning", Message: "skill path is not a markdown file", Path: resolvedPath,
+		})
 	}
-	return LoadSkillsResult{Skills: skills, Diagnostics: diagnostics}
+
+	return LoadSkillsResult{Skills: skills, Diagnostics: append(allDiagnostics, collisionDiagnostics...)}
 }
 
 // escapeXML escapes XML entities (port of escapeXml).

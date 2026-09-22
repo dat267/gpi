@@ -1,0 +1,101 @@
+package interactive
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/dat267/pier/coding"
+	"github.com/dat267/pier/tui"
+)
+
+// TestAutocompleteSkillCommandsWired covers the skill slash commands: the
+// session loads skills into the system prompt (systemPromptOptions.Skills),
+// but AutocompleteWiring.Skills was never assigned, so /skill:<name> commands
+// never appeared (upstream builds them from the resource loader's skills).
+func TestAutocompleteSkillCommandsWired(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+	app.Init(context.Background())
+
+	app.Session.SystemPromptOptions.Skills = []coding.Skill{
+		{Name: "tdd", Description: "Test-driven development", FilePath: "/skills/tdd/SKILL.md"},
+	}
+
+	commands := app.Autocomplete.Skills()
+	if len(commands) != 1 || commands[0].Name != "tdd" || commands[0].FilePath != "/skills/tdd/SKILL.md" {
+		t.Fatalf("skill commands = %+v", commands)
+	}
+
+	provider, ok := app.Autocomplete.CreateBaseAutocompleteProvider().(*tui.CombinedAutocompleteProvider)
+	if !ok {
+		t.Fatal("provider is not combined")
+	}
+	suggestions := provider.GetSuggestions(context.Background(), []string{"/skill:td"}, 0, len("/skill:td"), false)
+	if suggestions == nil {
+		t.Fatal("no suggestions for /skill:td")
+	}
+	found := false
+	for _, item := range suggestions.Items {
+		if item.Value == "skill:tdd" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("/skill:td suggestions missing skill:tdd: %+v", suggestions.Items)
+	}
+}
+
+// TestLoadedResourcesShowsSkills covers the startup loaded-resources area: the
+// container existed and was cleared but nothing ever populated it, so ctrl+o
+// showed no skills (upstream showLoadedResources renders a [Skills] section).
+func TestLoadedResourcesShowsSkills(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+	app.Init(context.Background())
+
+	app.Session.SystemPromptOptions.Skills = []coding.Skill{
+		{Name: "tdd", Description: "Test-driven development", FilePath: "/skills/tdd/SKILL.md"},
+		{Name: "karpathy-guidelines", Description: "Guidelines", FilePath: "/skills/karpathy-guidelines/SKILL.md"},
+	}
+	app.ShowLoadedResources(true)
+
+	rendered := coding.StripAnsi(strings.Join(app.LoadedResourcesContainer.Render(80), "\n"))
+	if !strings.Contains(rendered, "Skills") {
+		t.Fatalf("loaded resources missing Skills section:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "tdd") {
+		t.Fatalf("loaded resources missing skill name:\n%s", rendered)
+	}
+}
+
+// TestToolsExpandTogglesLoadedResources covers ctrl+o: OnToolsExpand only
+// flipped the UIState bool, never calling SetToolsExpanded, so the header and
+// loaded-resources expandables stayed collapsed.
+func TestToolsExpandTogglesLoadedResources(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+	app.Init(context.Background())
+
+	app.Session.SystemPromptOptions.Skills = []coding.Skill{{
+		Name: "tdd", Description: "Test-driven development", FilePath: "/skills/tdd/SKILL.md",
+		SourceInfo: coding.CreateSyntheticSourceInfo("/skills/tdd/SKILL.md", "local", coding.SourceScopeUser, coding.SourceOriginTopLevel, "/skills"),
+	}}
+	app.ShowLoadedResources(true)
+
+	renderLoaded := func() string {
+		return coding.StripAnsi(strings.Join(app.LoadedResourcesContainer.Render(80), "\n"))
+	}
+	if strings.Contains(renderLoaded(), "/skills/tdd/SKILL.md") {
+		t.Fatalf("collapsed resources already show the expanded path:\n%s", renderLoaded())
+	}
+
+	app.Key.OnToolsExpand()
+
+	if !app.UIState.ToolOutputExpanded {
+		t.Fatal("ToolOutputExpanded not set")
+	}
+	if !strings.Contains(renderLoaded(), "/skills/tdd/SKILL.md") {
+		t.Fatalf("expanded resources missing the skill path:\n%s", renderLoaded())
+	}
+}

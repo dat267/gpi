@@ -462,6 +462,7 @@ func NewApp(options AppOptions) *App {
 		SetupKeyHandlers:      app.KeySetup,
 		SetupSubmitHandler:    app.SubmitSetup,
 		RenderInitialMessages: func() { app.Transcript.RenderInitialMessages() },
+		ShowLoadedResources:   app.ShowLoadedResources,
 		OnThemeChange: func(callback func()) func() {
 			// The theme watcher fires on its own goroutine; deliver the change
 			// on the UI loop (stage 4).
@@ -650,7 +651,9 @@ func NewApp(options AppOptions) *App {
 		OnModelSelect:        func() { app.Models.ShowModelSelector(context.Background(), "") },
 		OnToolsExpand: func() {
 			expanded := app.UIState.ToolOutputExpanded
-			app.Queue.ToggleToolOutputExpansion(&expanded, func(value bool) { app.UIState.ToolOutputExpanded = value })
+			app.Queue.ToggleToolOutputExpansion(&expanded, func(value bool) {
+				app.Queue.SetToolsExpanded(value, &app.UIState.ToolOutputExpanded, app.UIState.BuiltInHeader, app.LoadedResourcesContainer)
+			})
 		},
 		OnThinkingToggle: func() {
 			hidden := app.Transcript.HideThinkingBlock
@@ -734,9 +737,23 @@ func NewApp(options AppOptions) *App {
 		DefaultEditor:  app.DefaultEditor,
 		Editor:         app.DefaultEditor,
 		LoginProviders: func() []AuthSelectorProvider { return app.Auth.GetLoginProviderOptions("") },
+		Skills:         app.skillCommands,
 	}
 
 	return app
+}
+
+// skillCommands converts the session's loaded skills into autocomplete slash
+// commands (upstream builds `/skill:<name>` entries from the resource loader).
+func (a *App) skillCommands() []SkillCommand {
+	skills := a.Session.Skills()
+	commands := make([]SkillCommand, 0, len(skills))
+	for _, skill := range skills {
+		commands = append(commands, SkillCommand{
+			Name: skill.Name, Description: skill.Description, FilePath: skill.FilePath,
+		})
+	}
+	return commands
 }
 
 // Init initializes and mounts the app.
@@ -1042,6 +1059,8 @@ func (a *App) applyReloadedSettings() {
 			expandable.SetExpanded(a.UIState.ToolOutputExpanded)
 		}
 	}
+	// Reloaded resources (upstream showLoadedResources after /reload).
+	a.ShowLoadedResources(false)
 	if a.TranscriptScrollView != nil {
 		a.TranscriptScrollView.SetScrollbar(tui.ScrollViewScrollbar(a.Settings.GetFullscreenScrollbar()))
 	}

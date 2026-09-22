@@ -283,6 +283,22 @@ func (s *AgentSession) PromptTemplates() []PromptTemplate {
 	return append([]PromptTemplate{}, s.control.PromptTemplates...)
 }
 
+// Skills returns the loaded skills (the system-prompt options).
+func (s *AgentSession) Skills() []Skill {
+	if s.SystemPromptOptions == nil {
+		return nil
+	}
+	return append([]Skill{}, s.SystemPromptOptions.Skills...)
+}
+
+// ContextFiles returns the loaded context files (the system-prompt options).
+func (s *AgentSession) ContextFiles() []ContextFile {
+	if s.SystemPromptOptions == nil {
+		return nil
+	}
+	return append([]ContextFile{}, s.SystemPromptOptions.ContextFiles...)
+}
+
 // AutoCompactionEnabled reports the auto-compaction toggle.
 func (s *AgentSession) AutoCompactionEnabled() bool {
 	if s.control == nil {
