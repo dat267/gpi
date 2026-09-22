@@ -587,6 +587,12 @@ func NewApp(options AppOptions) *App {
 			return app.Session.ExportSessionToHTML(outputPath, themeName)
 		},
 
+		CopyToClipboard: func(text string) (bool, string) {
+			if err := coding.CopyTextToClipboard(text); err != nil {
+				return false, err.Error()
+			}
+			return true, ""
+		},
 		EditorContainer: app.EditorContainer,
 		Editor:          app.DefaultEditor,
 		RunDetached: func(fn func()) {
@@ -607,8 +613,19 @@ func NewApp(options AppOptions) *App {
 	}
 
 	app.Key = &KeyWiring{
-		Session:  app.Session,
-		Editor:   app.DefaultEditor,
+		Session: app.Session,
+		Editor:  app.DefaultEditor,
+		OnPasteImage: func() {
+			// Upstream handleClipboardPaste pastes a clipboard image first and
+			// falls back to text; image transports are out of scope (D41
+			// scope note in AGENTS.md), so the text path is ported.
+			text, err := coding.ReadClipboardText()
+			if err != nil || text == "" {
+				return
+			}
+			app.DefaultEditor.InsertTextAtCursor(text)
+			app.UI.RequestRender(false)
+		},
 		Settings: app.Settings,
 		UI:       app.UI,
 		Queue:    app.Queue,

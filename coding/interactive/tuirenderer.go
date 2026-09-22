@@ -1,14 +1,16 @@
 package interactive
 
 import (
+	"github.com/dat267/pier/coding"
 	"github.com/dat267/pier/tui"
 )
 
 // Port of src/modes/interactive/tui-renderer.ts: the composition root that
 // builds the regular or fullscreen renderer and the swappable reference.
 //
-// Divergences: clipboard copying is injected because the native helper is out
-// of scope (D106); the browser opener reuses the injected opener (D92).
+// Divergences: the native (Bun FFI) clipboard has no Go counterpart (D106),
+// so copying uses the ported platform-command implementation; the browser
+// opener reuses the injected opener (D92).
 
 // InteractiveTuiOptions configure the renderer.
 type InteractiveTuiOptions struct {
@@ -32,6 +34,14 @@ func SetClipboardCopier(copier CopySelectionFn) { clipboardCopier = copier }
 // interactive mode drives rendering from its own loop, so the renderer's
 // internal timer is replaced by the tick channel (stage 2).
 func CreateInteractiveTui(options InteractiveTuiOptions) tui.TUI {
+	// The selection copier is a process-wide seam (D106); wire the real
+	// clipboard implementation once.
+	SetClipboardCopier(func(text string) (bool, string) {
+		if err := coding.CopyTextToClipboard(text); err != nil {
+			return false, err.Error()
+		}
+		return true, ""
+	})
 	return withRenderTicks(createInteractiveTui(options))
 }
 
