@@ -794,10 +794,10 @@ func PrepareCompaction(pathEntries []SessionEntry, settings CompactionSettings) 
 	}
 	boundaryEnd := len(pathEntries)
 
-	var contextMessages []ai.Message
-	for i := range BuildContextEntries(pathEntries, nil, nil) {
-		entry := BuildContextEntries(pathEntries, nil, nil)[i]
-		contextMessages = append(contextMessages, SessionEntryToContextMessages(&entry)...)
+	contextEntries := BuildContextEntries(pathEntries, nil, nil)
+	contextMessages := make([]ai.Message, 0, len(contextEntries))
+	for i := range contextEntries {
+		contextMessages = append(contextMessages, SessionEntryToContextMessages(&contextEntries[i])...)
 	}
 	tokensBefore := EstimateContextTokens(contextMessages).Tokens
 

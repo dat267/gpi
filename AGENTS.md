@@ -184,7 +184,12 @@ paints its first frame in ~20 ms instead of ~400 ms. Resizing a huge session
 still costs ~350–430 ms per new width because the layout renders the whole
 attached scroll content at the content width (`ScrollContentLines` calls the
 component render) — this matches upstream `layout.ts` and is deliberately not
-staggered (a partial-width render would show stale text).
+staggered (a partial-width render would show stale text). A manual `/compact`
+on that session spent ~20 s and ~325 GB of allocations in `PrepareCompaction`
+before the summarization request was even built, because the port re-derived
+the context projection inside the loop over it (`BuildContextEntries` once per
+entry); it now builds the projection once (~105 ms at 15.5k entries), pinned by
+`TestPrepareCompactionProjectsTheContextOnce`.
 
 ## Conventions and gotchas
 
