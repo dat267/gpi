@@ -29,6 +29,8 @@ type CommandSession interface {
 	CompactSession(ctx context.Context, customInstructions string) error
 	GetCacheWarmingStatus() *coding.CacheWarmingStatus
 	ModelRuntime() *coding.ModelRuntime
+	IsStreaming() bool
+	IsCompacting() bool
 }
 
 // CommandWiring handles the slash commands.
@@ -70,6 +72,21 @@ type CommandWiring struct {
 	WriteDebugLog func(content string) error
 	// MarkdownTheme is used for the changelog/hotkeys rendering.
 	MarkdownTheme func() tui.MarkdownTheme
+
+	// Reload hooks (upstream handleReloadCommand; extension mechanics are
+	// out of scope, D41).
+	EditorContainer *tui.Container
+	Editor          tui.Component
+	// RunDetached runs the blocking reload work off the UI loop.
+	RunDetached func(fn func())
+	// ReloadNow re-reads settings-dependent state off the UI loop (settings
+	// file, session queue modes, keybindings, implicit project trust). It
+	// returns the models.json error ("" = none) and whether implicit project
+	// trust was saved.
+	ReloadNow func() (modelsJSONError string, savedTrust bool, err error)
+	// ApplyReloadedSettings re-applies settings-dependent UI state on the
+	// loop (runtime settings, chat rebuild, themes, autocomplete).
+	ApplyReloadedSettings func()
 }
 
 func (w *CommandWiring) showStatus(message string) {
@@ -213,6 +230,84 @@ func (w *CommandWiring) HandleShareCommand(ctx context.Context) {
 	if err := w.ShareSession(ctx); err != nil {
 		w.showError(err.Error())
 	}
+}
+
+// HandleReloadCommand runs /reload (upstream handleReloadCommand): guard
+// streaming/compacting, swap the editor for a reload box, run the reload
+// work detached so the box paints, then re-apply settings-dependent state
+// and restore the editor. Extension mechanics are out of scope (D41).
+func (w *CommandWiring) HandleReloadCommand() {
+	if w.Session != nil && w.Session.IsStreaming() {
+		w.showWarning("Wait for the current response to finish before reloading.")
+		return
+	}
+	if w.Session != nil && w.Session.IsCompacting() {
+		w.showWarning("Wait for compaction to finish before reloading.")
+		return
+	}
+	if w.EditorContainer == nil || w.Editor == nil || w.ReloadNow == nil {
+		return
+	}
+
+	theme := ActiveTheme()
+	reloadBox := &tui.Container{}
+	reloadBox.AddChild(NewDynamicBorder(nil))
+	reloadBox.AddChild(tui.NewSpacer(1))
+	reloadBox.AddChild(tui.NewText(theme.Fg("muted",
+		"Reloading keybindings, extensions, skills, prompts, themes, and context files..."), 1, 0, nil))
+	reloadBox.AddChild(tui.NewSpacer(1))
+	reloadBox.AddChild(NewDynamicBorder(nil))
+
+	// Upstream swaps the editor, focuses the box and awaits a nextTick so the
+	// box paints before the reload; the port runs the reload work detached so
+	// the loop keeps painting while it runs.
+	w.EditorContainer.Clear()
+	w.EditorContainer.AddChild(reloadBox)
+	if w.UI != nil {
+		w.UI.SetFocus(reloadBox)
+		w.UI.RequestRender(true)
+	}
+
+	restore := func() {
+		w.EditorContainer.Clear()
+		w.EditorContainer.AddChild(w.Editor)
+		if w.UI != nil {
+			w.UI.SetFocus(w.Editor)
+			w.UI.RequestRender(false)
+		}
+	}
+	finish := func(modelsJSONError string, savedTrust bool, err error) {
+		if err != nil {
+			restore()
+			w.showError("Reload failed: " + err.Error())
+			return
+		}
+		if w.ApplyReloadedSettings != nil {
+			w.ApplyReloadedSettings()
+		}
+		if modelsJSONError != "" {
+			w.showError("models.json error: " + modelsJSONError)
+		}
+		if savedTrust {
+			w.showStatus("Reloaded keybindings, extensions, skills, prompts, themes, and context files; saved project trust")
+		} else {
+			w.showStatus("Reloaded keybindings, extensions, skills, prompts, themes, and context files")
+		}
+		restore()
+	}
+
+	if w.RunDetached != nil {
+		w.RunDetached(func() {
+			modelsJSONError, savedTrust, err := w.ReloadNow()
+			if w.UI != nil {
+				w.UI.Post(func() { finish(modelsJSONError, savedTrust, err) })
+				return
+			}
+			finish(modelsJSONError, savedTrust, err)
+		})
+		return
+	}
+	finish(w.ReloadNow())
 }
 
 // HandleCopyCommand copies the selection or the last assistant message.

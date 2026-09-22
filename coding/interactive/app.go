@@ -88,7 +88,13 @@ type AppOptions struct {
 
 // App is the composed interactive mode.
 type App struct {
-	options AppOptions
+	// AutoTrustOnReloadCwd is the cwd /reload may implicitly trust
+	// (main.ts:706): captured at startup when the project has no
+	// trust-requiring resources, so a later reload can save trust for a
+	// project that gained them mid-session. Upstream also gates on the
+	// --trust CLI override, which the port does not have.
+	AutoTrustOnReloadCwd string
+	options              AppOptions
 
 	// initialUI is the renderer created at composition time; the lifecycle
 	// swaps it on /tui switches and the exit replay.
@@ -279,6 +285,14 @@ func NewApp(options AppOptions) *App {
 		// fullscreenExitOutput setting.
 		Stop: func(string) { app.StopMode(options.Settings.GetFullscreenExitOutput()) },
 		Exit: options.Exit,
+	}
+
+	// Upstream main.ts:706: capture at startup so a later /reload can save
+	// an implicitly-trusted project whose cwd gained trust-requiring
+	// resources during the session.
+	app.AutoTrustOnReloadCwd = ""
+	if app.SessionMgr != nil && !coding.HasTrustRequiringProjectResources(app.SessionMgr.GetCwd()) {
+		app.AutoTrustOnReloadCwd = app.SessionMgr.GetCwd()
 	}
 
 	// UI state + transcript.
@@ -564,6 +578,24 @@ func NewApp(options AppOptions) *App {
 		RequestRender:        func() { app.UI.RequestRender(false) },
 		ClearStatusIndicator: func() { app.UIState.ClearStatusIndicator("", false) },
 		MarkdownTheme:        func() tui.MarkdownTheme { return *app.markdownTheme() },
+
+		EditorContainer: app.EditorContainer,
+		Editor:          app.DefaultEditor,
+		RunDetached: func(fn func()) {
+			app.runDetached(func(ctx context.Context) error { fn(); return nil })
+		},
+		ReloadNow: func() (string, bool, error) {
+			// Upstream session.reload's in-scope subset: settings re-read,
+			// session queue modes, keybindings, implicit project trust
+			// (extension runner and resource loader are out of scope, D41).
+			app.Settings.Reload()
+			app.Session.SetSteeringMode(app.Settings.GetSteeringMode())
+			app.Session.SetFollowUpMode(app.Settings.GetFollowUpMode())
+			app.Keybindings.Reload()
+			savedTrust := app.Trust.MaybeSaveImplicitProjectTrustAfterReload(app.AutoTrustOnReloadCwd)
+			return app.Session.ModelRuntime().GetError(), savedTrust, nil
+		},
+		ApplyReloadedSettings: app.applyReloadedSettings,
 	}
 
 	app.Key = &KeyWiring{
@@ -647,6 +679,7 @@ func NewApp(options AppOptions) *App {
 				})
 				return nil
 			},
+			HandleReloadCommand:  func() error { app.Commands.HandleReloadCommand(); return nil },
 			HandleDebugCommand:   func() { app.Commands.HandleDebugCommand("") },
 			HandleArminSaysHi:    func() { app.Commands.HandleArminSaysHi(app.UI, time.Now().UnixNano()) },
 			HandleDementedDelves: app.Commands.HandleDementedDelves,
@@ -916,6 +949,50 @@ func (a *App) updateEditorBorderColor() {
 	if a.Queue != nil {
 		a.Queue.UpdateEditorBorderColor()
 	}
+}
+
+// applyReloadedSettings re-applies settings-dependent state after /reload
+// (upstream applyRuntimeSettings + restoreChatBeforeSessionStart +
+// themeController.applyFromSettings + setupAutocompleteProvider). It runs on
+// the UI loop. Terminal capability overrides and the HTTP dispatcher have no
+// port counterpart (D41 scope).
+func (a *App) applyReloadedSettings() {
+	hidden := a.Settings.GetHideThinkingBlock()
+	pad := a.Settings.GetOutputPad()
+	a.updateThinkingBlockVisibility(hidden)
+	a.Transcript.OutputPad = pad
+	a.Events.OutputPad = pad
+	// Upstream rebuildChatFromMessages (the reload's beforeSessionStart hook).
+	if a.Startup != nil {
+		a.Startup.RebuildChatFromMessages()
+	}
+	// Header expansion (upstream activeHeader.setExpanded).
+	if a.UIState != nil {
+		if expandable, ok := IsExpandable(a.UIState.BuiltInHeader); ok {
+			expandable.SetExpanded(a.UIState.ToolOutputExpanded)
+		}
+	}
+	if a.TranscriptScrollView != nil {
+		a.TranscriptScrollView.SetScrollbar(tui.ScrollViewScrollbar(a.Settings.GetFullscreenScrollbar()))
+	}
+	if altscreen, ok := tuiConcrete(a.UI).(*tui.AltScreen); ok {
+		altscreen.SetCopyOnSelect(a.Settings.GetFullscreenCopyOnSelect())
+	}
+	a.UI.SetShowHardwareCursor(a.Settings.GetShowHardwareCursor())
+	clearOnShrink := a.Settings.GetClearOnShrink()
+	a.UI.SetClearOnShrink(clearOnShrink)
+	if !clearOnShrink && a.UIState != nil && a.UIState.ActiveStatusIndicator == nil && a.StatusContainer != nil {
+		a.StatusContainer.Clear()
+	}
+	editorPad := a.Settings.GetEditorPaddingX()
+	maxVisible := a.Settings.GetAutocompleteMaxVisible()
+	a.DefaultEditor.SetPaddingX(editorPad)
+	a.DefaultEditor.SetAutocompleteMaxVisible(maxVisible)
+	// Custom theme files are re-read from disk by ApplyFromSettings.
+	a.Theme.ApplyFromSettings()
+	// Rebuild the autocomplete provider (upstream setupAutocompleteProvider);
+	// the skills list is a func, so it re-reads on the next query.
+	a.Autocomplete.SetupAutocompleteProvider()
 }
 
 func (a *App) updateThinkingBlockVisibility(hidden bool) {

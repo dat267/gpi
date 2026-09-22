@@ -13,6 +13,8 @@ import (
 
 // commandTestSession implements CommandSession.
 type commandTestSession struct {
+	streaming   bool
+	compacting  bool
 	stats       *coding.SessionStats
 	lastText    string
 	name        string
@@ -39,6 +41,8 @@ func (s *commandTestSession) CompactSession(_ context.Context, instructions stri
 }
 func (s *commandTestSession) GetCacheWarmingStatus() *coding.CacheWarmingStatus { return s.cacheStatus }
 func (s *commandTestSession) ModelRuntime() *coding.ModelRuntime                { return s.runtime }
+func (s *commandTestSession) IsStreaming() bool                                 { return s.streaming }
+func (s *commandTestSession) IsCompacting() bool                                { return s.compacting }
 
 func newCommandTestWiring(t *testing.T) (*CommandWiring, *commandTestSession, *coding.SettingsManager) {
 	t.Helper()
