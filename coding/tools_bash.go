@@ -47,6 +47,41 @@ type OutputAccumulator struct {
 	tempFile                 *os.File
 }
 
+// BashUpdateThrottleMS is how often streamed bash output updates are emitted
+// (upstream BASH_UPDATE_THROTTLE_MS in renderers/bash.ts).
+const BashUpdateThrottleMS = 100 * time.Millisecond
+
+// bashUpdateThrottle coalesces streamed output updates (upstream's updateDirty /
+// lastUpdateAt pair): a burst of chunks inside the interval produces one update.
+// Callers serialize access.
+type bashUpdateThrottle struct {
+	interval time.Duration
+	now      func() time.Time
+	last     time.Time
+	dirty    bool
+}
+
+// mark records a pending change and reports whether an update is due now, or
+// after the returned delay.
+func (t *bashUpdateThrottle) mark() (bool, time.Duration) {
+	t.dirty = true
+	delay := t.interval - t.now().Sub(t.last)
+	if delay <= 0 {
+		return true, 0
+	}
+	return false, delay
+}
+
+// take clears the pending flag and reports whether an update should be emitted.
+func (t *bashUpdateThrottle) take() bool {
+	if !t.dirty {
+		return false
+	}
+	t.dirty = false
+	t.last = t.now()
+	return true
+}
+
 // NewOutputAccumulator builds an accumulator.
 func NewOutputAccumulator(maxLines, maxBytes int, tempFilePrefix string) *OutputAccumulator {
 	if maxLines == 0 {
@@ -416,10 +451,29 @@ func CreateShellTool(cwd string, config ShellToolConfig, options *BashToolOption
 			output := NewOutputAccumulator(0, 0, config.TempFilePrefix)
 			var updateWG sync.WaitGroup
 
+			// Streamed updates are throttled (upstream emitOutputUpdate /
+			// scheduleOutputUpdate): one snapshot per read chunk flooded the UI
+			// and cost a full tail snapshot each time.
+			throttle := &bashUpdateThrottle{interval: BashUpdateThrottleMS, now: time.Now}
+			var throttleMu sync.Mutex
+			var updateTimer *time.Timer
+			clearUpdateTimer := func() {
+				throttleMu.Lock()
+				defer throttleMu.Unlock()
+				if updateTimer != nil {
+					updateTimer.Stop()
+					updateTimer = nil
+				}
+			}
+
 			emitOutputUpdate := func() {
-				if onUpdate == nil {
+				throttleMu.Lock()
+				due := onUpdate != nil && throttle.take()
+				if !due {
+					throttleMu.Unlock()
 					return
 				}
+				throttleMu.Unlock()
 				snapshot := output.Snapshot(true)
 				details := map[string]any{}
 				if snapshot.Truncation.Truncated {
@@ -438,6 +492,35 @@ func CreateShellTool(cwd string, config ShellToolConfig, options *BashToolOption
 					defer updateWG.Done()
 					onUpdate(update)
 				}()
+			}
+
+			// scheduleOutputUpdate defers a chunk's update to the end of the
+			// interval, coalescing everything that arrives meanwhile.
+			scheduleOutputUpdate := func() {
+				throttleMu.Lock()
+				if onUpdate == nil {
+					throttleMu.Unlock()
+					return
+				}
+				emitNow, delay := throttle.mark()
+				if emitNow {
+					if updateTimer != nil {
+						updateTimer.Stop()
+						updateTimer = nil
+					}
+					throttleMu.Unlock()
+					emitOutputUpdate()
+					return
+				}
+				if updateTimer == nil {
+					updateTimer = time.AfterFunc(delay, func() {
+						throttleMu.Lock()
+						updateTimer = nil
+						throttleMu.Unlock()
+						emitOutputUpdate()
+					})
+				}
+				throttleMu.Unlock()
 			}
 
 			if onUpdate != nil {
@@ -501,7 +584,7 @@ func CreateShellTool(cwd string, config ShellToolConfig, options *BashToolOption
 						chunk := make([]byte, n)
 						copy(chunk, buf[:n])
 						_ = output.Append(chunk)
-						emitOutputUpdate()
+						scheduleOutputUpdate()
 					}
 					if err != nil {
 						return
@@ -517,7 +600,11 @@ func CreateShellTool(cwd string, config ShellToolConfig, options *BashToolOption
 			waitErr := cmd.Wait()
 			updateWG.Wait()
 
+			// Upstream finishOutput: stop the pending update, flush one last
+			// streamed state, then take the final snapshot.
 			output.Finish()
+			clearUpdateTimer()
+			emitOutputUpdate()
 			snapshot := output.Snapshot(true)
 			defer output.CloseTempFile()
 
