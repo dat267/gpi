@@ -244,7 +244,7 @@ tui/ coding/interactive/` outside tests returns only the two above):
 | `ScopedModelsSelectorComponent.mu` | `coding/interactive/scopedmodelsselector.go` | stage 4 |
 | `SessionSelectorComponent.mu` | `coding/interactive/sessionselector.go` | stage 4 |
 | `scheduleOnce` local `mu` | `coding/interactive/sessionselector.go` | stage 4 |
-| `editCallComponent.previewMu` | `coding/interactive/toolrenderers.go` | stage 4 |
+| `editCallComponent.previewMu` | `coding/interactive/toolrenderer_edit.go` | stage 4 |
 | `FooterComponent.cacheMu` | `coding/interactive/footer.go` | stage 4 |
 | `ModelCatalogRefreshCoordinator.mu` | `coding/interactive/catalogrefresh.go` | stage 4 (D148) |
 | `activeCatalogRefresh.mu` | `coding/interactive/catalogrefresh.go` | stage 4 (D148) |
