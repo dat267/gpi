@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -140,5 +141,38 @@ func TestGraphemeWidthSpecials(t *testing.T) {
 	// Tab is three.
 	if got := graphemeWidth("\t"); got != 3 {
 		t.Fatalf("tab = %d", got)
+	}
+}
+
+// TestWidthCacheEvictsInBatches pins the eviction amortization: the cache was
+// counted by ranging it (a full sync.Map walk) once per miss, so a full cache
+// cost O(cache) per miss — the scroll benchmark spent ~8% of a warm frame in
+// the sync.Map iterator alone. A full cache must therefore drop a batch of
+// entries, not one per miss, and must stay bounded.
+func TestWidthCacheEvictsInBatches(t *testing.T) {
+	fillUntilFull := func() {
+		for index := 0; index < widthCacheSize*4; index++ {
+			VisibleWidth(fmt.Sprintf("batch-probe-%d日", index))
+			if widthCacheEntryCount() >= widthCacheSize {
+				return
+			}
+		}
+	}
+	fillUntilFull()
+	before := widthCacheEntryCount()
+	if before != widthCacheSize {
+		t.Fatalf("cache filled to %d entries, want the cap %d", before, widthCacheSize)
+	}
+	VisibleWidth("batch-probe-overflow-日")
+	after := widthCacheEntryCount()
+	if after > widthCacheSize {
+		t.Fatalf("cache size %d exceeds the cap after a miss", after)
+	}
+	if dropped := before - after; dropped < 2 {
+		t.Fatalf("a full cache dropped %d entries on one miss; want a batch so eviction is amortized", dropped)
+	}
+	// Eviction must not corrupt the memoized widths.
+	if got := VisibleWidth("日本語テスト"); got != 12 {
+		t.Fatalf("width after eviction = %d", got)
 	}
 }

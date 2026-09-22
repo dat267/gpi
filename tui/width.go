@@ -8,6 +8,7 @@ package tui
 import (
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode"
 
 	"golang.org/x/text/width"
@@ -467,9 +468,18 @@ var spacingMarkRanges = [][2]rune{
 // widthCache caches widths for non-ASCII strings.
 const widthCacheSize = 512
 
+// widthCacheEvictBatch is how many entries a full cache drops at once. Evicting
+// (or even counting entries) one at a time meant a full sync.Map range per miss:
+// ~8% of a warm long-transcript frame went into the map iterator.
+const widthCacheEvictBatch = 64
+
 // widthCache memoizes non-ASCII widths. Stage 4 removed its mutex: sync.Map is
 // safe for the read-mostly, concurrent use from rendering and non-UI callers.
 var widthCache sync.Map
+
+// widthCacheEntries approximates the cache size so a miss does not have to
+// count the map; the bound is best-effort under concurrent eviction.
+var widthCacheEntries atomic.Int64
 
 // widthCacheEntryCount counts the memoized entries.
 func widthCacheEntryCount() int {
@@ -479,6 +489,24 @@ func widthCacheEntryCount() int {
 		return true
 	})
 	return count
+}
+
+// widthCacheStore memoizes a width and evicts a batch of arbitrary entries when
+// the cache is over its size.
+func widthCacheStore(text string, width int) {
+	if _, loaded := widthCache.LoadOrStore(text, width); loaded {
+		return
+	}
+	if widthCacheEntries.Add(1) <= widthCacheSize {
+		return
+	}
+	evicted := 0
+	widthCache.Range(func(key, _ any) bool {
+		widthCache.Delete(key)
+		evicted++
+		return evicted < widthCacheEvictBatch
+	})
+	widthCacheEntries.Add(int64(-evicted))
 }
 
 // VisibleWidth returns the width of a string in terminal columns: tabs count
@@ -508,14 +536,7 @@ func VisibleWidth(text string) int {
 		total += graphemeWidth(segment)
 	}
 
-	if widthCacheEntryCount() >= widthCacheSize {
-		// Evict an arbitrary entry (upstream evicts the insertion-oldest).
-		widthCache.Range(func(key, _ any) bool {
-			widthCache.Delete(key)
-			return false
-		})
-	}
-	widthCache.Store(text, total)
+	widthCacheStore(text, total)
 	return total
 }
 
