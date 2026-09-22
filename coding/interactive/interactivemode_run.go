@@ -112,6 +112,12 @@ type RunWiring struct {
 	// transcript materializer uses it to attach deferred chunks between
 	// paints.
 	OnBeat func()
+	// RawInputs carries RAW stdin chunks from a D147 raw-input terminal;
+	// the loop reassembles them through RawTerminal.FeedInput on the loop
+	// goroutine. Nil for sequence-mode terminals (fakes, library use).
+	RawInputs <-chan string
+	// RawTerminal is the raw-input terminal (nil for sequence mode).
+	RawTerminal tui.RawInputTerminal
 	// ShowStatus/ShowError/ShowWarning report messages.
 	ShowStatus  func(message string)
 	ShowError   func(message string)
@@ -533,6 +539,21 @@ func (w *RunWiring) renderUI() {
 // armed, equal-or-earlier deadline is left alone, so a busy event stream cannot
 // starve the animation.
 func (w *RunWiring) armAnimation(timer *time.Timer, deadline *time.Time) <-chan time.Time {
+	// The input flush deadline (a lone ESC, an incomplete sequence, a split
+	// keyboard-protocol response) shares the loop timer: waking for it is
+	// handled in the fire path via flushExpiredInput.
+	if w.RawTerminal != nil {
+		if flushDeadline, ok := w.RawTerminal.NextInputFlushDeadline(); ok {
+			if delay := time.Until(flushDeadline); delay <= 0 {
+				// Already expired: flush on this beat, before painting.
+				w.flushExpiredInput()
+			} else if deadline.IsZero() || flushDeadline.Before(*deadline) {
+				timer.Reset(delay)
+				*deadline = flushDeadline
+				return timer.C
+			}
+		}
+	}
 	if w.UI == nil {
 		return nil
 	}
@@ -554,6 +575,17 @@ func (w *RunWiring) armAnimation(timer *time.Timer, deadline *time.Time) <-chan 
 	timer.Reset(delay)
 	*deadline = next
 	return timer.C
+}
+
+// flushExpiredInput dispatches sequences whose input deadlines have expired
+// (a lone ESC, an incomplete sequence, a split keyboard-protocol response).
+func (w *RunWiring) flushExpiredInput() {
+	if w.RawTerminal == nil || w.UI == nil {
+		return
+	}
+	for _, sequence := range w.RawTerminal.FlushPendingInput() {
+		w.UI.HandleTerminalInput(sequence)
+	}
 }
 
 // LoopBeats reports the loop's iteration count (watchdog beat).
@@ -685,6 +717,20 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 			if w.OnPartialEventApplied != nil {
 				w.OnPartialEventApplied()
 			}
+		case raw, ok := <-w.RawInputs:
+			if !ok {
+				w.RawInputs = nil
+				continue
+			}
+			// Raw input is latency-sensitive: reassemble, dispatch every
+			// complete sequence, then paint once.
+			if w.RawTerminal != nil && w.UI != nil {
+				for _, sequence := range w.RawTerminal.FeedInput([]byte(raw)) {
+					w.UI.HandleTerminalInput(sequence)
+				}
+			}
+			w.drainReadyEvents()
+			w.renderUI()
 		case data, ok := <-w.InputEvents:
 			if !ok {
 				w.InputEvents = nil
@@ -712,6 +758,7 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 			}
 		case <-animationCh:
 			animationDeadline = time.Time{}
+			w.flushExpiredInput()
 			w.renderUI()
 		case <-w.renderTicks():
 			// Coalesce: apply every event already queued, then paint once, so

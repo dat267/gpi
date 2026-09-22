@@ -100,25 +100,40 @@ func TestStdinBufferPartialSequences(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 
-	// Incomplete sequences flush after the timeout.
+	// Incomplete sequences flush after the timeout: the consumer checks
+	// PendingTimeout and calls FlushExpired once it passes (D147 — no
+	// internal timer).
 	buffer.Clear()
 	resetEmitted()
 	buffer.ProcessString("\x1b[12")
-	time.Sleep(30 * time.Millisecond)
-	if got := emitted(); strings.Join(got, "") != "\x1b[12" {
+	deadline, ok := buffer.PendingTimeout()
+	if !ok {
+		t.Fatal("no flush deadline for an incomplete sequence")
+	}
+	if got := buffer.FlushExpired(deadline.Add(-time.Millisecond)); len(got) != 0 {
+		t.Fatalf("flushed before the deadline: %q", got)
+	}
+	if got := buffer.FlushExpired(deadline); strings.Join(got, "") != "\x1b[12" {
 		t.Fatalf("got %q", got)
 	}
 }
 
 func TestStdinBufferLoneEscape(t *testing.T) {
-	// A lone ESC waits for the escape timeout, not the sequence timeout.
+	// A lone ESC waits for the escape timeout, not the sequence timeout: the
+	// pending deadline uses EscapeTimeout, and FlushExpired honors it (D147).
 	buffer, emitted, resetEmitted := collectBuffer(StdinBufferOptions{Timeout: 200, EscapeTimeout: 10})
 	buffer.ProcessString("\x1b")
 	if got := emitted(); len(got) != 0 {
 		t.Fatalf("emitted early: %q", got)
 	}
-	time.Sleep(30 * time.Millisecond)
-	if got := emitted(); strings.Join(got, "") != "\x1b" {
+	deadline, ok := buffer.PendingTimeout()
+	if !ok {
+		t.Fatal("no flush deadline for a lone ESC")
+	}
+	if got := buffer.FlushExpired(deadline.Add(-time.Millisecond)); len(got) != 0 {
+		t.Fatalf("flushed before the deadline: %q", got)
+	}
+	if got := buffer.FlushExpired(deadline); strings.Join(got, "") != "\x1b" {
 		t.Fatalf("got %q", got)
 	}
 
@@ -130,14 +145,19 @@ func TestStdinBufferLoneEscape(t *testing.T) {
 		t.Fatalf("flush = %q", flushed)
 	}
 
-	// ESC + CR split across chunks within the escape timeout merges into a
-	// meta sequence.
+	// ESC + CR split across chunks with the deadline passed first: the ESC
+	// flushes as its own sequence, then the CR arrives separately.
 	buffer.Clear()
 	resetEmitted()
 	buffer.ProcessString("\x1b")
-	time.Sleep(25 * time.Millisecond) // > escape timeout
+	deadline, _ = buffer.PendingTimeout()
+	if flushed := buffer.FlushExpired(deadline); strings.Join(flushed, "") != "\x1b" {
+		t.Fatalf("flush = %q", flushed)
+	}
+	// The flushed sequence is returned to the consumer (dispatched by it), so
+	// only the later CR passes through OnData.
 	buffer.ProcessString("\r")
-	if got := emitted(); strings.Join(got, "|") != "\x1b|\r" {
+	if got := emitted(); strings.Join(got, "|") != "\r" {
 		t.Fatalf("got %q", got)
 	}
 }

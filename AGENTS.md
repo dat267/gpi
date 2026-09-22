@@ -235,10 +235,10 @@ Stage 4 result: **20 of the original 30 locks are retired** (input handoff,
 model/scoped/session selectors, footer cache, lifecycle flags, edit preview,
 theme registry + three seams, loader, flash container, kitty globals,
 keybindings manager + global registry, width cache, DrainInput tracking). The
-remaining 8 are the D-rowed exceptions above (D146 timer mode, D147 terminal
-and decoder); the interactive app itself runs
-lock-free — `grep 'sync.Mutex' tui/ coding/interactive/` outside tests returns
-only those documented locks.
+remaining exceptions are the D146 timer-mode locks (until D146 lands) plus
+the D147 `writeMu` and the D149 `FooterDataProvider.mu`; the interactive app
+itself runs lock-free — `grep 'sync.Mutex' tui/ coding/interactive/` outside
+tests returns only those documented locks.
 - **Go 1.27 quirk.** Function literals passed as arguments need an explicit
   result type when the parameter's function type has one.
 - **RE2 regex** (no lookaround/backreferences). Put `-` first in a character
@@ -303,12 +303,16 @@ summarized in the README scoreboard. The range is **D1–D139**. Representative:
   loop mode (`EnableRenderTicks`), where the loop is the only renderer and the
   only mutator, so those locks are always uncontended there; `renderMu` is
   taken only when `!loopMode()`.
-- D147 — terminal and decoder locks are kept: `ProcessTerminal.mu` guards raw
-  mode, the Kitty/modifyOtherKeys negotiation state and write bookkeeping that
-  the stdin reader goroutine shares with loop-side writers, and
-  `StdinBuffer.mu` guards the decoder's escape/sequence timeout timer. Neither
-  touches UI state; removing them would rework the decoder's timer into the
-  reader and hand terminal negotiation state to the loop.
+- D147 — **retired** (the decoder lock and the terminal's UI-state mutex are
+  gone): `StdinBuffer` is owned by the input consumer — the interactive UI
+  loop feeds raw stdin chunks through `ProcessTerminal.FeedInput` and drives
+  force-flushes via `PendingTimeout`/`FlushExpired` (no mutex, no internal
+  timer); the keyboard-protocol negotiation state is loop-owned too. The one
+  retained lock is `ProcessTerminal.writeMu`: pure write serialization between
+  the OSC 9;4 progress keepalive goroutine, loop-side writers, and the
+  shutdown path's raw-mode restore — I/O serialization, not UI state. The
+  legacy (non-raw) reader path remains for library consumers whose Terminal
+  is not driven by a UI loop.
 - D148 — **closed**: the model-catalog refresh registry is lock-free (atomic
   copy-on-write map with insert-if-absent/unpublish-if-matching, atomic per
   refresh outcome, waiter count and canceled flag). Two races were fixed on the

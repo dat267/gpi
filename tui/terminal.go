@@ -123,31 +123,55 @@ func ResolveEscapeTimeoutMs(env func(string) string) int {
 	return defaultEscapeTimeoutMSValue
 }
 
-// ProcessTerminal is the Terminal implementation over os.Stdin/os.Stdout.
-type ProcessTerminal struct {
-	mu sync.Mutex
+// inputHandlerFunc wraps the input handler for the atomic pointer.
+type inputHandlerFunc func(data string)
 
+// RawInputTerminal is implemented by terminals that support the D147
+// raw-input mode: the consumer (the UI loop) feeds raw stdin chunks through
+// FeedInput and drives force-flushes via the deadline accessors, instead of
+// the terminal reassembling sequences on its own reader goroutine.
+type RawInputTerminal interface {
+	Terminal
+	// EnableRawInput switches the terminal to raw-input mode (before Start).
+	EnableRawInput()
+	// FeedInput feeds raw stdin bytes and returns complete, negotiation-
+	// filtered sequences ready to dispatch.
+	FeedInput(raw []byte) []string
+	// NextInputFlushDeadline reports when an incomplete sequence or a
+	// buffered keyboard-protocol response must be force-flushed.
+	NextInputFlushDeadline() (time.Time, bool)
+	// FlushPendingInput flushes expired deadlines and returns the sequences.
+	FlushPendingInput() []string
+}
+
+// ProcessTerminal is the Terminal implementation over os.Stdin/os.Stdout.
+//
+// D147: the interactive consumer (the UI loop) owns input — it feeds raw
+// bytes through FeedInput and drives flushing via NextInputFlushDeadline /
+// FlushPendingInput, so the stdin buffer and the keyboard-protocol
+// negotiation state are loop-owned and lock-free. The protocol flags are
+// atomics. The one retained lock is writeMu: it serializes terminal writes
+// and raw-mode transitions between the progress keepalive goroutine, the
+// loop, and the shutdown path — pure I/O serialization, no UI state.
+type ProcessTerminal struct {
 	stdin  *os.File
 	stdout *os.File
 
+	writeMu                           sync.Mutex
 	wasRaw                            *term.State
-	inputHandler                      func(data string)
-	resizeHandler                     func()
-	kittyProtocolActive               bool
-	modifyOtherKeysActive             bool
-	keyboardProtocolPushed            bool
+	inputHandler                      atomic.Pointer[inputHandlerFunc]
+	lastInputAt                       atomic.Int64
+	kittyProtocolActive               atomic.Bool
+	modifyOtherKeysActive             atomic.Bool
+	keyboardProtocolPushed            atomic.Bool
+	closed                            atomic.Bool
+	useRawInput                       bool
 	keyboardProtocolNegotiationBuffer string
-	keyboardProtocolBufferFlushTimer  *time.Timer
+	negotiationDeadline               time.Time
 	stdinBuffer                       *StdinBuffer
-	// lastInputAt is the unix-nano time of the last delivered sequence. The
-	// stdin reader stamps it (no lock: it is a single atomic), and DrainInput
-	// reads it instead of swapping the buffer's OnData callback from another
-	// goroutine (stage 3).
-	lastInputAt      atomic.Int64
-	progressInterval *time.Ticker
-	progressDone     chan struct{}
-	writeLogPath     string
-	closed           bool
+	progressInterval                  *time.Ticker
+	progressDone                      chan struct{}
+	writeLogPath                      string
 }
 
 // NewProcessTerminal creates a terminal over the given files (os.Stdin and
@@ -177,78 +201,108 @@ func resolveWriteLogPath() string {
 
 // KittyProtocolActive reports whether the Kitty keyboard protocol is active.
 func (t *ProcessTerminal) KittyProtocolActive() bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.kittyProtocolActive
+	return t.kittyProtocolActive.Load()
 }
 
 // ModifyOtherKeysActive reports whether the modifyOtherKeys fallback is active.
 func (t *ProcessTerminal) ModifyOtherKeysActive() bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.modifyOtherKeysActive
+	return t.modifyOtherKeysActive.Load()
+}
+
+// EnableRawInput switches the terminal to raw-input mode: Start spawns a
+// reader that forwards RAW stdin chunks to the input handler (the consumer —
+// the UI loop — feeds them through FeedInput), instead of reassembling
+// sequences on a reader goroutine. Call before Start.
+func (t *ProcessTerminal) EnableRawInput() {
+	t.useRawInput = true
 }
 
 // Start enables raw mode, bracketed paste, and the keyboard protocol query.
 func (t *ProcessTerminal) Start(onInput func(data string), onResize func()) {
-	t.mu.Lock()
-	t.inputHandler = onInput
-	t.resizeHandler = onResize
+	t.setInputHandler(onInput)
 
 	// Save previous state and enable raw mode.
+	t.writeMu.Lock()
 	if state, err := term.MakeRaw(int(t.stdin.Fd())); err == nil {
 		t.wasRaw = state
 	}
-
 	// Enable bracketed paste mode: the terminal wraps pastes in
 	// \x1b[200~ ... \x1b[201~.
 	t.writeLocked("\x1b[?2004h")
+	t.writeMu.Unlock()
 
 	// Set up the resize handler immediately.
-	if t.resizeHandler != nil {
-		startResizeWatcher(t.resizeHandler)
+	if onResize != nil {
+		startResizeWatcher(onResize)
 	}
 
 	// Refresh terminal dimensions: they may be stale after suspend/resume
 	// (SIGWINCH is lost while the process is stopped).
 	RefreshTerminalDimensions()
-	t.mu.Unlock()
+
+	if t.useRawInput {
+		// The reader forwards raw chunks to the input handler (the UI loop);
+		// the loop reassembles them through FeedInput on the loop goroutine.
+		t.stdinBuffer = NewStdinBuffer(StdinBufferOptions{EscapeTimeout: ResolveEscapeTimeoutMs(os.Getenv)})
+		go t.readRawStdin()
+	} else {
+		// Legacy (library) mode: reassemble sequences on the reader goroutine.
+		t.setupLegacyStdinBuffer()
+	}
 
 	// Query Kitty keyboard protocol; fall back to modifyOtherKeys when the DA
 	// sentinel confirms no Kitty response.
 	t.queryAndEnableKittyProtocol()
 }
 
-// setupStdinBuffer reads stdin and forwards complete sequences.
-func (t *ProcessTerminal) setupStdinBufferLocked() {
+// readRawStdin reads stdin and forwards raw chunks to the input handler
+// until the terminal closes. The handler decides where the bytes go (the UI
+// loop posts them to its input channel); muting is done by swapping the
+// handler to nil (DrainInput).
+func (t *ProcessTerminal) readRawStdin() {
+	buf := make([]byte, 4096)
+	for {
+		n, err := t.stdin.Read(buf)
+		if t.closed.Load() {
+			return
+		}
+		if n > 0 {
+			t.lastInputAt.Store(time.Now().UnixNano())
+			if handler := t.loadInputHandler(); handler != nil {
+				data := make([]byte, n)
+				copy(data, buf[:n])
+				handler(string(data))
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// setupLegacyStdinBuffer reads stdin and forwards complete sequences (the
+// pre-D147 path, kept for library consumers whose Terminal is not driven by
+// a UI loop).
+func (t *ProcessTerminal) setupLegacyStdinBuffer() {
 	t.stdinBuffer = NewStdinBuffer(StdinBufferOptions{EscapeTimeout: ResolveEscapeTimeoutMs(os.Getenv)})
 	t.stdinBuffer.OnData = func(sequence string) {
 		t.lastInputAt.Store(time.Now().UnixNano())
-		t.mu.Lock()
-		negotiationSequence, pendingInput := t.readKeyboardProtocolNegotiationSequenceLocked(sequence)
+		negotiationSequence, pendingInput := t.readKeyboardProtocolNegotiationSequence(sequence)
 		if negotiationSequence.kind == "pending" {
-			t.scheduleKeyboardProtocolNegotiationBufferFlushLocked()
-			t.mu.Unlock()
+			t.negotiationDeadline = time.Now().Add(keyboardProtocolResponseFragmentTimeoutMS * time.Millisecond)
 			return // Wait briefly for the rest of a split Kitty response.
 		}
-		handled := t.handleKeyboardProtocolNegotiationSequenceLocked(negotiationSequence)
-		handler := t.inputHandler
-		t.mu.Unlock()
+		handled := t.handleKeyboardProtocolNegotiationSequence(negotiationSequence)
+		handler := t.loadInputHandler()
 		if handled {
 			return
 		}
-		// Deliver outside the terminal lock: the handler (the renderer) may
-		// write to the terminal, and the render path holds the alt-screen lock
-		// while writing, so holding t.mu here would invert the lock order (D138).
 		deliverInput(handler, pendingInput)
 		deliverInput(handler, sequence)
 	}
 	// Re-wrap paste content with bracketed paste markers for the editor.
 	t.stdinBuffer.OnPaste = func(content string) {
-		t.mu.Lock()
-		handler := t.inputHandler
-		t.mu.Unlock()
-		if handler != nil {
+		if handler := t.loadInputHandler(); handler != nil {
 			handler("\x1b[200~" + content + "\x1b[201~")
 		}
 	}
@@ -258,15 +312,11 @@ func (t *ProcessTerminal) setupStdinBufferLocked() {
 		buf := make([]byte, 4096)
 		for {
 			n, err := t.stdin.Read(buf)
+			if t.closed.Load() {
+				return
+			}
 			if n > 0 {
-				t.mu.Lock()
-				buffer := t.stdinBuffer
-				closed := t.closed
-				t.mu.Unlock()
-				if closed {
-					return
-				}
-				if buffer != nil {
+				if buffer := t.stdinBuffer; buffer != nil {
 					data := make([]byte, n)
 					copy(data, buf[:n])
 					buffer.Process(data)
@@ -279,6 +329,83 @@ func (t *ProcessTerminal) setupStdinBufferLocked() {
 	}()
 }
 
+// FeedInput feeds raw stdin bytes through the input buffer on the consumer
+// goroutine and returns the complete, negotiation-filtered sequences ready
+// to dispatch. Split keyboard-protocol responses are buffered internally
+// until FlushPendingInput expires them.
+func (t *ProcessTerminal) FeedInput(raw []byte) []string {
+	if t.closed.Load() {
+		return nil
+	}
+	var sequences []string
+	buffer := t.stdinBuffer
+	if buffer == nil {
+		return nil
+	}
+	buffer.OnData = func(sequence string) {
+		sequences = t.filterInputSequence(sequences, sequence)
+	}
+	buffer.OnPaste = func(content string) {
+		sequences = append(sequences, "\x1b[200~"+content+"\x1b[201~")
+	}
+	buffer.Process(raw)
+	return sequences
+}
+
+// NextInputFlushDeadline reports when an incomplete sequence or a buffered
+// keyboard-protocol response must be force-flushed, and whether one is
+// pending. The consumer arms its timer on it.
+func (t *ProcessTerminal) NextInputFlushDeadline() (time.Time, bool) {
+	deadline, ok := t.stdinBuffer.PendingTimeout()
+	if !ok && !t.negotiationDeadline.IsZero() {
+		deadline, ok = t.negotiationDeadline, true
+	}
+	if !ok {
+		return time.Time{}, false
+	}
+	if !t.negotiationDeadline.IsZero() && t.negotiationDeadline.Before(deadline) {
+		deadline = t.negotiationDeadline
+	}
+	return deadline, true
+}
+
+// FlushPendingInput flushes expired input deadlines (a lone ESC, an
+// incomplete sequence, a split keyboard-protocol response) and returns the
+// sequences ready to dispatch.
+func (t *ProcessTerminal) FlushPendingInput() []string {
+	now := time.Now()
+	var sequences []string
+	if !t.negotiationDeadline.IsZero() && !now.Before(t.negotiationDeadline) {
+		t.negotiationDeadline = time.Time{}
+		if buffered := t.takeKeyboardProtocolNegotiationBuffer(); buffered != "" {
+			sequences = append(sequences, buffered)
+		}
+	}
+	for _, sequence := range t.stdinBuffer.FlushExpired(now) {
+		sequences = t.filterInputSequence(sequences, sequence)
+	}
+	return sequences
+}
+
+// filterInputSequence runs the keyboard-protocol negotiation filter for one
+// complete sequence (loop-owned; no locking).
+func (t *ProcessTerminal) filterInputSequence(sequences []string, sequence string) []string {
+	negotiationSequence, pendingInput := t.readKeyboardProtocolNegotiationSequence(sequence)
+	if negotiationSequence.kind == "pending" {
+		// Wait briefly for the rest of a split Kitty response.
+		t.negotiationDeadline = time.Now().Add(keyboardProtocolResponseFragmentTimeoutMS * time.Millisecond)
+		return sequences
+	}
+	handled := t.handleKeyboardProtocolNegotiationSequence(negotiationSequence)
+	if pendingInput != "" {
+		sequences = append(sequences, pendingInput)
+	}
+	if !handled && sequence != "" {
+		sequences = append(sequences, sequence)
+	}
+	return sequences
+}
+
 // queryAndEnableKittyProtocol queries the terminal for Kitty keyboard
 // protocol support and enables it when available.
 //
@@ -289,35 +416,34 @@ func (t *ProcessTerminal) setupStdinBufferLocked() {
 // startup timeout. Requested flags: 1 = disambiguate escape codes, 2 = report
 // event types, 4 = report alternate keys.
 func (t *ProcessTerminal) queryAndEnableKittyProtocol() {
-	t.mu.Lock()
-	t.setupStdinBufferLocked()
-	t.keyboardProtocolPushed = true
-	t.clearKeyboardProtocolNegotiationBufferLocked()
+	t.writeMu.Lock()
+	t.keyboardProtocolPushed.Store(true)
+	t.clearKeyboardProtocolNegotiationBuffer()
 	t.writeLocked(kittyKeyboardProtocolQuery)
-	t.mu.Unlock()
+	t.writeMu.Unlock()
 }
 
-func (t *ProcessTerminal) handleKeyboardProtocolNegotiationSequenceLocked(negotiationSequence negotiationResult) bool {
+func (t *ProcessTerminal) handleKeyboardProtocolNegotiationSequence(negotiationSequence negotiationResult) bool {
 	if negotiationSequence.kind == "none" || negotiationSequence.kind == "pending" {
 		return false
 	}
 	parsed := negotiationSequence.parsed
-	t.clearKeyboardProtocolNegotiationBufferLocked()
+	t.clearKeyboardProtocolNegotiationBuffer()
 	if parsed.Kind == NegotiationKittyFlags {
 		if parsed.Flags != 0 {
-			t.disableModifyOtherKeysLocked()
-			if !t.kittyProtocolActive {
-				t.kittyProtocolActive = true
+			t.disableModifyOtherKeys()
+			if !t.kittyProtocolActive.Load() {
+				t.kittyProtocolActive.Store(true)
 				SetKittyProtocolActive(true)
 			}
 		} else {
-			t.enableModifyOtherKeysLocked()
+			t.enableModifyOtherKeys()
 		}
 		return true
 	}
 
-	if !t.kittyProtocolActive {
-		t.enableModifyOtherKeysLocked()
+	if !t.kittyProtocolActive.Load() {
+		t.enableModifyOtherKeys()
 	}
 	return true
 }
@@ -329,23 +455,23 @@ type negotiationResult struct {
 
 var negotiationPending = negotiationResult{kind: "pending"}
 
-func (t *ProcessTerminal) readKeyboardProtocolNegotiationSequenceLocked(sequence string) (negotiationResult, string) {
+func (t *ProcessTerminal) readKeyboardProtocolNegotiationSequence(sequence string) (negotiationResult, string) {
 	if t.keyboardProtocolNegotiationBuffer != "" {
 		bufferedSequence := t.keyboardProtocolNegotiationBuffer + sequence
 		if parsed := ParseKeyboardProtocolNegotiationSequence(bufferedSequence); parsed != nil {
-			t.clearKeyboardProtocolNegotiationBufferLocked()
+			t.clearKeyboardProtocolNegotiationBuffer()
 			return negotiationResult{kind: "sequence", parsed: parsed}, ""
 		}
 		if isKeyboardProtocolNegotiationSequencePrefix(bufferedSequence) {
-			t.setKeyboardProtocolNegotiationBufferLocked(bufferedSequence)
+			t.keyboardProtocolNegotiationBuffer = bufferedSequence
 			return negotiationPending, ""
 		}
-		pending := t.takeKeyboardProtocolNegotiationBufferLocked()
+		pending := t.takeKeyboardProtocolNegotiationBuffer()
 		if parsed := ParseKeyboardProtocolNegotiationSequence(sequence); parsed != nil {
 			return negotiationResult{kind: "sequence", parsed: parsed}, pending
 		}
 		if isKeyboardProtocolNegotiationSequencePrefix(sequence) {
-			t.setKeyboardProtocolNegotiationBufferLocked(sequence)
+			t.keyboardProtocolNegotiationBuffer = sequence
 			return negotiationPending, pending
 		}
 		return negotiationResult{kind: "none"}, pending
@@ -355,58 +481,24 @@ func (t *ProcessTerminal) readKeyboardProtocolNegotiationSequenceLocked(sequence
 		return negotiationResult{kind: "sequence", parsed: parsed}, ""
 	}
 	if isKeyboardProtocolNegotiationSequencePrefix(sequence) {
-		t.setKeyboardProtocolNegotiationBufferLocked(sequence)
+		t.keyboardProtocolNegotiationBuffer = sequence
 		return negotiationPending, ""
 	}
 	return negotiationResult{kind: "none"}, ""
 }
 
-func (t *ProcessTerminal) setKeyboardProtocolNegotiationBufferLocked(sequence string) {
-	t.clearKeyboardProtocolNegotiationBufferFlushTimerLocked()
-	t.keyboardProtocolNegotiationBuffer = sequence
-}
-
-func (t *ProcessTerminal) clearKeyboardProtocolNegotiationBufferLocked() {
-	t.clearKeyboardProtocolNegotiationBufferFlushTimerLocked()
+func (t *ProcessTerminal) clearKeyboardProtocolNegotiationBuffer() {
 	t.keyboardProtocolNegotiationBuffer = ""
+	t.negotiationDeadline = time.Time{}
 }
 
-func (t *ProcessTerminal) takeKeyboardProtocolNegotiationBufferLocked() string {
+func (t *ProcessTerminal) takeKeyboardProtocolNegotiationBuffer() string {
 	if t.keyboardProtocolNegotiationBuffer == "" {
 		return ""
 	}
 	sequence := t.keyboardProtocolNegotiationBuffer
-	t.clearKeyboardProtocolNegotiationBufferLocked()
+	t.clearKeyboardProtocolNegotiationBuffer()
 	return sequence
-}
-
-func (t *ProcessTerminal) scheduleKeyboardProtocolNegotiationBufferFlushLocked() {
-	if t.keyboardProtocolNegotiationBuffer == "" || t.keyboardProtocolBufferFlushTimer != nil {
-		return
-	}
-	t.keyboardProtocolBufferFlushTimer = time.AfterFunc(keyboardProtocolResponseFragmentTimeoutMS*time.Millisecond, func() {
-		t.mu.Lock()
-		t.keyboardProtocolBufferFlushTimer = nil
-		sequence := t.takeKeyboardProtocolNegotiationBufferLocked()
-		handler := t.inputHandler
-		t.mu.Unlock()
-		deliverInput(handler, sequence)
-	})
-}
-
-func (t *ProcessTerminal) clearKeyboardProtocolNegotiationBufferFlushTimerLocked() {
-	if t.keyboardProtocolBufferFlushTimer == nil {
-		return
-	}
-	t.keyboardProtocolBufferFlushTimer.Stop()
-	t.keyboardProtocolBufferFlushTimer = nil
-}
-
-func (t *ProcessTerminal) forwardInputSequence(sequence string) {
-	t.mu.Lock()
-	handler := t.inputHandler
-	t.mu.Unlock()
-	deliverInput(handler, sequence)
 }
 
 // deliverInput normalizes a sequence and hands it to the input handler without
@@ -421,20 +513,24 @@ func deliverInput(handler func(string), sequence string) {
 	handler(input)
 }
 
-func (t *ProcessTerminal) enableModifyOtherKeysLocked() {
-	if t.kittyProtocolActive || t.modifyOtherKeysActive {
+func (t *ProcessTerminal) enableModifyOtherKeys() {
+	if t.kittyProtocolActive.Load() || t.modifyOtherKeysActive.Load() {
 		return
 	}
+	t.writeMu.Lock()
 	t.writeLocked("\x1b[>4;2m")
-	t.modifyOtherKeysActive = true
+	t.writeMu.Unlock()
+	t.modifyOtherKeysActive.Store(true)
 }
 
-func (t *ProcessTerminal) disableModifyOtherKeysLocked() {
-	if !t.modifyOtherKeysActive {
+func (t *ProcessTerminal) disableModifyOtherKeys() {
+	if !t.modifyOtherKeysActive.Load() {
 		return
 	}
+	t.writeMu.Lock()
 	t.writeLocked("\x1b[>4;0m")
-	t.modifyOtherKeysActive = false
+	t.writeMu.Unlock()
+	t.modifyOtherKeysActive.Store(false)
 }
 
 // DrainInput drains stdin before exiting to prevent Kitty key release events
@@ -446,19 +542,18 @@ func (t *ProcessTerminal) DrainInput(maxMs int, idleMs int) error {
 	if idleMs == 0 {
 		idleMs = 50
 	}
-	t.mu.Lock()
-	shouldDisableKittyProtocol := t.keyboardProtocolPushed || t.kittyProtocolActive
-	t.clearKeyboardProtocolNegotiationBufferLocked()
+	shouldDisableKittyProtocol := t.keyboardProtocolPushed.Load() || t.kittyProtocolActive.Load()
 	if shouldDisableKittyProtocol {
 		// Disable the Kitty keyboard protocol first so any late key releases
 		// do not generate new Kitty escape sequences.
+		t.writeMu.Lock()
 		t.writeLocked("\x1b[<u")
-		t.keyboardProtocolPushed = false
-		t.kittyProtocolActive = false
+		t.writeMu.Unlock()
+		t.keyboardProtocolPushed.Store(false)
+		t.kittyProtocolActive.Store(false)
 		SetKittyProtocolActive(false)
 	}
-	t.disableModifyOtherKeysLocked()
-	t.mu.Unlock()
+	t.disableModifyOtherKeys()
 
 	previousHandler := t.swapInputHandler(nil)
 	defer t.swapInputHandlerRestore(previousHandler)
@@ -481,24 +576,36 @@ func (t *ProcessTerminal) DrainInput(maxMs int, idleMs int) error {
 	return nil
 }
 
+func (t *ProcessTerminal) setInputHandler(handler func(string)) {
+	if handler == nil {
+		t.inputHandler.Store(nil)
+		return
+	}
+	wrapped := inputHandlerFunc(handler)
+	t.inputHandler.Store(&wrapped)
+}
+
+func (t *ProcessTerminal) loadInputHandler() func(string) {
+	if wrapped := t.inputHandler.Load(); wrapped != nil {
+		return *wrapped
+	}
+	return nil
+}
+
 func (t *ProcessTerminal) swapInputHandler(handler func(string)) func(string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	previous := t.inputHandler
-	t.inputHandler = handler
+	previous := t.loadInputHandler()
+	t.setInputHandler(handler)
 	return previous
 }
 
 func (t *ProcessTerminal) swapInputHandlerRestore(previous func(string)) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.inputHandler = previous
+	t.setInputHandler(previous)
 }
 
 // Stop restores the terminal state.
 func (t *ProcessTerminal) Stop() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
 
 	if t.clearProgressIntervalLocked() {
 		t.writeLocked(terminalProgressClearSequence)
@@ -507,32 +614,36 @@ func (t *ProcessTerminal) Stop() {
 	// Disable bracketed paste mode.
 	t.writeLocked("\x1b[?2004l")
 
-	shouldDisableKittyProtocol := t.keyboardProtocolPushed || t.kittyProtocolActive
-	t.clearKeyboardProtocolNegotiationBufferLocked()
+	shouldDisableKittyProtocol := t.keyboardProtocolPushed.Load() || t.kittyProtocolActive.Load()
 
 	// Disable the Kitty keyboard protocol if not already done by DrainInput.
 	if shouldDisableKittyProtocol {
 		t.writeLocked("\x1b[<u")
-		t.keyboardProtocolPushed = false
-		t.kittyProtocolActive = false
+		t.keyboardProtocolPushed.Store(false)
+		t.kittyProtocolActive.Store(false)
 		SetKittyProtocolActive(false)
 	}
 	t.disableModifyOtherKeysLocked()
 
-	t.closed = true
-	if t.stdinBuffer != nil {
-		t.stdinBuffer.Destroy()
-		t.stdinBuffer = nil
-	}
-	t.inputHandler = nil
-	t.resizeHandler = nil
+	t.closed.Store(true)
+	t.setInputHandler(nil)
 	stopResizeWatcher()
 
-	// Restore raw mode state.
+	// Restore raw mode state. The stdin buffer and the negotiation state are
+	// owned by the input consumer (the loop) and are left alone here: the
+	// closed flag stops all further input processing.
 	if t.wasRaw != nil {
 		_ = term.Restore(int(t.stdin.Fd()), t.wasRaw)
 		t.wasRaw = nil
 	}
+}
+
+func (t *ProcessTerminal) disableModifyOtherKeysLocked() {
+	if !t.modifyOtherKeysActive.Load() {
+		return
+	}
+	t.writeLocked("\x1b[>4;0m")
+	t.modifyOtherKeysActive.Store(false)
 }
 
 func (t *ProcessTerminal) writeLocked(data string) {
@@ -548,8 +659,8 @@ func (t *ProcessTerminal) writeLocked(data string) {
 
 // Write writes output to the terminal.
 func (t *ProcessTerminal) Write(data string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
 	t.writeLocked(data)
 }
 
@@ -577,8 +688,8 @@ func (t *ProcessTerminal) Rows() int {
 
 // MoveBy moves the cursor up (negative) or down (positive) by N lines.
 func (t *ProcessTerminal) MoveBy(lines int) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
 	if lines > 0 {
 		t.writeLocked("\x1b[" + strconv.Itoa(lines) + "B")
 	} else if lines < 0 {
@@ -588,51 +699,51 @@ func (t *ProcessTerminal) MoveBy(lines int) {
 
 // HideCursor hides the cursor.
 func (t *ProcessTerminal) HideCursor() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
 	t.writeLocked("\x1b[?25l")
 }
 
 // ShowCursor shows the cursor.
 func (t *ProcessTerminal) ShowCursor() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
 	t.writeLocked("\x1b[?25h")
 }
 
 // ClearLine clears the current line.
 func (t *ProcessTerminal) ClearLine() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
 	t.writeLocked("\x1b[K")
 }
 
 // ClearFromCursor clears from the cursor to the end of the screen.
 func (t *ProcessTerminal) ClearFromCursor() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
 	t.writeLocked("\x1b[J")
 }
 
 // ClearScreen clears the entire screen and moves to (0,0).
 func (t *ProcessTerminal) ClearScreen() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
 	t.writeLocked("\x1b[2J\x1b[H")
 }
 
 // SetTitle sets the terminal window title (OSC 0;title BEL).
 func (t *ProcessTerminal) SetTitle(title string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
 	t.writeLocked("\x1b]0;" + title + "\x07")
 }
 
 // SetProgress drives the OSC 9;4 progress indicator; active shows an
 // indeterminate progress with a keepalive.
 func (t *ProcessTerminal) SetProgress(active bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
 	if active {
 		t.writeLocked(terminalProgressActiveSequence)
 		if t.progressInterval == nil {
@@ -644,9 +755,9 @@ func (t *ProcessTerminal) SetProgress(active bool) {
 					case <-done:
 						return
 					case <-ticker.C:
-						t.mu.Lock()
+						t.writeMu.Lock()
 						t.writeLocked(terminalProgressActiveSequence)
-						t.mu.Unlock()
+						t.writeMu.Unlock()
 					}
 				}
 			}(t.progressInterval, t.progressDone)

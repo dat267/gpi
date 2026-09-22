@@ -2,7 +2,6 @@ package tui
 
 import (
 	"regexp"
-	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -215,29 +214,24 @@ func parseUnmodifiedKittyPrintableCodepoint(sequence string) (int, bool) {
 
 // StdinBuffer buffers stdin input and emits complete sequences. Upstream
 // extends EventEmitter; Go takes callbacks (divergence D51).
+//
+// D147: the buffer is owned by the terminal's input consumer (the UI loop in
+// interactive mode), which drives flushing through the deadline accessors —
+// no mutex and no internal timer. PendingTimeout reports when an incomplete
+// sequence must be force-flushed; FlushExpired flushes it once the deadline
+// has passed.
 type StdinBuffer struct {
 	OnData  func(sequence string)
 	OnPaste func(content string)
 
-	mu                             sync.Mutex
-	buffer                         string
-	timeout                        *time.Timer
-	timeoutMS                      int
-	escapeTimeoutMS                int
-	pasteMode                      bool
-	pasteBuffer                    string
-	pendingKittyPrintableCodepoint int
-	hasPendingCodepoint            bool
-	// emissions collects the sequences produced while the lock is held so the
-	// callbacks run outside it (D139): the handler can trigger a shutdown that
-	// calls Destroy, which re-locks mu.
-	emissions []stdinEmission
-}
-
-// stdinEmission is one buffered callback invocation.
-type stdinEmission struct {
-	sequence string
-	paste    bool
+	buffer              string
+	pendingDeadline     time.Time
+	timeoutMS           int
+	escapeTimeoutMS     int
+	pasteMode           bool
+	pasteBuffer         string
+	pendingCodepoint    int
+	hasPendingCodepoint bool
 }
 
 // StdinBufferOptions configures a StdinBuffer.
@@ -266,53 +260,15 @@ func NewStdinBuffer(options StdinBufferOptions) *StdinBuffer {
 
 // Process feeds input data through the buffer.
 func (b *StdinBuffer) Process(data []byte) {
-	b.mu.Lock()
-	b.processLocked(string(data))
-	emissions := b.drainEmissionsLocked()
-	b.mu.Unlock()
-	b.deliver(emissions)
+	b.ProcessString(string(data))
 }
 
 // ProcessString feeds string input through the buffer.
 func (b *StdinBuffer) ProcessString(data string) {
-	b.mu.Lock()
-	b.processLocked(data)
-	emissions := b.drainEmissionsLocked()
-	b.mu.Unlock()
-	b.deliver(emissions)
+	b.process(data)
 }
 
-// drainEmissionsLocked returns and clears the pending emissions.
-func (b *StdinBuffer) drainEmissionsLocked() []stdinEmission {
-	if len(b.emissions) == 0 {
-		return nil
-	}
-	emissions := b.emissions
-	b.emissions = nil
-	return emissions
-}
-
-// deliver runs the buffered callbacks outside the lock (D139).
-func (b *StdinBuffer) deliver(emissions []stdinEmission) {
-	for _, emission := range emissions {
-		if emission.paste {
-			if b.OnPaste != nil {
-				b.OnPaste(emission.sequence)
-			}
-			continue
-		}
-		if b.OnData != nil {
-			b.OnData(emission.sequence)
-		}
-	}
-}
-
-func (b *StdinBuffer) processLocked(str string) {
-	if b.timeout != nil {
-		b.timeout.Stop()
-		b.timeout = nil
-	}
-
+func (b *StdinBuffer) process(str string) {
 	// High-byte conversion (for compatibility with parseKeypress): a single
 	// byte > 127 becomes ESC + (byte - 128).
 	if len(str) == 1 && str[0] > 127 {
@@ -320,7 +276,7 @@ func (b *StdinBuffer) processLocked(str string) {
 	}
 
 	if str == "" && b.buffer == "" {
-		b.emitDataSequenceLocked("")
+		b.emitDataSequence("")
 		return
 	}
 
@@ -336,13 +292,13 @@ func (b *StdinBuffer) processLocked(str string) {
 
 			b.pasteMode = false
 			b.pasteBuffer = ""
-			b.pendingKittyPrintableCodepoint = 0
+			b.pendingCodepoint = 0
 			b.hasPendingCodepoint = false
 
-			b.emitPasteLocked(pastedContent)
+			b.emitPaste(pastedContent)
 
 			if remaining != "" {
-				b.processLocked(remaining)
+				b.process(remaining)
 			}
 		}
 		return
@@ -353,11 +309,11 @@ func (b *StdinBuffer) processLocked(str string) {
 			beforePaste := b.buffer[:startIndex]
 			sequences, _ := extractCompleteSequences(beforePaste)
 			for _, sequence := range sequences {
-				b.emitDataSequenceLocked(sequence)
+				b.emitDataSequence(sequence)
 			}
 		}
 
-		b.pendingKittyPrintableCodepoint = 0
+		b.pendingCodepoint = 0
 		b.hasPendingCodepoint = false
 		b.buffer = b.buffer[startIndex+len(bracketedPasteStart):]
 		b.pasteMode = true
@@ -370,13 +326,13 @@ func (b *StdinBuffer) processLocked(str string) {
 
 			b.pasteMode = false
 			b.pasteBuffer = ""
-			b.pendingKittyPrintableCodepoint = 0
+			b.pendingCodepoint = 0
 			b.hasPendingCodepoint = false
 
-			b.emitPasteLocked(pastedContent)
+			b.emitPaste(pastedContent)
 
 			if remaining != "" {
-				b.processLocked(remaining)
+				b.process(remaining)
 			}
 		}
 		return
@@ -386,102 +342,104 @@ func (b *StdinBuffer) processLocked(str string) {
 	b.buffer = remainder
 
 	for _, sequence := range sequences {
-		b.emitDataSequenceLocked(sequence)
+		b.emitDataSequence(sequence)
 	}
 
+	// Incomplete sequences flush after the timeout; a lone ESC waits for the
+	// (shorter) escape timeout. The consumer drives the flush through
+	// FlushExpired once PendingTimeout passes.
+	b.pendingDeadline = time.Time{}
 	if b.buffer != "" {
 		timeoutMS := b.timeoutMS
 		if b.buffer == stdinEscape {
 			timeoutMS = b.escapeTimeoutMS
 		}
-		b.timeout = time.AfterFunc(time.Duration(timeoutMS)*time.Millisecond, func() {
-			b.mu.Lock()
-			b.timeout = nil
-			flushed := b.flushLocked()
-			emissions := b.drainEmissionsLocked()
-			b.mu.Unlock()
-			for _, sequence := range flushed {
-				if b.OnData != nil {
-					b.OnData(sequence)
-				}
-			}
-			b.deliver(emissions)
-		})
+		b.pendingDeadline = time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
 	}
 }
 
-// emitDataSequenceLocked deduplicates the raw character duplicate that
-// terminals echo after an unmodified Kitty printable sequence. Callers hold
-// the lock.
-func (b *StdinBuffer) emitDataSequenceLocked(sequence string) {
+// emitDataSequence deduplicates the raw character duplicate that
+// terminals echo after an unmodified Kitty printable sequence.
+func (b *StdinBuffer) emitDataSequence(sequence string) {
 	if runeCount(sequence) == 1 {
 		codepoint, _ := decodeRune(sequence)
-		if b.hasPendingCodepoint && int(codepoint) == b.pendingKittyPrintableCodepoint {
-			b.pendingKittyPrintableCodepoint = 0
+		if b.hasPendingCodepoint && int(codepoint) == b.pendingCodepoint {
+			b.pendingCodepoint = 0
 			b.hasPendingCodepoint = false
 			return
 		}
 	}
 
 	if codepoint, ok := parseUnmodifiedKittyPrintableCodepoint(sequence); ok {
-		b.pendingKittyPrintableCodepoint = codepoint
+		b.pendingCodepoint = codepoint
 		b.hasPendingCodepoint = true
 	} else {
-		b.pendingKittyPrintableCodepoint = 0
+		b.pendingCodepoint = 0
 		b.hasPendingCodepoint = false
 	}
 	b.emit(sequence)
 }
 
 func (b *StdinBuffer) emit(sequence string) {
-	b.emissions = append(b.emissions, stdinEmission{sequence: sequence})
-}
-
-func (b *StdinBuffer) emitPasteLocked(content string) {
-	b.emissions = append(b.emissions, stdinEmission{sequence: content, paste: true})
-}
-
-// Flush returns the buffered incomplete sequence, if any.
-func (b *StdinBuffer) Flush() []string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.flushLocked()
-}
-
-func (b *StdinBuffer) flushLocked() []string {
-	if b.timeout != nil {
-		b.timeout.Stop()
-		b.timeout = nil
+	if b.OnData != nil {
+		b.OnData(sequence)
 	}
+}
+
+func (b *StdinBuffer) emitPaste(content string) {
+	if b.OnPaste != nil {
+		b.OnPaste(content)
+	}
+}
+
+// PendingTimeout returns the deadline at which the buffered incomplete
+// sequence must be force-flushed, and whether one is pending.
+func (b *StdinBuffer) PendingTimeout() (time.Time, bool) {
+	return b.pendingDeadline, !b.pendingDeadline.IsZero()
+}
+
+// FlushExpired flushes the buffered sequence once its deadline has passed
+// (now >= deadline) and returns it; otherwise it returns nil.
+func (b *StdinBuffer) FlushExpired(now time.Time) []string {
+	if b.pendingDeadline.IsZero() || now.Before(b.pendingDeadline) {
+		return nil
+	}
+	b.pendingDeadline = time.Time{}
 	if b.buffer == "" {
 		return nil
 	}
 	sequences := []string{b.buffer}
 	b.buffer = ""
-	b.pendingKittyPrintableCodepoint = 0
+	b.pendingCodepoint = 0
+	b.hasPendingCodepoint = false
+	return sequences
+}
+
+// Flush returns the buffered incomplete sequence, if any.
+func (b *StdinBuffer) Flush() []string {
+	b.pendingDeadline = time.Time{}
+	if b.buffer == "" {
+		return nil
+	}
+	sequences := []string{b.buffer}
+	b.buffer = ""
+	b.pendingCodepoint = 0
 	b.hasPendingCodepoint = false
 	return sequences
 }
 
 // Clear drops all buffered state.
 func (b *StdinBuffer) Clear() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.timeout != nil {
-		b.timeout.Stop()
-		b.timeout = nil
-	}
+	b.pendingDeadline = time.Time{}
 	b.buffer = ""
 	b.pasteMode = false
 	b.pasteBuffer = ""
-	b.pendingKittyPrintableCodepoint = 0
+	b.pendingCodepoint = 0
 	b.hasPendingCodepoint = false
 }
 
 // GetBuffer returns the pending buffer contents.
 func (b *StdinBuffer) GetBuffer() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
 	return b.buffer
 }
 

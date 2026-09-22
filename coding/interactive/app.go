@@ -154,6 +154,8 @@ type App struct {
 	// parked on a full channel at shutdown.
 	runCtx           atomic.Pointer[context.Context]
 	loopInputs       chan string
+	loopRawInputs    chan string
+	rawTerminal      tui.RawInputTerminal
 	loopResizes      chan struct{}
 	loopSignals      chan os.Signal
 	loopInputsClosed chan struct{}
@@ -193,6 +195,8 @@ func NewApp(options AppOptions) *App {
 		terminal = tui.NewProcessTerminal(nil, nil)
 	}
 
+	options.Terminal = terminal
+
 	app := &App{
 		options:     options,
 		Settings:    options.Settings,
@@ -205,6 +209,7 @@ func NewApp(options AppOptions) *App {
 	// createInteractiveTuiReference(() => this.renderer)): SwitchTuiMode swaps
 	// the lifecycle's renderer and every holder of app.UI follows it.
 	app.loopInputs = make(chan string, loopInputCapacity)
+	app.loopRawInputs = make(chan string, loopInputCapacity)
 	app.loopResizes = make(chan struct{}, 1)
 	app.loopSignals = make(chan os.Signal, 4)
 	app.loopInputsClosed = make(chan struct{})
@@ -431,6 +436,8 @@ func NewApp(options AppOptions) *App {
 
 	app.Runner = &RunWiring{
 		OnBeat:             func() { app.Transcript.MaterializeDeferred() },
+		RawTerminal:        app.rawTerminal,
+		RawInputs:          app.loopRawInputs,
 		Startup:            app.Startup,
 		Events:             app.Events,
 		SessionEvents:      app.sessionEvents.Events(),
@@ -832,16 +839,22 @@ func (a *App) LifecycleCheckShutdown() { a.Lifecycle.CheckShutdownRequested() }
 
 // newLoopTui creates a renderer wired to the UI loop: terminal input and
 // resize notifications are delivered as channel messages instead of being
-// dispatched inline (stage 3).
+// dispatched inline (stage 3). With a D147 raw-input terminal the handler
+// receives RAW stdin chunks; the loop reassembles them through FeedInput on
+// the loop goroutine.
 func (a *App) newLoopTui(options InteractiveTuiOptions) tui.TUI {
 	screen := CreateInteractiveTui(options)
 	if screen == nil {
 		return screen
 	}
+	if raw, ok := options.Terminal.(tui.RawInputTerminal); ok {
+		raw.EnableRawInput()
+		a.rawTerminal = raw
+	}
 	screen.EnableLoopInput(
 		func(data string) {
 			select {
-			case a.loopInputs <- data:
+			case a.loopRawInputs <- data:
 			case <-a.loopInputsClosed:
 			case <-a.runDone():
 			}
