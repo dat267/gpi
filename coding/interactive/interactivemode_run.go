@@ -108,6 +108,10 @@ type RunWiring struct {
 	// beats counts loop iterations (the watchdog beat: a stalled loop stops
 	// advancing it, so a watchdog can detect a hang).
 	beats atomic.Uint64
+	// OnBeat runs once per loop iteration (on the loop goroutine): the lazy
+	// transcript materializer uses it to attach deferred chunks between
+	// paints.
+	OnBeat func()
 	// ShowStatus/ShowError/ShowWarning report messages.
 	ShowStatus  func(message string)
 	ShowError   func(message string)
@@ -645,6 +649,9 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 
 	for {
 		w.beats.Add(1)
+		if w.OnBeat != nil {
+			w.OnBeat()
+		}
 		var (
 			inputsCh <-chan string
 			doneCh   chan error

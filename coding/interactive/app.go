@@ -430,6 +430,7 @@ func NewApp(options AppOptions) *App {
 	app.sessionEvents = newSessionEventQueue()
 
 	app.Runner = &RunWiring{
+		OnBeat:             func() { app.Transcript.MaterializeDeferred() },
 		Startup:            app.Startup,
 		Events:             app.Events,
 		SessionEvents:      app.sessionEvents.Events(),

@@ -74,6 +74,14 @@ type TranscriptRenderer struct {
 	lastStatusSpacer         *tui.Spacer
 	lastStatusText           *tui.Text
 	managedToolStatusStarted bool
+
+	// Lazy materialization: on a large session load only the last window of
+	// components attaches to Chat immediately (the visible bottom); the rest
+	// wait here and are inserted in time-budgeted chunks from the UI loop
+	// (MaterializeDeferred), so the first paint is instant instead of a
+	// multi-hundred-millisecond full-transcript render. Touched only on the
+	// loop goroutine (render/entry paths and loop beats all run there).
+	deferredComponents []tui.Component
 }
 
 // NewTranscriptRenderer creates the renderer.
@@ -331,6 +339,70 @@ func decodeCustomMessage(content json.RawMessage) (string, string, bool) {
 
 // RenderSessionItems renders a list of transcript items.
 func (r *TranscriptRenderer) RenderSessionItems(items []RenderSessionItem, updateFooter bool, populateHistory bool) {
+	// Lazy path: a large replay (session load, renderer swap) collects into a
+	// collector container and attaches only the last window to the real chat;
+	// the rest drains through MaterializeDeferred. Small renders attach
+	// directly, exactly as before.
+	if populateHistory && len(items) >= lazyTranscriptThresholdItems {
+		r.deferredComponents = nil
+		collector := &tui.Container{}
+		realChat := r.Chat
+		r.Chat = collector
+		r.renderSessionItems(items, updateFooter, populateHistory)
+		r.Chat = realChat
+
+		children := collector.Children
+		cut := len(children) - lazyTranscriptWindowComponents
+		if cut < 0 {
+			cut = 0
+		}
+		r.deferredComponents = children[:cut:cut]
+		for _, component := range children[cut:] {
+			realChat.AddChild(component)
+		}
+		r.requestRender()
+		return
+	}
+	r.deferredComponents = nil
+	r.renderSessionItems(items, updateFooter, populateHistory)
+}
+
+// lazyTranscriptThresholdItems is the item count above which a replay
+// materializes lazily.
+const lazyTranscriptThresholdItems = 400
+
+// lazyTranscriptWindowComponents is how many tail components attach
+// immediately.
+const lazyTranscriptWindowComponents = 120
+
+// lazyTranscriptChunkComponents is how many deferred components attach per
+// loop beat (kept small: the next paint renders each newly attached child).
+const lazyTranscriptChunkComponents = 64
+
+// MaterializeDeferred attaches one chunk of deferred transcript components.
+// It returns true while work remains; the UI loop calls it from its beat
+// until it returns false. The chunk is small because the NEXT paint renders
+// every newly attached child (~0.2ms each): a too-large chunk would just
+// move the freeze into that frame, so the work is amortized over frames.
+func (r *TranscriptRenderer) MaterializeDeferred() bool {
+	if len(r.deferredComponents) == 0 {
+		return false
+	}
+	for n := 0; n < lazyTranscriptChunkComponents && len(r.deferredComponents) > 0; n++ {
+		last := len(r.deferredComponents) - 1
+		component := r.deferredComponents[last]
+		r.deferredComponents[last] = nil
+		r.deferredComponents = r.deferredComponents[:last]
+		// Components are stored oldest-first; attaching from the end at the
+		// top of the chat keeps the transcript order (older entries land
+		// above the already-attached tail and any live messages).
+		r.Chat.InsertChildAt(0, component)
+	}
+	r.requestRender()
+	return len(r.deferredComponents) > 0
+}
+
+func (r *TranscriptRenderer) renderSessionItems(items []RenderSessionItem, updateFooter bool, populateHistory bool) {
 	r.pendingTools = map[string]*ToolExecutionComponent{}
 	renderedPendingTools := map[string]*ToolExecutionComponent{}
 

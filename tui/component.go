@@ -216,6 +216,19 @@ func (c *Container) AddChild(component Component) {
 	c.Children = append(c.Children, component)
 }
 
+// InsertChildAt inserts a child at the given index (clamped to the current
+// range).
+func (c *Container) InsertChildAt(index int, component Component) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if index < 0 || index > len(c.Children) {
+		index = len(c.Children)
+	}
+	c.Children = append(c.Children, nil)
+	copy(c.Children[index+1:], c.Children[index:])
+	c.Children[index] = component
+}
+
 // RemoveChild removes a child component.
 func (c *Container) RemoveChild(component Component) {
 	c.mu.Lock()
