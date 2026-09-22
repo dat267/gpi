@@ -41,8 +41,12 @@ const (
 var (
 	osc133ZonePrefix  = regexp.MustCompile(`^(?:\x1b\]133;[ABC](?:\x07|\x1b\\))+`)
 	osc133PromptStart = regexp.MustCompile(`^\x1b\]133;A(?:\x07|\x1b\\)`)
-	altSgrMouseRegex  = regexp.MustCompile(`^\x1b\[<(\d+);(\d+);(\d+)([Mm])$`)
-	wheelSgrRegex     = regexp.MustCompile(`^\x1b\[<(\d+);(\d+);(\d+)[Mm]$`)
+	// osc133ZonePrefixMatch is the literal the zone regexp needs to see at the
+	// start of a line: checking it first keeps the per-frame pass over every
+	// document line off the regexp engine.
+	osc133ZonePrefixMatch = "\x1b]133;"
+	altSgrMouseRegex      = regexp.MustCompile(`^\x1b\[<(\d+);(\d+);(\d+)([Mm])$`)
+	wheelSgrRegex         = regexp.MustCompile(`^\x1b\[<(\d+);(\d+);(\d+)[Mm]$`)
 )
 
 var terminalWordSelectionJoiners = map[string]bool{"/": true, "-": true}
@@ -418,7 +422,7 @@ func (s *AltScreen) afterTerminalStop(options TuiStopOptions) {
 	documentLines := s.Render(width)
 	trimmed := make([]string, 0, len(documentLines))
 	for _, line := range documentLines {
-		trimmed = append(trimmed, osc133ZonePrefix.ReplaceAllString(line, ""))
+		trimmed = append(trimmed, stripZonePrefix(line))
 	}
 	lines := s.ApplyLineResets(replaceAllStrings(trimmed, CursorMarker, ""))
 	for index, line := range lines {
@@ -511,6 +515,16 @@ func (s *AltScreen) scrollToPromptLocked(direction int) {
 		s.RequestRender(false)
 		return
 	}
+}
+
+// stripZonePrefix removes the OSC 133 zone markers a message prepends. The
+// regexp only ever matches at the start of a line, and this runs over every
+// document line on every paint, so the common case costs a literal check.
+func stripZonePrefix(line string) string {
+	if !strings.HasPrefix(line, osc133ZonePrefixMatch) {
+		return line
+	}
+	return osc133ZonePrefix.ReplaceAllString(line, "")
 }
 
 // Flash shows a transient message.
@@ -2088,7 +2102,7 @@ func (s *AltScreen) doRender() {
 	}
 	screen := make([]string, 0, len(nextLayout.Lines))
 	for _, line := range nextLayout.Lines {
-		screen = append(screen, osc133ZonePrefix.ReplaceAllString(line, ""))
+		screen = append(screen, stripZonePrefix(line))
 	}
 	screen = s.applySearchHighlights(screen, nextLayout)
 	screen = s.compositeScrollToEndIndicator(screen, nextLayout, width)

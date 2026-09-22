@@ -7,6 +7,11 @@ import "strings"
 // Spacer renders empty lines.
 type Spacer struct {
 	Lines int
+
+	// cached is the rendered blank block: a transcript holds one spacer per
+	// message, so re-allocating it on every paint was the largest per-frame
+	// allocator (and it is a pure function of Lines).
+	cached []string
 }
 
 // NewSpacer creates a spacer with the given line count.
@@ -15,18 +20,21 @@ func NewSpacer(lines int) *Spacer {
 }
 
 // SetLines updates the line count.
-func (s *Spacer) SetLines(lines int) { s.Lines = lines }
+func (s *Spacer) SetLines(lines int) {
+	s.Lines = lines
+	s.cached = nil
+}
 
 // Invalidate drops cached state (none).
-func (s *Spacer) Invalidate() {}
+func (s *Spacer) Invalidate() { s.cached = nil }
 
 // Render renders the empty lines.
 func (s *Spacer) Render(width int) []string {
-	result := make([]string, 0, s.Lines)
-	for i := 0; i < s.Lines; i++ {
-		result = append(result, "")
+	if len(s.cached) != s.Lines {
+		result := make([]string, s.Lines)
+		s.cached = result
 	}
-	return result
+	return s.cached
 }
 
 // Text displays multi-line text with word wrapping, padding, and an optional

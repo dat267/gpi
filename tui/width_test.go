@@ -150,9 +150,12 @@ func TestGraphemeWidthSpecials(t *testing.T) {
 // the sync.Map iterator alone. A full cache must therefore drop a batch of
 // entries, not one per miss, and must stay bounded.
 func TestWidthCacheEvictsInBatches(t *testing.T) {
+	// The cache is process-global, so the probe keys must be unique per run
+	// (the suite runs with -count=2).
+	widthCacheProbeNonce++
 	fillUntilFull := func() {
 		for index := 0; index < widthCacheSize*4; index++ {
-			VisibleWidth(fmt.Sprintf("batch-probe-%d日", index))
+			VisibleWidth(fmt.Sprintf("batch-probe-%d-%d日", widthCacheProbeNonce, index))
 			if widthCacheEntryCount() >= widthCacheSize {
 				return
 			}
@@ -163,7 +166,7 @@ func TestWidthCacheEvictsInBatches(t *testing.T) {
 	if before != widthCacheSize {
 		t.Fatalf("cache filled to %d entries, want the cap %d", before, widthCacheSize)
 	}
-	VisibleWidth("batch-probe-overflow-日")
+	VisibleWidth(fmt.Sprintf("batch-probe-%d-overflow-日", widthCacheProbeNonce))
 	after := widthCacheEntryCount()
 	if after > widthCacheSize {
 		t.Fatalf("cache size %d exceeds the cap after a miss", after)
@@ -176,3 +179,6 @@ func TestWidthCacheEvictsInBatches(t *testing.T) {
 		t.Fatalf("width after eviction = %d", got)
 	}
 }
+
+// widthCacheProbeNonce keeps the eviction probe's keys unique between runs.
+var widthCacheProbeNonce int

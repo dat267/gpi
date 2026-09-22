@@ -32,6 +32,10 @@ type Box struct {
 	// frame scratch, reused across renders (loop-owned).
 	childLines   [][]string
 	leftPadCache string
+	// bgSample/bgSampleSet cache bgFn("test") — one allocation per box per
+	// frame otherwise. SetBgFn clears them.
+	bgSample    string
+	bgSampleSet bool
 }
 
 // NewBox creates a box with the given padding and optional background.
@@ -64,7 +68,12 @@ func (b *Box) Clear() {
 
 // SetBgFn updates the background function. The cache is kept because the
 // background change is detected by sampling the function output.
-func (b *Box) SetBgFn(bgFn func(text string) string) { b.bgFn = bgFn }
+func (b *Box) SetBgFn(bgFn func(text string) string) {
+	b.bgFn = bgFn
+	b.bgSample = ""
+	b.bgSampleSet = false
+	b.cache = nil
+}
 
 // childComponents implements childrenHolder.
 func (b *Box) childComponents() []Component { return b.Children }
@@ -175,7 +184,11 @@ func (b *Box) Render(width int) []string {
 	bgSample := ""
 	hasBgSample := false
 	if b.bgFn != nil {
-		bgSample = b.bgFn("test")
+		if !b.bgSampleSet {
+			b.bgSample = b.bgFn("test")
+			b.bgSampleSet = true
+		}
+		bgSample = b.bgSample
 		hasBgSample = true
 	}
 
