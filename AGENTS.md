@@ -12,7 +12,11 @@ upstream packages file-for-file.
 
 - Module: `github.com/dat267/pier`, Go `1.27`.
 - Dependencies are offline-cached only: `golang.org/x/text`, `x/term`, `x/sys`.
-- Upstream checkout used while porting: `/tmp/pi` (see the README's pin table).
+- Upstream checkout used while porting: `/tmp/pi` at tag `v0.87.0`
+  (`16787ad5b`; see the README's pin table). The installed 0.86.1 bundle and the
+  old pin `36b60d2e8` are on divergent upstream lines (no common ancestor), so
+  the released tags are the reference; 0.87 diff checks go through `/tmp/pi`
+  sources (`node --experimental-strip-types`, `FORCE_COLOR=1` for chalk parity).
 - License: MIT (see `LICENSE`).
 
 ## Ground-truth rules

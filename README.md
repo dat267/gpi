@@ -27,8 +27,26 @@ from upstream source, not inferred.
 | What | Value |
 |---|---|
 | Repository | https://github.com/earendil-works/pi (cloned at `../pi`) |
-| Pin | `36b60d2e8` — "fix: clean up delta test lint diagnostics" |
+| Pin | `16787ad5b` — Release v0.87.0 |
 | Stale upstream test | `packages/ai/test/faux-provider.test.ts` "estimates prompt and output tokens" still expects pre-`9e05370b2` faux serialization; source wins |
+
+v0.87.0 refresh (reference moved from the installed 0.86.1 bundle to the
+`v0.87.0` tag; the previous pin `36b60d2e8` sits on a divergent upstream line
+with no common ancestor, so the released tags are the reference):
+
+- Tool renderer parity re-probed against the 0.87 sources
+  (`/tmp/parity/editprobe-087.mjs`): the edit block is byte-identical to the Go
+  golden.
+- TUI delta: one renderer fix. `compositeScrollToEndIndicator` now truncates
+  the label to the clip width, centers it in the clip, then clamps it to the
+  scrollbar column (pre-0.87 centered in the space left of the scrollbar,
+  shifting it one cell for an even remainder). Ported with
+  `TestScrollToEndIndicator*`.
+- Not yet ported (recorded follow-ups): the coding-agent delta
+  (`agent-session.ts`, `compaction.ts`, `session-manager.ts`,
+  `prompt-templates.ts`, extensions, new `crash-log.ts`) and the `read` tool's
+  model-driven image resize. Extension mechanics and image transports stay out
+  of scope (D41/D140).
 
 Update the pin whenever upstream source is re-read for a port.
 

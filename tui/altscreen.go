@@ -2026,17 +2026,24 @@ func (s *AltScreen) compositeScrollToEndIndicator(screen []string, layout Layout
 	if row >= len(screen) || IsImageLine(screen[row]) {
 		return screen
 	}
-	trackEnd := clip.X + clip.Width
+	// v0.87 (upstream tui-alt-screen.ts compositeScrollToEndIndicator): the
+	// label is truncated to the clip width, centered within the clip, and only
+	// then clamped so it never overlaps the scrollbar column. The pre-0.87
+	// version centered the label in the space left of the scrollbar instead,
+	// which shifted it left by one cell for an even remainder.
+	label := TruncateToWidth(s.scrollToEndIndicator(), clip.Width, "", false)
+	labelWidth := VisibleWidth(label)
+	column := clip.X + (clip.Width-labelWidth)/2
+	rightEdge := clip.X + clip.Width
 	if geometry, ok := GetScrollbarGeometry(box, false); ok {
-		trackEnd = geometry.Column
+		rightEdge = geometry.Column
 	}
-	availableWidth := maxInt(0, trackEnd-clip.X)
-	text := TruncateToWidth(s.scrollToEndIndicator(), availableWidth, "", false)
+	availableWidth := maxInt(0, rightEdge-column)
+	text := TruncateToWidth(label, availableWidth, "", false)
 	textWidth := VisibleWidth(text)
 	if textWidth == 0 {
 		return screen
 	}
-	column := clip.X + (availableWidth-textWidth)/2
 	result := append([]string(nil), screen...)
 	result[row] = CompositeTuiLine(result[row], text, column, textWidth, width)
 	s.scrollToEndRect = &scrollToEndIndicatorRect{Row: row, Column: column, Width: textWidth}
