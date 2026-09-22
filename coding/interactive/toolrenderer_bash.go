@@ -30,13 +30,20 @@ func formatShellCall(args map[string]any, prompt string, theme *Theme) string {
 	return theme.Fg("toolTitle", theme.Bold(prompt+" "+commandDisplay)) + timeoutSuffix
 }
 
-// bashResultState caches the collapsed preview per width.
+// bashResultState caches the collapsed preview. Command output is
+// append-only while the tool streams, so the visual-line count of the
+// already-seen prefix and the rendered tail are carried between frames:
+// re-wrapping the whole output on every chunk was O(output) and stalled the
+// loop on large command output.
 type bashResultState struct {
+	cachedOutput   string
 	cachedWidth    int
 	hasCached      bool
-	cachedLines    []string
-	cachedSkipped  int
 	cachedRendered []string
+
+	countWidth  int
+	countedText string
+	totalVisual int
 }
 
 func rebuildBashResult(result *SortToolResultContent, options ToolRenderResultOptions, theme *Theme,
@@ -61,19 +68,12 @@ func rebuildBashResult(result *SortToolResultContent, options ToolRenderResultOp
 		}
 	}
 	if output != "" {
-		styledLines := make([]string, 0, strings.Count(output, "\n")+1)
-		for _, line := range strings.Split(output, "\n") {
-			styledLines = append(styledLines, theme.Fg("toolOutput", line))
-		}
-		styledOutput := strings.Join(styledLines, "\n")
 		if options.Expanded {
-			children = append(children, tui.NewText("\n"+styledOutput, 0, 0, nil))
+			children = append(children, tui.NewText("\n"+styleBashOutput(output, theme), 0, 0, nil))
 		} else {
-			state.cachedWidth = 0
-			state.hasCached = false
-			state.cachedLines = nil
-			state.cachedSkipped = 0
-			children = append(children, &bashPreviewComponent{output: styledOutput, state: state, theme: theme})
+			// The collapsed preview styles and wraps only the lines it shows;
+			// styling the whole output here was the per-chunk cost.
+			children = append(children, &bashPreviewComponent{output: output, state: state, theme: theme})
 		}
 	}
 	if (truncation != nil && truncation.Truncated) || fullOutputPath != "" {
@@ -106,39 +106,112 @@ type bashPreviewComponent struct {
 	theme  *Theme
 }
 
-// bashResultState additionally caches the fully rendered preview lines (the
-// hint included), so a warm frame reuses them (upstream caches visualLines the
-// same way, bash-execution.ts).
+// styleBashOutput applies the tool-output style per logical line.
+func styleBashOutput(output string, theme *Theme) string {
+	lines := strings.Split(output, "\n")
+	for index, line := range lines {
+		lines[index] = theme.Fg("toolOutput", line)
+	}
+	return strings.Join(lines, "\n")
+}
 
 func (c *bashPreviewComponent) Render(width int) []string {
-	if c.state.hasCached && c.state.cachedWidth == width && c.state.cachedRendered != nil {
-		return c.state.cachedRendered
+	state := c.state
+	if state.hasCached && state.cachedWidth == width && state.cachedOutput == c.output {
+		return state.cachedRendered
 	}
-	if !c.state.hasCached || c.state.cachedWidth != width {
-		preview := TruncateToVisualLines(c.output, bashPreviewLines, width, 0)
-		c.state.cachedLines = preview.VisualLines
-		c.state.cachedSkipped = preview.SkippedCount
-		c.state.cachedWidth = width
-		c.state.hasCached = true
+
+	tail := c.tailVisualLines(width)
+	skipped := c.visualLineCount(width) - len(tail)
+	if skipped < 0 {
+		skipped = 0
 	}
-	lines := make([]string, 0, len(c.state.cachedLines)+2)
+
+	lines := make([]string, 0, len(tail)+2)
 	lines = append(lines, "")
-	if c.state.cachedSkipped > 0 {
-		hint := c.theme.Fg("muted", fmt.Sprintf("... (%d earlier lines,", c.state.cachedSkipped)) +
+	if skipped > 0 {
+		hint := c.theme.Fg("muted", fmt.Sprintf("... (%d earlier lines,", skipped)) +
 			" " + KeyHint("app.tools.expand", "to expand") + c.theme.Fg("muted", ")")
 		lines = append(lines, tui.TruncateToWidth(hint, width, "...", false))
 	}
-	lines = append(lines, c.state.cachedLines...)
-	c.state.cachedRendered = lines
+	lines = append(lines, tail...)
+
+	state.cachedOutput = c.output
+	state.cachedWidth = width
+	state.cachedRendered = lines
+	state.hasCached = true
 	return lines
 }
 
+// wrappedLineCount is how many visual lines one logical line wraps to, matching
+// tui.Text.Render (tabs become three spaces; a blank line still occupies one).
+func wrappedLineCount(line string, contentWidth int) int {
+	wrapped := tui.WrapTextWithAnsi(strings.ReplaceAll(line, "\t", "   "), contentWidth)
+	if len(wrapped) == 0 {
+		return 1
+	}
+	return len(wrapped)
+}
+
+// visualLineCount returns the number of visual lines the whole output wraps
+// to. Wrapping is per logical line, so only the lines appended since the last
+// call are counted.
+func (c *bashPreviewComponent) visualLineCount(width int) int {
+	state := c.state
+	if state.countWidth != width || !strings.HasPrefix(c.output, state.countedText) {
+		state.countWidth = width
+		state.countedText = ""
+		state.totalVisual = 0
+	}
+	contentWidth := width
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+	consumed := len(state.countedText)
+	rest := c.output[consumed:]
+	if lastNewline := strings.LastIndexByte(rest, '\n'); lastNewline >= 0 {
+		complete := rest[:lastNewline+1]
+		for _, line := range strings.Split(complete[:len(complete)-1], "\n") {
+			state.totalVisual += wrappedLineCount(line, contentWidth)
+		}
+		consumed += len(complete)
+		// Slice the output rather than concatenating: the counted prefix can be
+		// large and copying it per chunk was itself O(output).
+		state.countedText = c.output[:consumed]
+		rest = c.output[consumed:]
+	}
+	// The trailing (still growing) line is re-counted each call.
+	return state.totalVisual + wrappedLineCount(rest, contentWidth)
+}
+
+// tailVisualLines renders the last bashPreviewLines visual lines. Only the
+// last bashPreviewLines logical lines can contain them, because a logical line
+// is at least one visual line.
+func (c *bashPreviewComponent) tailVisualLines(width int) []string {
+	suffix := c.output
+	end := len(suffix)
+	for i := 0; i < bashPreviewLines; i++ {
+		index := strings.LastIndexByte(suffix[:end], '\n')
+		if index < 0 {
+			end = 0
+			break
+		}
+		end = index
+	}
+	suffix = suffix[end:]
+	suffix = strings.TrimPrefix(suffix, "\n")
+	return TruncateToVisualLines(styleBashOutput(suffix, c.theme), bashPreviewLines, width, 0).VisualLines
+}
+
 func (c *bashPreviewComponent) Invalidate() {
-	c.state.hasCached = false
-	c.state.cachedWidth = 0
-	c.state.cachedLines = nil
-	c.state.cachedRendered = nil
-	c.state.cachedSkipped = 0
+	state := c.state
+	state.hasCached = false
+	state.cachedOutput = ""
+	state.cachedWidth = 0
+	state.cachedRendered = nil
+	state.countWidth = 0
+	state.countedText = ""
+	state.totalVisual = 0
 }
 
 // CreateShellRenderers builds the shell tool renderers (bash and powershell
