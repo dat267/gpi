@@ -407,16 +407,19 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 	return &CreateAgentSessionResult{Session: session, ModelFallbackMessage: modelFallbackMessage}, nil
 }
 
+// cacheContextIsCurrent reports whether the session's context still extends the
+// warmed request: the model is the request's model and no earlier message was
+// dropped. The currency check is re-evaluated while the warmer runs (and by the
+// status display), so it compares cheap context signatures instead of
+// projecting the session.
 func cacheContextIsCurrent(sessionManager *SessionManager, requestModel *ai.Model) func() bool {
-	messages := sessionManager.BuildSessionContext().Messages
+	warm := sessionManager.ContextSignature()
 	return func() bool {
-		context := sessionManager.BuildSessionContext()
-		ref := context.Model
-		if ref == nil {
+		current := sessionManager.ContextSignature()
+		if current.Provider != string(requestModel.Provider) || current.ModelID != requestModel.ID {
 			return false
 		}
-		return ref.Provider == string(requestModel.Provider) && ref.ModelID == requestModel.ID &&
-			len(messages) <= len(context.Messages)
+		return warm.MessageCount <= current.MessageCount
 	}
 }
 

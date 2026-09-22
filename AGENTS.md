@@ -189,7 +189,17 @@ on that session spent ~20 s and ~325 GB of allocations in `PrepareCompaction`
 before the summarization request was even built, because the port re-derived
 the context projection inside the loop over it (`BuildContextEntries` once per
 entry); it now builds the projection once (~105 ms at 15.5k entries), pinned by
-`TestPrepareCompactionProjectsTheContextOnce`.
+`TestPrepareCompactionProjectsTheContextOnce`. The other projection was on the
+request path: `cacheContextIsCurrent` (the cache-warmer currency check) built
+the whole `SessionManager` context — ~190 ms on that session — on **every**
+model request, and `BuildSessionContext` held the session mutex while it ran,
+so the UI thread (the footer re-reads the session on each status change) parked
+behind it and the TUI froze for ~200 ms right after every tool result, which is
+how it was reported ("running bash freezes the TUI"). The check now compares
+cheap `SessionManager.ContextSignature` values (branch-cache lookup + entry
+scan) and the projection snapshots the entries and projects outside the lock;
+see `TestCacheContextIsCurrentDoesNotProjectTheSession` (37 MB → 0 allocated per
+call) and `TestBuildSessionContextDoesNotHoldTheSessionLock`.
 
 ## Conventions and gotchas
 

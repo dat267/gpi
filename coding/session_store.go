@@ -432,7 +432,13 @@ func SessionEntryToContextMessages(entry *SessionEntry) []ai.Message {
 // BuildContextEntries builds the active, compaction-aware session entry
 // list following the leaf path (port of buildContextEntries).
 func BuildContextEntries(entries []SessionEntry, leafID *string, byID map[string]*SessionEntry) []SessionEntry {
-	path := buildSessionPath(entries, leafID, byID)
+	return applyCompactionWindow(buildSessionPath(entries, leafID, byID))
+}
+
+// applyCompactionWindow drops the entries a compaction replaced, keeping the
+// summary and the window after firstKeptEntryId (the tail of
+// BuildContextEntries, reusable on an already-resolved path).
+func applyCompactionWindow(path []SessionEntry) []SessionEntry {
 	var compaction *SessionEntry
 	for i := range path {
 		if path[i].Type == "compaction" {

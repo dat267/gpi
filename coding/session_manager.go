@@ -523,6 +523,11 @@ func (m *SessionManager) AppendLabelChange(targetID string, label *string) (stri
 func (m *SessionManager) GetBranch(fromID string) []SessionEntry {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.branchLocked(fromID)
+}
+
+// branchLocked is GetBranch for callers already holding m.mu.
+func (m *SessionManager) branchLocked(fromID string) []SessionEntry {
 	startID := fromID
 	if startID == "" {
 		if m.leafID == nil {
@@ -576,11 +581,89 @@ func (m *SessionManager) buildContextEntriesForLeafLocked() []SessionEntry {
 	return BuildContextEntries(m.getEntriesLocked(), &leafID, m.byID)
 }
 
-// BuildSessionContext builds the LLM context from the current leaf.
-func (m *SessionManager) BuildSessionContext() SessionContext {
+// ContextSignature summarizes what the next request's context would carry: the
+// model its messages use and how many messages there are. Upstream's cache
+// currency check compares the projected message lists, but projecting a large
+// session costs ~190 ms and holds the session lock while it runs, which stalls
+// the UI thread (its per-frame context usage needs the same lock). The count is
+// derived from the cached branch instead: every entry in the compaction window
+// that projects to a message counts as one.
+type ContextSignature struct {
+	Provider     string
+	ModelID      string
+	MessageCount int
+}
+
+// ContextSignature returns the current context signature cheaply.
+func (m *SessionManager) ContextSignature() ContextSignature {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.buildSessionContextLocked()
+	branch := m.branchLocked("")
+	count := 0
+	for _, entry := range applyCompactionWindow(branch) {
+		if contextEntryYieldsMessage(entry) {
+			count++
+		}
+	}
+	provider, modelID := contextModelRef(branch)
+	return ContextSignature{Provider: provider, ModelID: modelID, MessageCount: count}
+}
+
+// contextEntryYieldsMessage reports whether projecting the entry produces a
+// message (sessionEntryToContextMessages; a message entry that fails to
+// unmarshal is still counted, which only makes the conservative comparison in
+// cacheContextIsCurrent slightly more permissive).
+func contextEntryYieldsMessage(entry SessionEntry) bool {
+	switch entry.Type {
+	case "message", "custom_message", "compaction":
+		return true
+	case "branch_summary":
+		return entry.Summary != ""
+	}
+	return false
+}
+
+// contextModelRef returns the model the context uses. getSessionContextSettings
+// scans the path forward and lets later entries win, so the answer is the last
+// model_change entry or assistant message.
+func contextModelRef(path []SessionEntry) (provider string, modelID string) {
+	for i := len(path) - 1; i >= 0; i-- {
+		entry := path[i]
+		switch entry.Type {
+		case "model_change":
+			return entry.Provider, entry.ModelID
+		case "message":
+			var message struct {
+				Role     string `json:"role"`
+				Provider string `json:"provider"`
+				Model    string `json:"model"`
+			}
+			if json.Unmarshal(entry.Message, &message) == nil && message.Role == "assistant" {
+				return message.Provider, message.Model
+			}
+		}
+	}
+	return "", ""
+}
+
+// BuildSessionContext builds the LLM context from the current leaf.
+func (m *SessionManager) BuildSessionContext() SessionContext {
+	// Project from a snapshot: the projection decodes every message in the
+	// session (hundreds of milliseconds on a large one), and holding m.mu for
+	// that long blocks every other reader, the UI's per-frame session reads
+	// included.
+	m.mu.Lock()
+	entries := m.getEntriesLocked()
+	leafID := ""
+	if m.leafID != nil {
+		leafID = *m.leafID
+	}
+	m.mu.Unlock()
+	byID := make(map[string]*SessionEntry, len(entries))
+	for i := range entries {
+		byID[entries[i].ID] = &entries[i]
+	}
+	return BuildSessionContext(entries, &leafID, byID)
 }
 
 // buildSessionContextLocked is BuildSessionContext for callers already holding
