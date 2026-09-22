@@ -307,45 +307,78 @@ func (p *partialParser) parseArray() (any, error) {
 
 // parsePartialString parses a possibly-truncated JSON string; an
 // unterminated string yields the complete prefix (partial-json semantics).
+// parsePartialString parses a (possibly unterminated) JSON string. Escape
+// sequences are decoded by the standard JSON decoder, so every escape behaves
+// the same here as in a complete document (including surrogate pairs); an
+// invalid or truncated escape ends the string, like partial-json.
 func (p *partialParser) parsePartialString() (string, error) {
 	p.pos++ // opening quote
-	var out []uint16
+	var builder strings.Builder
+	pending := p.pos // start of the literal span not yet emitted
 	for p.pos < len(p.units) {
 		u := p.units[p.pos]
 		if u == '"' {
+			builder.WriteString(p.sliceUnits(pending, p.pos))
 			p.pos++
-			return string(utf16.Decode(out)), nil
+			return builder.String(), nil
 		}
-		if u == '\\' {
-			if p.pos+1 < len(p.units) {
-				next := p.units[p.pos+1]
-				switch next {
-				case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
-					out = append(out, u, next)
-					p.pos += 2
-					continue
-				case 'u':
-					if p.pos+6 <= len(p.units) {
-						out = append(out, p.units[p.pos:p.pos+6]...)
-						p.pos += 6
-						continue
-					}
-					// Truncated \u escape: stop with the prefix.
-					return string(utf16.Decode(out)), nil
-				default:
-					// Invalid escape: treat literally (repair upstream handles
-					// this before partial parse).
-					out = append(out, u)
-					p.pos++
-					continue
-				}
+		if u != '\\' {
+			p.pos++
+			continue
+		}
+
+		builder.WriteString(p.sliceUnits(pending, p.pos))
+		// Decode the maximal well-formed run of escapes. Decoding the run as a
+		// whole lets the JSON decoder combine a surrogate pair, and stops at the
+		// first escape it rejects.
+		runStart := p.pos
+		end := runStart
+		decoded := ""
+		for {
+			size := escapeUnitLength(p.units, end)
+			if size == 0 {
+				break
 			}
-			return string(utf16.Decode(out)), nil
+			var out string
+			if err := json.Unmarshal([]byte(`"`+p.sliceUnits(runStart, end+size)+`"`), &out); err != nil {
+				break
+			}
+			decoded = out
+			end += size
 		}
-		out = append(out, u)
-		p.pos++
+		if end == runStart {
+			// The first escape is invalid or truncated: stop the string here
+			// (everything from the backslash on is dropped).
+			return builder.String(), nil
+		}
+		builder.WriteString(decoded)
+		p.pos = end
+		pending = end
 	}
-	return string(utf16.Decode(out)), nil
+	builder.WriteString(p.sliceUnits(pending, p.pos))
+	return builder.String(), nil
+}
+
+// sliceUnits converts a UTF-16 code-unit span to a string (the parser indexes
+// in code units, like the JS original).
+func (p *partialParser) sliceUnits(from, to int) string {
+	return string(utf16.Decode(p.units[from:to]))
+}
+
+// escapeUnitLength returns the code-unit length of the JSON escape starting at
+// pos: 1 for \u plus its four digits, otherwise \ plus one unit. 0 means the
+// input is truncated or does not start an escape.
+func escapeUnitLength(units []uint16, pos int) int {
+	if pos >= len(units) || units[pos] != '\\' || pos+1 >= len(units) {
+		return 0
+	}
+	if units[pos+1] == 'u' {
+		if pos+6 > len(units) {
+			return 0
+		}
+		return 6
+	}
+	return 2
 }
 
 // tryParseFullString parses a complete string; ok is false when truncated.
