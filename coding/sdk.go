@@ -322,6 +322,17 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 		return innerStreamFn(requestModel, requestContext, merged)
 	}
 
+	// Context files and skills feed the system prompt (upstream
+	// agent-session._buildRuntime reads them from the resource loader):
+	// the global agent-dir context file plus every workspace ancestor's,
+	// and skills from the settings paths plus a trusted project's
+	// .pi/skills.
+	contextFiles := LoadProjectContextFiles(cwd, agentDir)
+	skills := LoadSkills(LoadSkillsOptions{
+		Cwd: cwd, AgentDir: agentDir, SkillPaths: settingsManager.GetSkillPaths(),
+		IncludeDefaults: true,
+	}, settingsManager.IsProjectTrusted()).Skills
+
 	session, err := NewAgentSession(&SessionConfig{
 		Cwd:             cwd,
 		Model:           model,
@@ -330,6 +341,8 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 		Sessions:        sessionManager,
 		Settings:        SessionSettings{Retry: retryPolicy, Compaction: compactionSettingsOf(settingsManager, model)},
 		ThinkingLevel:   thinkingLevel,
+		Skills:          skills,
+		ContextFiles:    contextFiles,
 		SystemPrompt:    options.SystemPrompt,
 		ConvertToLlm:    convertToLlmWithBlockImages,
 		SessionID:       sessionID,

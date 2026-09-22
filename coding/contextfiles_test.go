@@ -3,6 +3,7 @@ package coding
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -356,5 +357,37 @@ func TestFindGitPaths(t *testing.T) {
 	linkWorktree(t, main, sibling, "sib")
 	if got := FindShadowedContextFile(sibling); got != nil {
 		t.Fatalf("sibling shadowed = %v", got)
+	}
+}
+
+// TestBuildSystemPromptIncludesContextFiles pins the wiring the CLI boot
+// uses: the global agent-dir context file and the workspace ancestor files
+// land in the rendered system prompt (upstream agent-session._buildRuntime
+// feeds resource-loader agentsFiles into the prompt options).
+func TestBuildSystemPromptIncludesContextFiles(t *testing.T) {
+	dir := t.TempDir()
+	agentDir := filepath.Join(dir, "agent")
+	if err := os.MkdirAll(filepath.Join(agentDir, "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENTS.md"), []byte("GLOBAL-CONTEXT-MARKER"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("WORKSPACE-CONTEXT-MARKER"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	contextFiles := LoadProjectContextFiles(dir, agentDir)
+	if len(contextFiles) != 2 {
+		t.Fatalf("context files = %d, want 2", len(contextFiles))
+	}
+	prompt, err := BuildSystemPrompt(BuildSystemPromptOptions{
+		Cwd: dir, ContextFiles: contextFiles, SelectedTools: []string{"read", "bash"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "GLOBAL-CONTEXT-MARKER") || !strings.Contains(prompt, "WORKSPACE-CONTEXT-MARKER") {
+		t.Fatal("context file contents missing from the system prompt")
 	}
 }
