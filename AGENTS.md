@@ -334,13 +334,14 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   refresh outcome, waiter count and canceled flag). Two races were fixed on the
   way: publishing must not overwrite an entry that appeared after the load, and
   a waiter slot is only claimed once the entry is confirmed published.
-- D150 — the startup "loaded resources" area ports only the **Skills**
-  section (upstream `showLoadedResources`): collapsed name list plus the
-  expanded project/user/path scope groups, and the ctrl+o expand toggle now
-  drives the header and section expandables (`SetToolsExpanded`). Context,
-  Prompts, Themes, Extensions and the diagnostics blocks are not rendered yet
-  (the Go loader exposes no themes/extensions; extensions stay out of scope,
-  D41/D140). `coding.LoadSkills` now matches upstream's loader: paths resolve
+- D150 — the startup "loaded resources" area ports the **Skills**, **Context**
+  and **Prompts** sections of upstream `showLoadedResources` (collapsed name
+  list plus the expanded project/user/path scope groups), the skill
+  warnings/collisions block (`[Skill conflicts]`), and the ctrl+o expand
+  toggle now drives the header and section expandables (`SetToolsExpanded`).
+  Themes and Extensions sections are not rendered (the Go loader exposes no
+  custom-theme SourceInfo and extension mechanics are out of scope, D41/D140).
+  `coding.LoadSkills` now matches upstream's loader: paths resolve
   (`~`/relative, `ResolvePath`), skills dedupe by canonical real path, and
   name collisions keep the first and record a `collision` diagnostic — the
   prior port appended both the default agent-dir skills and a settings path

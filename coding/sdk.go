@@ -328,29 +328,30 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 	// and skills from the settings paths plus a trusted project's
 	// .pi/skills.
 	contextFiles := LoadProjectContextFiles(cwd, agentDir)
-	skills := LoadSkills(LoadSkillsOptions{
+	skillsResult := LoadSkills(LoadSkillsOptions{
 		Cwd: cwd, AgentDir: agentDir, SkillPaths: settingsManager.GetSkillPaths(),
 		IncludeDefaults: true,
-	}, settingsManager.IsProjectTrusted()).Skills
+	}, settingsManager.IsProjectTrusted())
 
 	session, err := NewAgentSession(&SessionConfig{
-		Cwd:             cwd,
-		Model:           model,
-		StreamFn:        streamFn,
-		Tools:           activeTools,
-		Sessions:        sessionManager,
-		Settings:        SessionSettings{Retry: retryPolicy, Compaction: compactionSettingsOf(settingsManager, model)},
-		ThinkingLevel:   thinkingLevel,
-		Skills:          skills,
-		ContextFiles:    contextFiles,
-		SystemPrompt:    options.SystemPrompt,
-		ConvertToLlm:    convertToLlmWithBlockImages,
-		SessionID:       sessionID,
-		SteeringMode:    settingsManager.GetSteeringMode(),
-		FollowUpMode:    settingsManager.GetFollowUpMode(),
-		Transport:       ai.Transport(settingsManager.GetTransport()),
-		ThinkingBudgets: thinkingBudgetsOf(settingsManager.GetThinkingBudgets()),
-		MaxRetryDelayMS: &maxRetryDelay,
+		Cwd:              cwd,
+		Model:            model,
+		StreamFn:         streamFn,
+		Tools:            activeTools,
+		Sessions:         sessionManager,
+		Settings:         SessionSettings{Retry: retryPolicy, Compaction: compactionSettingsOf(settingsManager, model)},
+		ThinkingLevel:    thinkingLevel,
+		Skills:           skillsResult.Skills,
+		ContextFiles:     contextFiles,
+		SkillDiagnostics: skillsResult.Diagnostics,
+		SystemPrompt:     options.SystemPrompt,
+		ConvertToLlm:     convertToLlmWithBlockImages,
+		SessionID:        sessionID,
+		SteeringMode:     settingsManager.GetSteeringMode(),
+		FollowUpMode:     settingsManager.GetFollowUpMode(),
+		Transport:        ai.Transport(settingsManager.GetTransport()),
+		ThinkingBudgets:  thinkingBudgetsOf(settingsManager.GetThinkingBudgets()),
+		MaxRetryDelayMS:  &maxRetryDelay,
 	})
 	if err != nil {
 		return nil, err

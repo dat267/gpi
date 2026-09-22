@@ -299,6 +299,11 @@ func (s *AgentSession) ContextFiles() []ContextFile {
 	return append([]ContextFile{}, s.SystemPromptOptions.ContextFiles...)
 }
 
+// SkillDiagnostics returns the skill loader's warnings/collisions.
+func (s *AgentSession) SkillDiagnostics() []ResourceDiagnostic {
+	return append([]ResourceDiagnostic{}, s.skillDiagnostics...)
+}
+
 // AutoCompactionEnabled reports the auto-compaction toggle.
 func (s *AgentSession) AutoCompactionEnabled() bool {
 	if s.control == nil {

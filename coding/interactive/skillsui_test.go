@@ -58,6 +58,7 @@ func TestLoadedResourcesShowsSkills(t *testing.T) {
 		{Name: "tdd", Description: "Test-driven development", FilePath: "/skills/tdd/SKILL.md"},
 		{Name: "karpathy-guidelines", Description: "Guidelines", FilePath: "/skills/karpathy-guidelines/SKILL.md"},
 	}
+	app.Session.SystemPromptOptions.ContextFiles = []coding.ContextFile{{Path: "/tmp/project/AGENTS.md"}}
 	app.ShowLoadedResources(true)
 
 	rendered := coding.StripAnsi(strings.Join(app.LoadedResourcesContainer.Render(80), "\n"))
@@ -66,6 +67,9 @@ func TestLoadedResourcesShowsSkills(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "tdd") {
 		t.Fatalf("loaded resources missing skill name:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Context") {
+		t.Fatalf("loaded resources missing Context section:\n%s", rendered)
 	}
 }
 
@@ -97,5 +101,22 @@ func TestToolsExpandTogglesLoadedResources(t *testing.T) {
 	}
 	if !strings.Contains(renderLoaded(), "/skills/tdd/SKILL.md") {
 		t.Fatalf("expanded resources missing the skill path:\n%s", renderLoaded())
+	}
+}
+
+// TestFormatSkillDiagnostics covers the [Skill conflicts] body: collision
+// groups keep the winner and list the skipped losers, like upstream
+// formatDiagnostics.
+func TestFormatSkillDiagnostics(t *testing.T) {
+	rendered := coding.StripAnsi(formatSkillDiagnostics([]coding.ResourceDiagnostic{
+		{Type: "collision", Message: "name \"dup\" collision", Collision: &coding.ResourceCollision{
+			ResourceType: "skill", Name: "dup", WinnerPath: "/a/dup/SKILL.md", LoserPath: "/b/dup/SKILL.md",
+		}},
+		{Type: "warning", Message: "description is required", Path: "/c/SKILL.md"},
+	}))
+	for _, want := range []string{"\"dup\" collision:", "/a/dup/SKILL.md", "/b/dup/SKILL.md (skipped)", "/c/SKILL.md", "description is required"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("diagnostics missing %q:\n%s", want, rendered)
+		}
 	}
 }

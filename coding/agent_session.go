@@ -187,6 +187,9 @@ type AgentSession struct {
 
 	// System prompt options for section diffing on tool changes.
 	SystemPromptOptions *BuildSystemPromptOptions
+
+	// skillDiagnostics are the skill loader's warnings/collisions.
+	skillDiagnostics []ResourceDiagnostic
 }
 
 type sessionListenerKey struct {
@@ -195,18 +198,21 @@ type sessionListenerKey struct {
 
 // SessionConfig configures NewAgentSession.
 type SessionConfig struct {
-	Cwd             string
-	Model           *ai.Model
-	StreamFn        agent.StreamFn
-	APIKey          string
-	SystemPrompt    string
-	Tools           []agent.AgentTool
-	Sessions        *SessionManager
-	Settings        SessionSettings
-	ThinkingLevel   ai.ThinkingLevel
-	Skills          []Skill
-	ContextFiles    []ContextFile
-	InitialMessages []ai.Message
+	Cwd           string
+	Model         *ai.Model
+	StreamFn      agent.StreamFn
+	APIKey        string
+	SystemPrompt  string
+	Tools         []agent.AgentTool
+	Sessions      *SessionManager
+	Settings      SessionSettings
+	ThinkingLevel ai.ThinkingLevel
+	Skills        []Skill
+	ContextFiles  []ContextFile
+	// SkillDiagnostics are the skill loader's warnings/collisions, surfaced in
+	// the interactive loaded-resources area.
+	SkillDiagnostics []ResourceDiagnostic
+	InitialMessages  []ai.Message
 	// ConvertToLlm transforms messages before provider calls (the block-images
 	// filter).
 	ConvertToLlm func(messages []ai.Message) []ai.Message
@@ -267,6 +273,7 @@ func NewAgentSession(config *SessionConfig) (*AgentSession, error) {
 			CustomPrompt: config.SystemPrompt, Cwd: config.Cwd,
 			Skills: config.Skills, ContextFiles: config.ContextFiles,
 		},
+		skillDiagnostics: config.SkillDiagnostics,
 	}
 	// Always subscribed: session persistence, queue tracking, compaction,
 	// retry logic.
