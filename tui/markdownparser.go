@@ -543,6 +543,15 @@ func (l *mdLexer) lexParagraph(source string) (*MdToken, string) {
 		if len(rawLines) > 0 && l.startsNewBlock(line.text) {
 			break
 		}
+		// A GFM table interrupts the paragraph (marked: a line containing a
+		// pipe followed by a delimiter row ends the paragraph and lexes as a
+		// table; the hotkeys/export tables follow bold headings this way).
+		if len(rawLines) > 0 && strings.Contains(line.text, "|") {
+			next := mdNextLine(source[position+line.length:])
+			if mdTableDelimiterRegex.MatchString(next.text) {
+				break
+			}
+		}
 		rawLines = append(rawLines, line.text)
 		position += line.length
 	}
