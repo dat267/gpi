@@ -414,6 +414,9 @@ func (d *EventDispatcher) handleMessageEnd(event *coding.SessionEvent) {
 		}
 		d.pendingTools = map[string]*ToolExecutionComponent{}
 	} else {
+		// The streamed arguments may still be partial (they update per delta);
+		// the final message carries the complete values.
+		d.syncToolCallComponents(assistant)
 		for _, component := range d.pendingTools {
 			component.SetArgsComplete()
 		}
@@ -445,6 +448,10 @@ func (d *EventDispatcher) handleToolExecutionStart(event *coding.SessionEvent) {
 			return
 		}
 		d.pendingTools[agentEvent.ToolCallID] = component
+	} else {
+		// A component created mid-stream may still hold partial arguments;
+		// the execution-start event carries the final ones.
+		component.UpdateArgs(agentEvent.Args)
 	}
 	component.MarkExecutionStarted()
 	d.requestRender()
