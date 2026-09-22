@@ -236,28 +236,36 @@ func TruncateTail(content string, options TruncationOptions) TruncationResult {
 		}
 	}
 
-	var outputLines []string
+	// Collect the window backwards, then reverse it once: prepending into a
+	// fresh slice per kept line made this quadratic (34 MB allocated to keep
+	// 2000 lines), and the bash tool snapshots its output on every 64 KB read.
+	reversed := make([]string, 0, maxLines)
 	outputBytesCount := 0
 	truncatedBy := TruncatedByLines
 	lastLinePartial := false
 
-	for i := len(lines) - 1; i >= 0 && len(outputLines) < maxLines; i-- {
+	for i := len(lines) - 1; i >= 0 && len(reversed) < maxLines; i-- {
 		lineBytes := len(lines[i])
-		if len(outputLines) > 0 {
+		if len(reversed) > 0 {
 			lineBytes++ // +1 for the newline
 		}
 		if outputBytesCount+lineBytes > maxBytes {
 			truncatedBy = TruncatedByBytes
-			if len(outputLines) == 0 {
+			if len(reversed) == 0 {
 				truncatedLine := truncateStringToBytesFromEnd(lines[i], maxBytes)
-				outputLines = append([]string{truncatedLine}, outputLines...)
+				reversed = append(reversed, truncatedLine)
 				outputBytesCount = len(truncatedLine)
 				lastLinePartial = true
 			}
 			break
 		}
-		outputLines = append([]string{lines[i]}, outputLines...)
+		reversed = append(reversed, lines[i])
 		outputBytesCount += lineBytes
+	}
+
+	outputLines := make([]string, len(reversed))
+	for i, line := range reversed {
+		outputLines[len(reversed)-1-i] = line
 	}
 
 	if len(outputLines) >= maxLines && outputBytesCount <= maxBytes {
