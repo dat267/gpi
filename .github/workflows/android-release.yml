@@ -1,0 +1,51 @@
+name: android-release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+
+      # Pure-Go build: no NDK needed. CGO_ENABLED=0 targets android/arm64
+      # (the Termux architecture; android/amd64 and android/386 require cgo
+      # external linking and are skipped).
+      - name: build android/arm64 release
+        env:
+          CGO_ENABLED: "0"
+          GOOS: android
+          GOARCH: arm64
+          VERSION: ${{ github.ref_name }}
+        run: |
+          if [ -z "${VERSION#v}" ] || [ "$VERSION" = "main" ]; then VERSION="${GITHUB_SHA::7}"; fi
+          go build -trimpath -ldflags "-s -w -X github.com/dat267/pier/coding.Version=$VERSION" \
+            -o pier-android-arm64 ./cmd/pier
+          file pier-android-arm64
+          sha256sum pier-android-arm64 > pier-android-arm64.sha256
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pier-android-arm64
+          path: |
+            pier-android-arm64
+            pier-android-arm64.sha256
+
+      - name: attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" 2>/dev/null || true
+          gh release upload "$GITHUB_REF_NAME" pier-android-arm64 pier-android-arm64.sha256 --clobber
