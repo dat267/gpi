@@ -804,3 +804,64 @@ type StartupDiagnostic struct {
 	Type    string // "error" | "warning" | other
 	Message string
 }
+
+// newRunWiring assembles the RunWiring (port of the corresponding InteractiveMode wiring).
+func newRunWiring(app *App) *RunWiring {
+	return &RunWiring{
+		OnBeat:             func() { app.Transcript.MaterializeDeferred() },
+		RawTerminal:        app.rawTerminal,
+		RawInputs:          app.loopRawInputs,
+		Startup:            app.Startup,
+		Events:             app.Events,
+		SessionEvents:      app.sessionEvents.Events(),
+		PartialEvents:      app.sessionEvents.Partials(),
+		InputEvents:        app.loopInputs,
+		ResizeEvents:       app.loopResizes,
+		SignalEvents:       app.loopSignals,
+		OnSignal:           app.Lifecycle.HandleSignal,
+		UI:                 app.UI,
+		Settings:           app.Settings,
+		Terminal:           app.UI.GetTerminal(),
+		HeaderContainer:    app.HeaderContainer,
+		Chat:               app.Chat,
+		OutputPad:          app.options.Settings.GetOutputPad(),
+		ToolOutputExpanded: app.UIState.ToolOutputExpanded,
+		Verbose:            app.options.Verbose,
+		AppName:            app.options.AppName,
+		Version:            app.options.Version,
+
+		SetupKeyHandlers:      app.KeySetup,
+		SetupSubmitHandler:    app.SubmitSetup,
+		RenderInitialMessages: func() { app.Transcript.RenderInitialMessages() },
+		ShowLoadedResources:   app.ShowLoadedResources,
+		OnThemeChange: func(callback func()) func() {
+			// The theme watcher fires on its own goroutine; deliver the change
+			// on the UI loop (stage 4).
+			OnThemeChange(func() {
+				if app.UI != nil {
+					app.UI.Post(callback)
+					return
+				}
+				callback()
+			})
+			return func() {}
+		},
+		OnBranchChange: func(callback func()) func() { return app.FooterData.OnBranchChange(callback) },
+		RefreshModelCatalogs: func(ctx context.Context) error {
+			_, err := RefreshModelCatalogs(ctx, app.Runtime)
+			return err
+		},
+		CheckTmux: func() string { return app.Startup.CheckTmuxKeyboardSetup(os.Getenv("TMUX") != "") },
+		TakeCrash: func() *coding.CrashRecord {
+			return coding.TakeUnnotifiedCrash(coding.GetCrashLogPath(app.options.AgentDir), time.Now().UnixMilli())
+		},
+		Prompt:      func(ctx context.Context, text string) error { return app.Session.Prompt(ctx, text, nil) },
+		ShowStatus:  func(message string) { app.Transcript.ShowStatus(message) },
+		ShowError:   app.RunnerShowChatError,
+		ShowWarning: app.RunnerShowChatWarning,
+		WarnAnthropic: func(ctx context.Context) {
+			app.Startup.MaybeWarnAboutAnthropicSubscriptionAuth(ctx, app.Session.Model())
+		},
+		RequestRender: func() { app.UI.RequestRender(false) },
+	}
+}

@@ -470,3 +470,35 @@ func (w *SessionWiring) HandleResumeSession(ctx context.Context, sessionPath str
 	w.showError("Failed to resume session: " + err.Error())
 	return SessionSwitchResult{}
 }
+
+// newModelWiring assembles the ModelWiring (port of the corresponding InteractiveMode wiring).
+func newModelWiring(app *App) *ModelWiring {
+	return &ModelWiring{
+		Slot:                         app.Slot,
+		Settings:                     app.Settings,
+		Session:                      app.modelSession(),
+		UI:                           app.UI,
+		UpdateAvailableProviderCount: func() { app.Startup.UpdateAvailableProviderCount() },
+		UpdateEditorBorderColor:      func() { app.updateEditorBorderColor() },
+		ShowStatus:                   func(message string) { app.Transcript.ShowStatus(message) },
+		ShowError:                    func(message string) { app.showError(message) },
+		OnModelSelected:              func(model *ai.Model) {},
+		RequestRender:                func() { app.UI.RequestRender(false) },
+	}
+}
+
+// newSessionWiring assembles the SessionWiring (port of the corresponding InteractiveMode wiring).
+func newSessionWiring(app *App) *SessionWiring {
+	return &SessionWiring{
+		Slot:                 app.Slot,
+		Settings:             app.Settings,
+		SessionInfo:          app.SessionMgr,
+		UI:                   app.UI,
+		Keybindings:          app.Keybindings.KeybindingsManager,
+		ShowStatus:           func(message string) { app.Transcript.ShowStatus(message) },
+		ShowError:            func(message string) { app.showError(message) },
+		Shutdown:             func() { app.Lifecycle.Shutdown(false) },
+		RequestRender:        func() { app.UI.RequestRender(false) },
+		ClearStatusIndicator: func() { app.UIState.ClearStatusIndicator("", false) },
+		SwitchSession:        app.SwitchSession}
+}

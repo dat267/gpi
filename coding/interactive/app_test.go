@@ -222,3 +222,62 @@ func renderAppChat(app *App) string {
 		return coding.StripAnsi(strings.Join(lines, "\n"))
 	}
 }
+
+// TestAppWiringCompleteness guards the composition root's failure mode: a
+// wiring field that NewApp silently never assigns. /debug (WriteDebugLog) and
+// right-click paste both shipped unwired this way. Each wiring now owns its
+// constructor, so the required hooks are asserted here after NewApp.
+func TestAppWiringCompleteness(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+
+	required := []struct {
+		name string
+		set  bool
+	}{
+		{"Commands.WriteDebugLog", app.Commands.WriteDebugLog != nil},
+		{"Commands.CopyToClipboard", app.Commands.CopyToClipboard != nil},
+		{"Commands.ReloadNow", app.Commands.ReloadNow != nil},
+		{"Commands.ApplyReloadedSettings", app.Commands.ApplyReloadedSettings != nil},
+		{"Commands.ExportToHTML", app.Commands.ExportToHTML != nil},
+		{"Commands.MarkdownTheme", app.Commands.MarkdownTheme != nil},
+		{"Commands.RunDetached", app.Commands.RunDetached != nil},
+		{"Autocomplete.Skills", app.Autocomplete.Skills != nil},
+		{"Autocomplete.LoginProviders", app.Autocomplete.LoginProviders != nil},
+		{"Runner.ShowLoadedResources", app.Runner.ShowLoadedResources != nil},
+		{"Runner.OnSignal", app.Runner.OnSignal != nil},
+		{"Runner.Prompt", app.Runner.Prompt != nil},
+		{"Runner.RefreshModelCatalogs", app.Runner.RefreshModelCatalogs != nil},
+		{"Runner.TakeCrash", app.Runner.TakeCrash != nil},
+		{"Runner.ShowError", app.Runner.ShowError != nil},
+		{"Runner.RequestRender", app.Runner.RequestRender != nil},
+		{"Runner.SetupKeyHandlers", app.Runner.SetupKeyHandlers != nil},
+		{"Runner.SetupSubmitHandler", app.Runner.SetupSubmitHandler != nil},
+		{"Key.OnToolsExpand", app.Key.OnToolsExpand != nil},
+		{"Key.OnPasteImage", app.Key.OnPasteImage != nil},
+		{"Key.OnModelSelect", app.Key.OnModelSelect != nil},
+		{"Key.OnSessionTree", app.Key.OnSessionTree != nil},
+		{"Key.OnExit", app.Key.OnExit != nil},
+		{"Submit.Handlers.HandleDebugCommand", app.Submit.Handlers.HandleDebugCommand != nil},
+		{"Submit.Handlers.HandleReloadCommand", app.Submit.Handlers.HandleReloadCommand != nil},
+		{"Submit.Handlers.HandleCompactCommand", app.Submit.Handlers.HandleCompactCommand != nil},
+		{"Submit.Handlers.HandleExportCommand", app.Submit.Handlers.HandleExportCommand != nil},
+		{"Submit.Handlers.HandleHotkeysCommand", app.Submit.Handlers.HandleHotkeysCommand != nil},
+		{"Submit.Handlers.ShowTrustSelector", app.Submit.Handlers.ShowTrustSelector != nil},
+		{"Submit.Handlers.Shutdown", app.Submit.Handlers.Shutdown != nil},
+		{"Trust.Stop", app.Trust.Stop != nil},
+		{"Startup.ShowError", app.Startup.ShowError != nil},
+		{"Startup.ShowStatus", app.Startup.ShowStatus != nil},
+		{"Startup.RequestRender", app.Startup.RequestRender != nil},
+		{"Selectors.ShowError", app.Selectors.ShowError != nil},
+		{"SettingsW.RequestRender", app.SettingsW.RequestRender != nil},
+		{"Models.ShowError", app.Models.ShowError != nil},
+		{"Sessions.Shutdown", app.Sessions.Shutdown != nil},
+		{"Auth.ShowError", app.Auth.ShowError != nil},
+	}
+	for _, check := range required {
+		if !check.set {
+			t.Errorf("%s is not wired", check.name)
+		}
+	}
+}

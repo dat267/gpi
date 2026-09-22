@@ -677,3 +677,54 @@ func WriteDebugLogFile(content string) error {
 }
 
 var errNotAvailable = errors.New("not available")
+
+// newCommandWiring assembles the CommandWiring (port of the corresponding InteractiveMode wiring).
+func newCommandWiring(app *App) *CommandWiring {
+	return &CommandWiring{
+		Chat:                 app.Chat,
+		UI:                   app.UI,
+		Settings:             app.Settings,
+		Session:              app.commandSession(),
+		SessionInfo:          app.SessionMgr,
+		AppName:              app.options.AppName,
+		Platform:             app.options.Platform,
+		ShowStatus:           func(message string) { app.Transcript.ShowStatus(message) },
+		ShowError:            func(message string) { app.showError(message) },
+		ShowWarning:          func(message string) { app.showWarning(message) },
+		RequestRender:        func() { app.UI.RequestRender(false) },
+		ClearStatusIndicator: func() { app.UIState.ClearStatusIndicator("", false) },
+		MarkdownTheme:        func() tui.MarkdownTheme { return *app.markdownTheme() },
+		ExportToHTML: func(outputPath string) (string, error) {
+			themeSetting := app.Settings.GetThemeSetting()
+			themeName := ""
+			if themeSetting != nil {
+				themeName = *themeSetting
+			}
+			return app.Session.ExportSessionToHTML(outputPath, themeName)
+		},
+
+		CopyToClipboard: func(text string) (bool, string) {
+			if err := coding.CopyTextToClipboard(text); err != nil {
+				return false, err.Error()
+			}
+			return true, ""
+		},
+		WriteDebugLog:   WriteDebugLogFile,
+		EditorContainer: app.EditorContainer,
+		Editor:          app.DefaultEditor,
+		RunDetached: func(fn func()) {
+			app.runDetached(func(ctx context.Context) error { fn(); return nil })
+		},
+		ReloadNow: func() (string, bool, error) {
+			// Upstream session.reload's in-scope subset: settings re-read,
+			// session queue modes, keybindings, implicit project trust
+			// (extension runner and resource loader are out of scope, D41).
+			app.Settings.Reload()
+			app.Session.SetSteeringMode(app.Settings.GetSteeringMode())
+			app.Session.SetFollowUpMode(app.Settings.GetFollowUpMode())
+			app.Keybindings.Reload()
+			savedTrust := app.Trust.MaybeSaveImplicitProjectTrustAfterReload(app.AutoTrustOnReloadCwd)
+			return app.Session.ModelRuntime().GetError(), savedTrust, nil
+		},
+		ApplyReloadedSettings: app.applyReloadedSettings}
+}

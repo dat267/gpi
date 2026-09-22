@@ -357,3 +357,24 @@ func (w *StartupWiring) MaybeWarnAboutAnthropicSubscriptionAuth(ctx context.Cont
 	w.anthropicSubscriptionWarningShown = true
 	w.showWarning(AnthropicSubscriptionAuthWarning)
 }
+
+// newStartupWiring assembles the StartupWiring (port of the corresponding InteractiveMode wiring).
+func newStartupWiring(app *App) *StartupWiring {
+	return &StartupWiring{
+		UI:              app.UI,
+		Session:         app.Session,
+		Settings:        app.Settings,
+		Terminal:        app.UI.GetTerminal(),
+		Chat:            app.Chat,
+		PendingMessages: app.PendingMessages,
+		LoadedResources: app.LoadedResourcesContainer,
+		Transcript:      app.Transcript,
+		FooterData:      app.FooterData,
+		SessionInfo:     app.SessionMgr,
+		Version:         app.options.Version,
+		ShowWarning:     func(message string) { app.showWarning(message) },
+		ShowError:       func(message string) { app.showError(message) },
+		ShowStatus:      func(message string) { app.Transcript.ShowStatus(message) },
+		RequestRender:   func() { app.UI.RequestRender(false) },
+	}
+}

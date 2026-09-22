@@ -391,3 +391,37 @@ func PrefixAutocompleteDescription(description string, sourceInfo *coding.Source
 
 // trimSlash strips a leading slash.
 func trimSlash(value string) string { return strings.TrimPrefix(value, "/") }
+
+// newTrustCrashWiring assembles the TrustCrashWiring (port of the corresponding InteractiveMode wiring).
+func newTrustCrashWiring(app *App) *TrustCrashWiring {
+	return &TrustCrashWiring{
+		Chat:             app.Chat,
+		UI:               app.UI,
+		Settings:         app.Settings,
+		SessionInfo:      app.SessionMgr,
+		AppName:          app.options.AppName,
+		OutputPad:        app.options.Settings.GetOutputPad(),
+		AgentDir:         app.options.AgentDir,
+		SessionFile:      func() string { return app.Session.SessionFile() },
+		ShowError:        func(message string) { app.showError(message) },
+		RequestRender:    func() { app.UI.RequestRender(false) },
+		StopThemeWatcher: func() { StopThemeWatcher() },
+		// Upstream's fatal path calls stop(), which reads the
+		// fullscreenExitOutput setting.
+		Stop: func(string) { app.StopMode(app.options.Settings.GetFullscreenExitOutput()) },
+		Exit: app.options.Exit,
+	}
+}
+
+// newAutocompleteWiring assembles the AutocompleteWiring (port of the corresponding InteractiveMode wiring).
+func newAutocompleteWiring(app *App) *AutocompleteWiring {
+	return &AutocompleteWiring{
+		Session:        app.Session,
+		Settings:       app.Settings,
+		SessionInfo:    app.SessionMgr,
+		UI:             app.UI,
+		DefaultEditor:  app.DefaultEditor,
+		Editor:         app.DefaultEditor,
+		LoginProviders: func() []AuthSelectorProvider { return app.Auth.GetLoginProviderOptions("") },
+		Skills:         app.skillCommands}
+}

@@ -647,3 +647,22 @@ func modelsForProvider(models []*ai.Model, providerID string) []*ai.Model {
 	}
 	return result
 }
+
+// newAuthWiring assembles the AuthWiring (port of the corresponding InteractiveMode wiring).
+func newAuthWiring(app *App) *AuthWiring {
+	return &AuthWiring{
+		Slot:                         app.Slot,
+		EditorContainer:              app.EditorContainer,
+		Editor:                       app.DefaultEditor,
+		UI:                           app.UI,
+		Session:                      app.Session,
+		Settings:                     app.Settings,
+		ShowStatus:                   func(message string) { app.Transcript.ShowStatus(message) },
+		ShowError:                    func(message string) { app.showError(message) },
+		ShowWarning:                  func(message string) { app.showWarning(message) },
+		UpdateAvailableProviderCount: func() { app.Startup.UpdateAvailableProviderCount() },
+		UpdateEditorBorderColor:      func() { app.updateEditorBorderColor() },
+		OnAuthenticated:              func(model *ai.Model, hasModel bool) {},
+		RequestRender:                func() { app.UI.RequestRender(false) },
+		AuthPath:                     coding.GetAgentDir() + "/auth.json"}
+}

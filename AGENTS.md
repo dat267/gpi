@@ -161,6 +161,12 @@ into narrow, injectable wirings (all in `coding/interactive`):
   `extensionsselector.go`, `sessionshare.go`, `interactivemode_helpers.go`.
 - `cmd/pier/main.go` — boots settings/auth/model-runtime/agent-session and runs
   the `App` (port of `main.ts`'s boot).
+- Each `*Wiring` has a constructor next to its struct (`newCommandWiring(app)`,
+  `newRunWiring(app)`, …) that owns its full field wiring; `NewApp` is the
+  object graph plus a sequence of constructor calls. A field cannot be silently
+  skipped in the composition root because it lives with its struct —
+  `TestAppWiringCompleteness` pins the required hooks (the `/debug`
+  `WriteDebugLog` and right-click-paste hooks shipped unwired this way).
 
 `tui/render.go` (+ `mainscreen.go`, `altscreen.go`, `terminal.go`,
 `stdinbuffer.go`) is the differential renderer core. Its lock discipline is

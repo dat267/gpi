@@ -5,11 +5,10 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
-
-	"golang.org/x/term"
 	"time"
 
-	"github.com/dat267/pier/ai"
+	"golang.org/x/term"
+
 	"github.com/dat267/pier/coding"
 	"github.com/dat267/pier/tui"
 )
@@ -275,23 +274,7 @@ func NewApp(options AppOptions) *App {
 	app.FooterContainer.AddChild(app.Footer)
 
 	// Trust/crash helpers (used by the event dispatcher and lifecycle).
-	app.Trust = &TrustCrashWiring{
-		Chat:             app.Chat,
-		UI:               app.UI,
-		Settings:         app.Settings,
-		SessionInfo:      app.SessionMgr,
-		AppName:          options.AppName,
-		OutputPad:        options.Settings.GetOutputPad(),
-		AgentDir:         options.AgentDir,
-		SessionFile:      func() string { return app.Session.SessionFile() },
-		ShowError:        func(message string) { app.showError(message) },
-		RequestRender:    func() { app.UI.RequestRender(false) },
-		StopThemeWatcher: func() { StopThemeWatcher() },
-		// Upstream's fatal path calls stop(), which reads the
-		// fullscreenExitOutput setting.
-		Stop: func(string) { app.StopMode(options.Settings.GetFullscreenExitOutput()) },
-		Exit: options.Exit,
-	}
+	app.Trust = newTrustCrashWiring(app)
 
 	// Upstream main.ts:706: capture at startup so a later /reload can save
 	// an implicitly-trusted project whose cwd gained trust-requiring
@@ -413,332 +396,32 @@ func NewApp(options AppOptions) *App {
 		StopMode:             func(output string) { app.StopMode(output) },
 	})
 
-	app.Startup = &StartupWiring{
-		UI:              app.UI,
-		Session:         app.Session,
-		Settings:        app.Settings,
-		Terminal:        terminal,
-		Chat:            app.Chat,
-		PendingMessages: app.PendingMessages,
-		LoadedResources: app.LoadedResourcesContainer,
-		Transcript:      app.Transcript,
-		FooterData:      app.FooterData,
-		SessionInfo:     app.SessionMgr,
-		Version:         options.Version,
-		ShowWarning:     func(message string) { app.showWarning(message) },
-		ShowError:       func(message string) { app.showError(message) },
-		ShowStatus:      func(message string) { app.Transcript.ShowStatus(message) },
-		RequestRender:   func() { app.UI.RequestRender(false) },
-	}
+	app.Startup = newStartupWiring(app)
 	// The submission channel exists from composition so the run loop always
 	// has a consumer side to select on.
 	app.Startup.InitInputs()
 
 	app.sessionEvents = newSessionEventQueue()
 
-	app.Runner = &RunWiring{
-		OnBeat:             func() { app.Transcript.MaterializeDeferred() },
-		RawTerminal:        app.rawTerminal,
-		RawInputs:          app.loopRawInputs,
-		Startup:            app.Startup,
-		Events:             app.Events,
-		SessionEvents:      app.sessionEvents.Events(),
-		PartialEvents:      app.sessionEvents.Partials(),
-		InputEvents:        app.loopInputs,
-		ResizeEvents:       app.loopResizes,
-		SignalEvents:       app.loopSignals,
-		OnSignal:           app.Lifecycle.HandleSignal,
-		UI:                 app.UI,
-		Settings:           app.Settings,
-		Terminal:           terminal,
-		HeaderContainer:    app.HeaderContainer,
-		Chat:               app.Chat,
-		OutputPad:          options.Settings.GetOutputPad(),
-		ToolOutputExpanded: app.UIState.ToolOutputExpanded,
-		Verbose:            options.Verbose,
-		AppName:            options.AppName,
-		Version:            options.Version,
+	app.Runner = newRunWiring(app)
 
-		SetupKeyHandlers:      app.KeySetup,
-		SetupSubmitHandler:    app.SubmitSetup,
-		RenderInitialMessages: func() { app.Transcript.RenderInitialMessages() },
-		ShowLoadedResources:   app.ShowLoadedResources,
-		OnThemeChange: func(callback func()) func() {
-			// The theme watcher fires on its own goroutine; deliver the change
-			// on the UI loop (stage 4).
-			OnThemeChange(func() {
-				if app.UI != nil {
-					app.UI.Post(callback)
-					return
-				}
-				callback()
-			})
-			return func() {}
-		},
-		OnBranchChange: func(callback func()) func() { return app.FooterData.OnBranchChange(callback) },
-		RefreshModelCatalogs: func(ctx context.Context) error {
-			_, err := RefreshModelCatalogs(ctx, app.Runtime)
-			return err
-		},
-		CheckTmux: func() string { return app.Startup.CheckTmuxKeyboardSetup(os.Getenv("TMUX") != "") },
-		TakeCrash: func() *coding.CrashRecord {
-			return coding.TakeUnnotifiedCrash(coding.GetCrashLogPath(options.AgentDir), time.Now().UnixMilli())
-		},
-		Prompt:      func(ctx context.Context, text string) error { return app.Session.Prompt(ctx, text, nil) },
-		ShowStatus:  func(message string) { app.Transcript.ShowStatus(message) },
-		ShowError:   app.RunnerShowChatError,
-		ShowWarning: app.RunnerShowChatWarning,
-		WarnAnthropic: func(ctx context.Context) {
-			app.Startup.MaybeWarnAboutAnthropicSubscriptionAuth(ctx, app.Session.Model())
-		},
-		RequestRender: func() { app.UI.RequestRender(false) },
-	}
+	app.Selectors = newSelectorWiring(app)
 
-	app.Selectors = &SelectorWiring{
-		Slot:                    app.Slot,
-		Session:                 app.Session,
-		Settings:                app.Settings,
-		SessionInfo:             app.SessionMgr,
-		AgentDir:                options.AgentDir,
-		ShowStatus:              func(message string) { app.Transcript.ShowStatus(message) },
-		ShowError:               func(message string) { app.showError(message) },
-		UpdateEditorBorderColor: func() { app.updateEditorBorderColor() },
-		TerminalRows:            func() int { return app.UI.GetTerminal().Rows() },
-		ShowStatusIndicator:     func(kind StatusIndicatorKind) {},
-		RestoreQueuedMessagesToEditor: func() {
-			text := app.DefaultEditor.GetText()
-			app.Queue.RestoreQueuedMessagesToEditor(true, text, text != "")
-		},
-		OnEditorText: func(text string) { app.DefaultEditor.SetText(text) },
-	}
+	app.SettingsW = newSettingsWiring(app)
 
-	app.SettingsW = &SettingsWiring{
-		Slot:                          app.Slot,
-		Settings:                      app.Settings,
-		Session:                       app.Session,
-		ThemeController:               themeSettingsControllerAdapter{app.Theme},
-		UI:                            app.UI,
-		Chat:                          app.Chat,
-		DefaultEditor:                 app.DefaultEditor,
-		Editor:                        app.DefaultEditor,
-		Renderer:                      app.UI,
-		UpdateThinkingBlockVisibility: func(hidden bool) { app.updateThinkingBlockVisibility(hidden) },
-		RebuildChatFromMessages:       func() { app.Startup.RebuildChatFromMessages() },
-		UpdateEditorBorderColor:       func() { app.updateEditorBorderColor() },
-		SetupAutocompleteProvider:     func() { app.Autocomplete.SetupAutocompleteProvider() },
-		SwitchTuiMode:                 func(mode string) bool { return app.Lifecycle.SwitchTuiMode(mode, true, true) },
-		ShowStatus:                    func(message string) { app.Transcript.ShowStatus(message) },
-		RequestRender:                 func() { app.UI.RequestRender(false) },
-	}
+	app.Models = newModelWiring(app)
 
-	app.Models = &ModelWiring{
-		Slot:                         app.Slot,
-		Settings:                     app.Settings,
-		Session:                      app.modelSession(),
-		UI:                           app.UI,
-		UpdateAvailableProviderCount: func() { app.Startup.UpdateAvailableProviderCount() },
-		UpdateEditorBorderColor:      func() { app.updateEditorBorderColor() },
-		ShowStatus:                   func(message string) { app.Transcript.ShowStatus(message) },
-		ShowError:                    func(message string) { app.showError(message) },
-		OnModelSelected:              func(model *ai.Model) {},
-		RequestRender:                func() { app.UI.RequestRender(false) },
-	}
+	app.Sessions = newSessionWiring(app)
 
-	app.Sessions = &SessionWiring{
-		Slot:                 app.Slot,
-		Settings:             app.Settings,
-		SessionInfo:          app.SessionMgr,
-		UI:                   app.UI,
-		Keybindings:          keybindings.KeybindingsManager,
-		ShowStatus:           func(message string) { app.Transcript.ShowStatus(message) },
-		ShowError:            func(message string) { app.showError(message) },
-		Shutdown:             func() { app.Lifecycle.Shutdown(false) },
-		RequestRender:        func() { app.UI.RequestRender(false) },
-		ClearStatusIndicator: func() { app.UIState.ClearStatusIndicator("", false) },
-		SwitchSession:        app.SwitchSession,
-	}
+	app.Auth = newAuthWiring(app)
 
-	app.Auth = &AuthWiring{
-		Slot:                         app.Slot,
-		EditorContainer:              app.EditorContainer,
-		Editor:                       app.DefaultEditor,
-		UI:                           app.UI,
-		Session:                      app.Session,
-		Settings:                     app.Settings,
-		ShowStatus:                   func(message string) { app.Transcript.ShowStatus(message) },
-		ShowError:                    func(message string) { app.showError(message) },
-		ShowWarning:                  func(message string) { app.showWarning(message) },
-		UpdateAvailableProviderCount: func() { app.Startup.UpdateAvailableProviderCount() },
-		UpdateEditorBorderColor:      func() { app.updateEditorBorderColor() },
-		OnAuthenticated:              func(model *ai.Model, hasModel bool) {},
-		RequestRender:                func() { app.UI.RequestRender(false) },
-		AuthPath:                     coding.GetAgentDir() + "/auth.json",
-	}
+	app.Commands = newCommandWiring(app)
 
-	app.Commands = &CommandWiring{
-		Chat:                 app.Chat,
-		UI:                   app.UI,
-		Settings:             app.Settings,
-		Session:              app.commandSession(),
-		SessionInfo:          app.SessionMgr,
-		AppName:              options.AppName,
-		Platform:             options.Platform,
-		ShowStatus:           func(message string) { app.Transcript.ShowStatus(message) },
-		ShowError:            func(message string) { app.showError(message) },
-		ShowWarning:          func(message string) { app.showWarning(message) },
-		RequestRender:        func() { app.UI.RequestRender(false) },
-		ClearStatusIndicator: func() { app.UIState.ClearStatusIndicator("", false) },
-		MarkdownTheme:        func() tui.MarkdownTheme { return *app.markdownTheme() },
-		ExportToHTML: func(outputPath string) (string, error) {
-			themeSetting := app.Settings.GetThemeSetting()
-			themeName := ""
-			if themeSetting != nil {
-				themeName = *themeSetting
-			}
-			return app.Session.ExportSessionToHTML(outputPath, themeName)
-		},
+	app.Key = newKeyWiring(app)
 
-		CopyToClipboard: func(text string) (bool, string) {
-			if err := coding.CopyTextToClipboard(text); err != nil {
-				return false, err.Error()
-			}
-			return true, ""
-		},
-		WriteDebugLog:   WriteDebugLogFile,
-		EditorContainer: app.EditorContainer,
-		Editor:          app.DefaultEditor,
-		RunDetached: func(fn func()) {
-			app.runDetached(func(ctx context.Context) error { fn(); return nil })
-		},
-		ReloadNow: func() (string, bool, error) {
-			// Upstream session.reload's in-scope subset: settings re-read,
-			// session queue modes, keybindings, implicit project trust
-			// (extension runner and resource loader are out of scope, D41).
-			app.Settings.Reload()
-			app.Session.SetSteeringMode(app.Settings.GetSteeringMode())
-			app.Session.SetFollowUpMode(app.Settings.GetFollowUpMode())
-			app.Keybindings.Reload()
-			savedTrust := app.Trust.MaybeSaveImplicitProjectTrustAfterReload(app.AutoTrustOnReloadCwd)
-			return app.Session.ModelRuntime().GetError(), savedTrust, nil
-		},
-		ApplyReloadedSettings: app.applyReloadedSettings,
-	}
+	app.Submit = newSubmitWiring(app)
 
-	app.Key = &KeyWiring{
-		Session: app.Session,
-		Editor:  app.DefaultEditor,
-		OnPasteImage: func() {
-			// Upstream handleClipboardPaste pastes a clipboard image first and
-			// falls back to text; image transports are out of scope (D41
-			// scope note in AGENTS.md), so the text path is ported.
-			text, err := readClipboardText()
-			if err != nil || text == "" {
-				return
-			}
-			app.DefaultEditor.InsertTextAtCursor(text)
-			app.UI.RequestRender(false)
-		},
-		Settings: app.Settings,
-		UI:       app.UI,
-		Queue:    app.Queue,
-		OnExit:   func() { app.Lifecycle.Shutdown(false) },
-		OnSuspend: func() {
-			app.Lifecycle.HandleCtrlZ(func(message string) { app.Transcript.ShowStatus(message) }, nil)
-		},
-		OnThinkingCycle:      func() { app.Queue.CycleThinkingLevel() },
-		OnModelCycleForward:  func() { _, _ = app.Queue.CycleModel(context.Background(), "forward") },
-		OnModelCycleBackward: func() { _, _ = app.Queue.CycleModel(context.Background(), "backward") },
-		OnModelSelect:        func() { app.Models.ShowModelSelector(context.Background(), "") },
-		OnToolsExpand: func() {
-			expanded := app.UIState.ToolOutputExpanded
-			app.Queue.ToggleToolOutputExpansion(&expanded, func(value bool) {
-				app.Queue.SetToolsExpanded(value, &app.UIState.ToolOutputExpanded, app.UIState.BuiltInHeader, app.LoadedResourcesContainer)
-			})
-		},
-		OnThinkingToggle: func() {
-			hidden := app.Transcript.HideThinkingBlock
-			app.Queue.ToggleThinkingBlockVisibility(&hidden)
-		},
-		OnSessionTree:   func() { app.Selectors.ShowTreeSelector(context.Background(), "", false) },
-		OnSessionFork:   func() { app.Selectors.ShowUserMessageSelector(context.Background()) },
-		OnSessionResume: app.Sessions.ShowSessionSelector,
-		OnSessionNew: func() {
-			if _, err := app.SessionNew(context.Background()); err != nil {
-				app.showWarning(err.Error())
-			}
-		},
-		ShowTreeSelector:        func() { app.Selectors.ShowTreeSelector(context.Background(), "", false) },
-		ShowUserMessageSelector: func() { app.Selectors.ShowUserMessageSelector(context.Background()) },
-	}
-	app.Key.OnClear = func() { app.Lifecycle.HandleCtrlC(func() { app.DefaultEditor.SetText("") }) }
-
-	app.Submit = &SubmitWiring{
-		Editor:        app.DefaultEditor,
-		Session:       app.Session,
-		Settings:      app.Settings,
-		Queue:         app.Queue,
-		OnInput:       app.Startup.QueueUserInput,
-		ShowStatus:    func(message string) { app.Transcript.ShowStatus(message) },
-		ShowWarning:   func(message string) { app.showWarning(message) },
-		RequestRender: func() { app.UI.RequestRender(false) },
-		Handlers: SubmitHandlers{
-			ShowSettingsSelector: app.SettingsW.ShowSettingsSelector,
-			ShowModelsSelector:   func() error { app.Models.ShowModelsSelector(context.Background()); return nil },
-			HandleModelCommand: func(searchTerm string) error {
-				app.Models.ShowModelSelector(context.Background(), searchTerm)
-				return nil
-			},
-			HandleThinkingCommand:   app.Selectors.HandleThinkingCommand,
-			HandleExportCommand:     func(text string) error { app.Commands.HandleExportCommand(context.Background(), text); return nil },
-			HandleImportCommand:     func(text string) error { app.Commands.HandleImportCommand(context.Background(), text); return nil },
-			HandleCopyCommand:       func() error { app.Commands.HandleCopyCommand(false, false); return nil },
-			HandleNameCommand:       app.Commands.HandleNameCommand,
-			HandleSessionCommand:    func() { app.Commands.HandleSessionCommand(time.Now().UnixMilli()) },
-			HandleHotkeysCommand:    app.Commands.HandleHotkeysCommand,
-			ShowUserMessageSelector: func() { app.Selectors.ShowUserMessageSelector(context.Background()) },
-			ShowTreeSelector:        func() { app.Selectors.ShowTreeSelector(context.Background(), "", false) },
-			ShowTrustSelector:       app.Selectors.ShowTrustSelector,
-			HandleLoginCommand: func(providerRef string) error {
-				app.Auth.HandleLoginCommand(context.Background(), providerRef)
-				return nil
-			},
-			ShowOAuthSelector:  func(mode string) { app.Auth.ShowOAuthSelector(context.Background(), mode) },
-			HandleClearCommand: func() error { app.Commands.HandleClearCommand(context.Background()); return nil },
-			HandleCompactCommand: func(instructions string) error {
-				// The indicator is UI state (loop side); the compaction itself
-				// only emits session events. It runs detached, not through
-				// RunWork's single slot: upstream session.compact() aborts the
-				// active run and compacts immediately, while a queued work item
-				// would leave a mid-run /compact inert until the turn finished
-				// on its own.
-				app.Commands.ClearCompactionStatus()
-				app.runDetached(func(ctx context.Context) error {
-					app.Commands.CompactSession(ctx, instructions)
-					return nil
-				})
-				return nil
-			},
-			HandleReloadCommand: func() error { app.Commands.HandleReloadCommand(); return nil },
-			HandleDebugCommand: func() {
-				app.Commands.HandleDebugCommand(time.Now().UTC().Format("2006-01-02T15:04:05.000Z"))
-			},
-			HandleArminSaysHi:    func() { app.Commands.HandleArminSaysHi(app.UI, time.Now().UnixNano()) },
-			HandleDementedDelves: app.Commands.HandleDementedDelves,
-			ShowSessionSelector:  app.Sessions.ShowSessionSelector,
-			Shutdown:             func() error { app.Lifecycle.Shutdown(false); return nil },
-		},
-	}
-
-	app.Autocomplete = &AutocompleteWiring{
-		Session:        app.Session,
-		Settings:       app.Settings,
-		SessionInfo:    app.SessionMgr,
-		UI:             app.UI,
-		DefaultEditor:  app.DefaultEditor,
-		Editor:         app.DefaultEditor,
-		LoginProviders: func() []AuthSelectorProvider { return app.Auth.GetLoginProviderOptions("") },
-		Skills:         app.skillCommands,
-	}
+	app.Autocomplete = newAutocompleteWiring(app)
 
 	return app
 }

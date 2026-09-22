@@ -453,3 +453,24 @@ func (w *SelectorWiring) showExtensionEditor(ctx context.Context, title string) 
 	}
 	return w.ShowExtensionEditor(ctx, title)
 }
+
+// newSelectorWiring assembles the SelectorWiring (port of the corresponding InteractiveMode wiring).
+func newSelectorWiring(app *App) *SelectorWiring {
+	return &SelectorWiring{
+		Slot:                    app.Slot,
+		Session:                 app.Session,
+		Settings:                app.Settings,
+		SessionInfo:             app.SessionMgr,
+		AgentDir:                app.options.AgentDir,
+		ShowStatus:              func(message string) { app.Transcript.ShowStatus(message) },
+		ShowError:               func(message string) { app.showError(message) },
+		UpdateEditorBorderColor: func() { app.updateEditorBorderColor() },
+		TerminalRows:            func() int { return app.UI.GetTerminal().Rows() },
+		ShowStatusIndicator:     func(kind StatusIndicatorKind) {},
+		RestoreQueuedMessagesToEditor: func() {
+			text := app.DefaultEditor.GetText()
+			app.Queue.RestoreQueuedMessagesToEditor(true, text, text != "")
+		},
+		OnEditorText: func(text string) { app.DefaultEditor.SetText(text) },
+	}
+}

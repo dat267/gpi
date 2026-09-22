@@ -3,6 +3,7 @@ package interactive
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/dat267/pier/coding"
 	"github.com/dat267/pier/tui"
@@ -463,4 +464,116 @@ func (w *SubmitWiring) HandleSubmit(ctx context.Context, text string) {
 		*w.PendingUserInputs = append(*w.PendingUserInputs, text)
 	}
 	addHistory(text)
+}
+
+// newKeyWiring assembles the KeyWiring (port of the corresponding InteractiveMode wiring).
+func newKeyWiring(app *App) *KeyWiring {
+	wiring := &KeyWiring{
+		Session: app.Session,
+		Editor:  app.DefaultEditor,
+		OnPasteImage: func() {
+			// Upstream handleClipboardPaste pastes a clipboard image first and
+			// falls back to text; image transports are out of scope (D41
+			// scope note in AGENTS.md), so the text path is ported.
+			text, err := readClipboardText()
+			if err != nil || text == "" {
+				return
+			}
+			app.DefaultEditor.InsertTextAtCursor(text)
+			app.UI.RequestRender(false)
+		},
+		Settings: app.Settings,
+		UI:       app.UI,
+		Queue:    app.Queue,
+		OnExit:   func() { app.Lifecycle.Shutdown(false) },
+		OnSuspend: func() {
+			app.Lifecycle.HandleCtrlZ(func(message string) { app.Transcript.ShowStatus(message) }, nil)
+		},
+		OnThinkingCycle:      func() { app.Queue.CycleThinkingLevel() },
+		OnModelCycleForward:  func() { _, _ = app.Queue.CycleModel(context.Background(), "forward") },
+		OnModelCycleBackward: func() { _, _ = app.Queue.CycleModel(context.Background(), "backward") },
+		OnModelSelect:        func() { app.Models.ShowModelSelector(context.Background(), "") },
+		OnToolsExpand: func() {
+			expanded := app.UIState.ToolOutputExpanded
+			app.Queue.ToggleToolOutputExpansion(&expanded, func(value bool) {
+				app.Queue.SetToolsExpanded(value, &app.UIState.ToolOutputExpanded, app.UIState.BuiltInHeader, app.LoadedResourcesContainer)
+			})
+		},
+		OnThinkingToggle: func() {
+			hidden := app.Transcript.HideThinkingBlock
+			app.Queue.ToggleThinkingBlockVisibility(&hidden)
+		},
+		OnSessionTree:   func() { app.Selectors.ShowTreeSelector(context.Background(), "", false) },
+		OnSessionFork:   func() { app.Selectors.ShowUserMessageSelector(context.Background()) },
+		OnSessionResume: app.Sessions.ShowSessionSelector,
+		OnSessionNew: func() {
+			if _, err := app.SessionNew(context.Background()); err != nil {
+				app.showWarning(err.Error())
+			}
+		},
+		ShowTreeSelector:        func() { app.Selectors.ShowTreeSelector(context.Background(), "", false) },
+		ShowUserMessageSelector: func() { app.Selectors.ShowUserMessageSelector(context.Background()) },
+	}
+	wiring.OnClear = func() { app.Lifecycle.HandleCtrlC(func() { app.DefaultEditor.SetText("") }) }
+	return wiring
+}
+
+// newSubmitWiring assembles the SubmitWiring (port of the corresponding InteractiveMode wiring).
+func newSubmitWiring(app *App) *SubmitWiring {
+	return &SubmitWiring{
+		Editor:        app.DefaultEditor,
+		Session:       app.Session,
+		Settings:      app.Settings,
+		Queue:         app.Queue,
+		OnInput:       app.Startup.QueueUserInput,
+		ShowStatus:    func(message string) { app.Transcript.ShowStatus(message) },
+		ShowWarning:   func(message string) { app.showWarning(message) },
+		RequestRender: func() { app.UI.RequestRender(false) },
+		Handlers: SubmitHandlers{
+			ShowSettingsSelector: app.SettingsW.ShowSettingsSelector,
+			ShowModelsSelector:   func() error { app.Models.ShowModelsSelector(context.Background()); return nil },
+			HandleModelCommand: func(searchTerm string) error {
+				app.Models.ShowModelSelector(context.Background(), searchTerm)
+				return nil
+			},
+			HandleThinkingCommand:   app.Selectors.HandleThinkingCommand,
+			HandleExportCommand:     func(text string) error { app.Commands.HandleExportCommand(context.Background(), text); return nil },
+			HandleImportCommand:     func(text string) error { app.Commands.HandleImportCommand(context.Background(), text); return nil },
+			HandleCopyCommand:       func() error { app.Commands.HandleCopyCommand(false, false); return nil },
+			HandleNameCommand:       app.Commands.HandleNameCommand,
+			HandleSessionCommand:    func() { app.Commands.HandleSessionCommand(time.Now().UnixMilli()) },
+			HandleHotkeysCommand:    app.Commands.HandleHotkeysCommand,
+			ShowUserMessageSelector: func() { app.Selectors.ShowUserMessageSelector(context.Background()) },
+			ShowTreeSelector:        func() { app.Selectors.ShowTreeSelector(context.Background(), "", false) },
+			ShowTrustSelector:       app.Selectors.ShowTrustSelector,
+			HandleLoginCommand: func(providerRef string) error {
+				app.Auth.HandleLoginCommand(context.Background(), providerRef)
+				return nil
+			},
+			ShowOAuthSelector:  func(mode string) { app.Auth.ShowOAuthSelector(context.Background(), mode) },
+			HandleClearCommand: func() error { app.Commands.HandleClearCommand(context.Background()); return nil },
+			HandleCompactCommand: func(instructions string) error {
+				// The indicator is UI state (loop side); the compaction itself
+				// only emits session events. It runs detached, not through
+				// RunWork's single slot: upstream session.compact() aborts the
+				// active run and compacts immediately, while a queued work item
+				// would leave a mid-run /compact inert until the turn finished
+				// on its own.
+				app.Commands.ClearCompactionStatus()
+				app.runDetached(func(ctx context.Context) error {
+					app.Commands.CompactSession(ctx, instructions)
+					return nil
+				})
+				return nil
+			},
+			HandleReloadCommand: func() error { app.Commands.HandleReloadCommand(); return nil },
+			HandleDebugCommand: func() {
+				app.Commands.HandleDebugCommand(time.Now().UTC().Format("2006-01-02T15:04:05.000Z"))
+			},
+			HandleArminSaysHi:    func() { app.Commands.HandleArminSaysHi(app.UI, time.Now().UnixNano()) },
+			HandleDementedDelves: app.Commands.HandleDementedDelves,
+			ShowSessionSelector:  app.Sessions.ShowSessionSelector,
+			Shutdown:             func() error { app.Lifecycle.Shutdown(false); return nil },
+		},
+	}
 }
