@@ -1,5 +1,7 @@
 package tui
 
+import "strings"
+
 // Port of the terminal-image line detection (src/terminal-image.ts) and the
 // extractSegments helper (src/utils.ts).
 
@@ -24,19 +26,13 @@ func IsImageLine(line string) bool {
 
 func isImageLine(line string) bool { return IsImageLine(line) }
 
+// indexOf is the port's String.prototype.indexOf for byte-oriented callers: the
+// first byte offset of needle in haystack, -1 when absent. It delegates to
+// strings.Index, which is the same search but SIMD-accelerated: the hand-rolled
+// O(n*m) byte loop (a slice comparison per position) cost 20% of a warm frame
+// through IsImageLine's two searches per line.
 func indexOf(haystack string, needle string) int {
-	if len(needle) == 0 {
-		return 0
-	}
-	if len(needle) > len(haystack) {
-		return -1
-	}
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return i
-		}
-	}
-	return -1
+	return strings.Index(haystack, needle)
 }
 
 // ExtractedSegments is the before/after extraction result.
