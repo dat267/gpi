@@ -302,6 +302,8 @@ func (m *SessionManager) persistEntry(entry *SessionEntry) {
 	if !m.persist || m.sessionFile == "" {
 		return
 	}
+	// Upstream checks `fileEntries.some(...)`: stop at the first assistant
+	// instead of unmarshalling every message on every append.
 	hasAssistant := false
 	for i := range m.fileEntries {
 		e := m.fileEntries[i].Entry
@@ -311,6 +313,7 @@ func (m *SessionManager) persistEntry(entry *SessionEntry) {
 			}
 			if json.Unmarshal(e.Message, &msg) == nil && msg.Role == "assistant" {
 				hasAssistant = true
+				break
 			}
 		}
 	}
