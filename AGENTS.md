@@ -134,7 +134,10 @@ Stage 2 (rendering on the loop) has landed:
   (`renderUI`), so a burst of N messages produces one render, not N.
 - `Renderer.RenderCount()` counts paints (test seam).
 - **D144**: the interactive renderer is caller-driven (the loop owns the frame
-  schedule) where upstream schedules its own throttled frames.
+  schedule) where upstream schedules its own throttled frames. The loop keeps
+  upstream's 16 ms frame throttle for coalesced render ticks, so a streaming
+  delta burst cannot paint back-to-back; input, resize and animation paints
+  stay immediate.
 
 - Stage 1 also fixed the read side of `coding.SessionManager`
   (`GetEntries`, `BuildContextEntriesForLeaf`, `BuildSessionContext` now take

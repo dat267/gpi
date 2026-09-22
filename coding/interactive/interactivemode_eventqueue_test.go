@@ -322,6 +322,35 @@ func TestDrainReadyEventsRendersOncePerBurst(t *testing.T) {
 	}
 }
 
+// TestRenderTicksThrottlePaintRate asserts that a sustained stream of render
+// requests (what streaming deltas produce) does not paint back-to-back: the
+// loop coalesces them to at most one paint per frame interval.
+func TestRenderTicksThrottlePaintRate(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+	stop := startLoopApp(t, app)
+	defer stop()
+
+	before := app.UI.RenderCount()
+	const requests = 200
+	start := time.Now()
+	for i := 0; i < requests; i++ {
+		app.UI.RequestRender(false)
+		time.Sleep(time.Millisecond)
+	}
+	elapsed := time.Since(start)
+
+	paints := app.UI.RenderCount() - before
+	// Without the throttle the loop paints for (nearly) every request.
+	limit := int64(elapsed/minInteractiveFrameInterval) + 8
+	if paints > limit {
+		t.Fatalf("painted %d times over %v, want at most %d", paints, elapsed, limit)
+	}
+	if paints == 0 {
+		t.Fatal("the loop never painted")
+	}
+}
+
 // TestLoopBeatAdvances is the watchdog gap: the loop beats once per iteration
 // while it runs and stops beating after cancellation, so a watchdog can detect
 // a stalled loop.

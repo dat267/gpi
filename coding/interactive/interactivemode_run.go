@@ -530,6 +530,11 @@ func (w *RunWiring) drainReadyEvents() {
 	}
 }
 
+// minInteractiveFrameInterval bounds the coalesced render-tick paint rate
+// (60 fps). Input, resize and animation paints are not bounded: they are
+// already rare and latency-sensitive.
+const minInteractiveFrameInterval = 16 * time.Millisecond
+
 // renderUI paints the current state (loop goroutine only).
 func (w *RunWiring) renderUI() {
 	if w.UI != nil {
@@ -670,6 +675,26 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 		animationDeadline time.Time
 	)
 
+	// Coalesced render requests paint at most once per frame interval, so a
+	// fast event stream (streaming deltas) cannot saturate the loop with
+	// back-to-back full repaints. Input, resize and animation paints stay
+	// immediate: they are latency-sensitive and already rate-limited.
+	paintTimer := time.NewTimer(time.Hour)
+	paintTimer.Stop()
+	defer paintTimer.Stop()
+	var (
+		paintCh   <-chan time.Time
+		lastPaint = time.Now()
+	)
+	paint := func() {
+		w.renderUI()
+		lastPaint = time.Now()
+		if paintCh != nil {
+			paintTimer.Stop()
+			paintCh = nil
+		}
+	}
+
 	for _, text := range initialWork {
 		text := text
 		w.work.pending = append(w.work.pending, func(context.Context) error {
@@ -733,7 +758,7 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 				}
 			}
 			w.drainReadyEvents()
-			w.renderUI()
+			paint()
 		case data, ok := <-w.InputEvents:
 			if !ok {
 				w.InputEvents = nil
@@ -744,13 +769,13 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 				w.UI.HandleTerminalInput(data)
 			}
 			w.drainReadyEvents()
-			w.renderUI()
+			paint()
 		case _, ok := <-w.ResizeEvents:
 			if !ok {
 				w.ResizeEvents = nil
 				continue
 			}
-			w.renderUI()
+			paint()
 		case sig, ok := <-w.SignalEvents:
 			if !ok {
 				w.SignalEvents = nil
@@ -762,12 +787,21 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 		case <-animationCh:
 			animationDeadline = time.Time{}
 			w.flushExpiredInput()
-			w.renderUI()
+			paint()
 		case <-w.renderTicks():
 			// Coalesce: apply every event already queued, then paint once, so
 			// a burst of N messages produces one render rather than N.
 			w.drainReadyEvents()
-			w.renderUI()
+			if wait := minInteractiveFrameInterval - time.Since(lastPaint); wait > 0 {
+				if paintCh == nil {
+					paintTimer.Reset(wait)
+					paintCh = paintTimer.C
+				}
+			} else {
+				paint()
+			}
+		case <-paintCh:
+			paint()
 		case text := <-inputsCh:
 			w.startWork(func(context.Context) error { return w.Prompt(ctx, text) })
 		case err := <-doneCh:
