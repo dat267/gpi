@@ -475,7 +475,13 @@ func (e *Editor) HandleMouse(event TuiMouseEvent) *TuiMouseDispatchResult {
 		childEvent.Y = event.Y - autocompleteStartRow
 		childEvent.Width = contentWidth
 		childEvent.Height = e.renderedAutocompleteHeight
-		if result := DispatchMouseEvent(e.autocompleteList, childEvent); result != nil {
+		// Upstream calls the list's handleMouse directly (editor.ts): the nested
+		// dispatch must not stamp target/focus onto the list — the editor's
+		// returned focus:true must resolve to the editor (its caller's
+		// dispatchMouseEvent stamps focusTarget with the component it was
+		// invoked with).
+		result := e.autocompleteList.HandleMouse(childEvent)
+		if result != nil {
 			result.Focus = true
 			return result
 		}

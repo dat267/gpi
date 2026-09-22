@@ -145,6 +145,15 @@ func DispatchMouseEvent(component Component, event TuiMouseEvent) *TuiMouseDispa
 	if result == nil {
 		return nil
 	}
+	// Upstream returns a result untouched once it already carries a target
+	// ("if (\"target\" in result) return result"): nested dispatches own the
+	// target/focus resolution, outer levels must not re-stamp focus to
+	// themselves — that let a container claim keyboard focus after a press on
+	// the editor's autocomplete popup, and the container has no HandleInput,
+	// so keystrokes were dropped (fullscreen input box froze).
+	if result.Target.Component != nil {
+		return result
+	}
 	if !result.Handled && !result.Capture && !result.Focus {
 		return nil
 	}
