@@ -74,8 +74,6 @@ type AgentSessionControl struct {
 	autoCompaction      bool
 	autoRetry           bool
 	retryAborted        bool
-	compactionActive    bool
-	branchSummaryOpen   bool
 	branchSummaryCancel context.CancelFunc
 	bashActive          bool
 	pendingBash         int
@@ -155,14 +153,29 @@ func (s *AgentSession) IsStreaming() bool {
 	return s.promptState.runActive
 }
 
-// IsCompacting reports whether compaction or branch summarization is running.
-func (s *AgentSession) IsCompacting() bool {
+// compactionInFlight reports whether a manual or automatic compaction is
+// running. Upstream derives isCompacting from the abort controllers
+// (agent-session.ts get isCompacting); the port keeps the single
+// compactionCancel and derives from it instead of a parallel flag.
+func (s *AgentSession) compactionInFlight() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.compactionCancel != nil
+}
+
+// branchSummaryInFlight reports whether a branch summarization is running.
+func (s *AgentSession) branchSummaryInFlight() bool {
 	if s.control == nil {
 		return false
 	}
 	s.control.stateMu.Lock()
 	defer s.control.stateMu.Unlock()
-	return s.control.compactionActive || s.control.branchSummaryOpen
+	return s.control.branchSummaryCancel != nil
+}
+
+// IsCompacting reports whether compaction or branch summarization is running.
+func (s *AgentSession) IsCompacting() bool {
+	return s.compactionInFlight() || s.branchSummaryInFlight()
 }
 
 // IsIdle reports whether no agent run or compaction is active.

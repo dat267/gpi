@@ -213,12 +213,19 @@ func TestPromptCompactionGuard(t *testing.T) {
 	var prompts atomic.Int64
 	model := &ai.Model{ID: "m", API: ai.APIAnthropicMessages, Provider: "anthropic", ContextWindow: 100000}
 	session := newPromptSession(t, model, recordingStreamFn(t, &prompts))
-	session.control.compactionActive = true
+	// A compaction in flight is represented by its abort controller
+	// (upstream's compactionAbortController), the single source IsCompacting
+	// derives from.
+	session.mu.Lock()
+	session.compactionCancel = func() {}
+	session.mu.Unlock()
 	if err := session.Prompt(ctxpkg.Background(), "hello", nil); err == nil ||
 		!strings.Contains(err.Error(), "Cannot submit a prompt while compaction is in progress") {
 		t.Fatalf("err = %v", err)
 	}
-	session.control.compactionActive = false
+	session.mu.Lock()
+	session.compactionCancel = nil
+	session.mu.Unlock()
 }
 
 func TestSendUserMessageAndCustomMessages(t *testing.T) {

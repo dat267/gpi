@@ -400,12 +400,10 @@ func (s *AgentSession) NavigateTree(ctx context.Context, targetID string, option
 	// navigation, so isCompacting reports the navigation as busy; D132).
 	summaryCtx, cancel := context.WithCancel(ctx)
 	s.control.stateMu.Lock()
-	s.control.branchSummaryOpen = true
 	s.control.branchSummaryCancel = cancel
 	s.control.stateMu.Unlock()
 	defer func() {
 		s.control.stateMu.Lock()
-		s.control.branchSummaryOpen = false
 		s.control.branchSummaryCancel = nil
 		s.control.stateMu.Unlock()
 		cancel()

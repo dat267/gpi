@@ -386,3 +386,60 @@ func TestCompactSessionNoModelEmitsEnd(t *testing.T) {
 		t.Fatalf("last end %+v, want an error message", lastEnd)
 	}
 }
+
+// TestIsCompactingDuringManualCompaction pins the activity state: a compaction
+// in flight must report IsCompacting and must not report IsIdle. Upstream
+// derives isCompacting from the abort controllers (agent-session.ts
+// get isCompacting), so the state has one source; the port read a
+// control.compactionActive flag that was never set, leaving the session
+// "idle" for the whole compaction except while a branch summary was open.
+func TestIsCompactingDuringManualCompaction(t *testing.T) {
+	model := &ai.Model{ID: "m", API: ai.APIAnthropicMessages, Provider: "anthropic", ContextWindow: 100000, MaxTokens: 8192}
+	session := compactionTestSession(t, model, summarizingStreamFn(t, new(atomic.Int64), "unused"), smallCompactionSettings())
+	seedBranch(t, session)
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	session.CompactionStreamFn = func(model *ai.Model, context ai.TranscriptContext, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		stream := ai.NewAssistantMessageEventStream()
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		go func() {
+			<-release
+			message := &ai.AssistantMessage{
+				API: ai.APIAnthropicMessages, Provider: model.Provider, Model: model.ID,
+				Content:    ai.ContentList{ai.TextContent{Text: "summary text long enough to be usable"}},
+				StopReason: ai.StopStop, Usage: ai.Usage{Input: 100, Output: 10, TotalTokens: 110},
+			}
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: ai.StopStop, Message: message})
+		}()
+		return stream
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := session.CompactSession(ctxpkg.Background(), "")
+		done <- err
+	}()
+
+	<-started
+	if !session.IsCompacting() {
+		t.Fatal("session must report compacting while a compaction is in flight")
+	}
+	if session.IsIdle() {
+		t.Fatal("session must not report idle while compacting")
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if session.IsCompacting() {
+		t.Fatal("session still compacting after the compaction finished")
+	}
+	if !session.IsIdle() {
+		t.Fatal("session must be idle after the compaction finished")
+	}
+}

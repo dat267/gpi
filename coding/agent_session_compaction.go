@@ -171,11 +171,9 @@ func (s *AgentSession) RunAutoCompaction(ctx context.Context, reason CompactionR
 	compactionCtx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
 	s.compactionCancel = cancel
-	s.compactionActive = true
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
-		s.compactionActive = false
 		s.compactionCancel = nil
 		s.mu.Unlock()
 		cancel()

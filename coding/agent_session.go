@@ -177,7 +177,6 @@ type AgentSession struct {
 	willRetry            bool
 
 	compactionCancel context.CancelFunc
-	compactionActive bool
 	overflowRecovery overflowRecoveryState
 
 	bashMu              sync.Mutex
@@ -478,7 +477,6 @@ func (s *AgentSession) CompactSession(ctx context.Context, customInstructions st
 	compactionCtx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
 	s.compactionCancel = cancel
-	s.compactionActive = true
 	s.mu.Unlock()
 
 	s.emit(&SessionEvent{Type: SessionCompactionStart, Reason: CompactionManual})
@@ -494,7 +492,6 @@ func (s *AgentSession) CompactSession(ctx context.Context, customInstructions st
 		}
 		cleaned = true
 		s.mu.Lock()
-		s.compactionActive = false
 		s.compactionCancel = nil
 		s.mu.Unlock()
 		cancel()
