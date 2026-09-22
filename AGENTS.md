@@ -287,8 +287,11 @@ snapshot under and deliver outside.
 Numbered D-rows live in code comments at the point of divergence and are
 summarized in the README scoreboard. The range is **D1–D150**. Representative:
 
-- D41 — extension mechanics are out of scope (resource loader, extension
-  runner, package/tools managers); seams are function values or return nil.
+- D41 — extension mechanics are out of scope (extension discovery in the
+  resource loader, the extension runner, package/tools managers); seams are
+  function values or return nil. The resource loader's non-extension pieces are
+  ported: context files, skills, and the SYSTEM.md / APPEND_SYSTEM.md prompt
+  files (resolved at session creation; `/reload` does not re-read resources).
 - D133 — tool renderers always resolve to the built-in set (no extension
   definitions); `computeEditsPreview` is synchronous.
 - D140 — the user's provider extensions (hyper, commandcode) are compiled in as

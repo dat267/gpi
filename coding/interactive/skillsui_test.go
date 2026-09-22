@@ -2,6 +2,7 @@ package interactive
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -70,6 +71,35 @@ func TestLoadedResourcesShowsSkills(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "Context") {
 		t.Fatalf("loaded resources missing Context section:\n%s", rendered)
+	}
+}
+
+// TestLoadedResourcesListsPromptSources pins the Context section's leading
+// entries: upstream spreads the system prompt source and the append prompt
+// sources ahead of the agents files (getSystemPromptSource /
+// getAppendSystemPromptSources).
+func TestLoadedResourcesListsPromptSources(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+	app.Init(context.Background())
+
+	app.Session.SystemPromptOptions.PromptSourcePaths = []string{
+		filepath.Join(app.options.Cwd, ".pi", "SYSTEM.md"),
+		"/home/user/.pi/agent/APPEND_SYSTEM.md",
+	}
+	app.Session.SystemPromptOptions.ContextFiles = []coding.ContextFile{{Path: "/tmp/project/AGENTS.md"}}
+	app.ShowLoadedResources(true)
+
+	rendered := coding.StripAnsi(strings.Join(app.LoadedResourcesContainer.Render(100), "\n"))
+	contextIndex := strings.Index(rendered, "Context")
+	systemIndex := strings.Index(rendered, "SYSTEM.md")
+	appendIndex := strings.Index(rendered, "APPEND_SYSTEM.md")
+	agentsIndex := strings.Index(rendered, "AGENTS.md")
+	if contextIndex == -1 || systemIndex == -1 || appendIndex == -1 || agentsIndex == -1 {
+		t.Fatalf("Context section is missing a prompt source:\n%s", rendered)
+	}
+	if !(contextIndex < systemIndex && systemIndex < appendIndex && appendIndex < agentsIndex) {
+		t.Fatalf("prompt sources must precede the context files:\n%s", rendered)
 	}
 }
 

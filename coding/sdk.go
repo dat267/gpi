@@ -46,8 +46,14 @@ type CreateAgentSessionOptions struct {
 	// StreamFn overrides the model stream function (compaction/summaries keep
 	// the session's).
 	StreamFn agent.StreamFn
-	// SystemPrompt replaces the default prefix.
-	SystemPrompt string
+	// SystemPrompt replaces the default prefix: a prompt source (text, or a
+	// path to read). Nil discovers SYSTEM.md; a non-nil empty value means no
+	// custom prompt (upstream systemPromptSource).
+	SystemPrompt *string
+	// AppendSystemPrompt appends to the system prompt. Each entry is a prompt
+	// source; nil discovers APPEND_SYSTEM.md. Multiple entries join with a
+	// blank line.
+	AppendSystemPrompt []string
 }
 
 // CreateAgentSessionResult is the assembled session.
@@ -328,30 +334,40 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 	// and skills from the settings paths plus a trusted project's
 	// .pi/skills.
 	contextFiles := LoadProjectContextFiles(cwd, agentDir)
+	projectTrusted := settingsManager.IsProjectTrusted()
 	skillsResult := LoadSkills(LoadSkillsOptions{
 		Cwd: cwd, AgentDir: agentDir, SkillPaths: settingsManager.GetSkillPaths(),
 		IncludeDefaults: true,
-	}, settingsManager.IsProjectTrusted())
+	}, projectTrusted)
+	// The base/append system prompt follows the same rule as upstream's
+	// resource loader: an explicit --system-prompt / --append-system-prompt
+	// source wins, otherwise the project's (trusted) or agent-dir file.
+	promptOverrides := LoadPromptOverrides(PromptFileSources{
+		Cwd: cwd, AgentDir: agentDir, ProjectTrusted: projectTrusted,
+		SystemPrompt: options.SystemPrompt, AppendSystemPrompt: options.AppendSystemPrompt,
+	})
 
 	session, err := NewAgentSession(&SessionConfig{
-		Cwd:              cwd,
-		Model:            model,
-		StreamFn:         streamFn,
-		Tools:            activeTools,
-		Sessions:         sessionManager,
-		Settings:         SessionSettings{Retry: retryPolicy, Compaction: compactionSettingsOf(settingsManager, model)},
-		ThinkingLevel:    thinkingLevel,
-		Skills:           skillsResult.Skills,
-		ContextFiles:     contextFiles,
-		SkillDiagnostics: skillsResult.Diagnostics,
-		SystemPrompt:     options.SystemPrompt,
-		ConvertToLlm:     convertToLlmWithBlockImages,
-		SessionID:        sessionID,
-		SteeringMode:     settingsManager.GetSteeringMode(),
-		FollowUpMode:     settingsManager.GetFollowUpMode(),
-		Transport:        ai.Transport(settingsManager.GetTransport()),
-		ThinkingBudgets:  thinkingBudgetsOf(settingsManager.GetThinkingBudgets()),
-		MaxRetryDelayMS:  &maxRetryDelay,
+		Cwd:                cwd,
+		Model:              model,
+		StreamFn:           streamFn,
+		Tools:              activeTools,
+		Sessions:           sessionManager,
+		Settings:           SessionSettings{Retry: retryPolicy, Compaction: compactionSettingsOf(settingsManager, model)},
+		ThinkingLevel:      thinkingLevel,
+		Skills:             skillsResult.Skills,
+		ContextFiles:       contextFiles,
+		SkillDiagnostics:   skillsResult.Diagnostics,
+		SystemPrompt:       promptOverrides.SystemPrompt,
+		AppendSystemPrompt: promptOverrides.AppendSystemPrompt,
+		PromptSourcePaths:  promptOverrides.SourcePaths,
+		ConvertToLlm:       convertToLlmWithBlockImages,
+		SessionID:          sessionID,
+		SteeringMode:       settingsManager.GetSteeringMode(),
+		FollowUpMode:       settingsManager.GetFollowUpMode(),
+		Transport:          ai.Transport(settingsManager.GetTransport()),
+		ThinkingBudgets:    thinkingBudgetsOf(settingsManager.GetThinkingBudgets()),
+		MaxRetryDelayMS:    &maxRetryDelay,
 	})
 	if err != nil {
 		return nil, err

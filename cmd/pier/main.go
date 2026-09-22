@@ -156,6 +156,10 @@ func run(appName string, args *coding.Args) error {
 		SessionManager:  sessions,
 		ModelRuntime:    runtime,
 		SettingsManager: settings,
+		// Prompt sources: text, or a path to read (the files are discovered
+		// when the flags are absent).
+		SystemPrompt:       args.SystemPrompt,
+		AppendSystemPrompt: args.AppendSystemPrompt,
 	})
 	if err != nil {
 		return err

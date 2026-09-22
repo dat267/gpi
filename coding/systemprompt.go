@@ -30,6 +30,9 @@ type BuildSystemPromptOptions struct {
 	PromptGuidelines []string
 	// AppendSystemPrompt is appended before project context/skills/cwd.
 	AppendSystemPrompt string
+	// PromptSourcePaths are the loaded system/append prompt files (the
+	// loaded-resources Context section lists them ahead of the context files).
+	PromptSourcePaths []string
 	// Sections: additional XML-wrapped prompt sections keyed by tag name.
 	Sections map[string]string
 	// Cwd is the working directory.

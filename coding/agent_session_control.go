@@ -305,6 +305,15 @@ func (s *AgentSession) Skills() []Skill {
 }
 
 // ContextFiles returns the loaded context files (the system-prompt options).
+// PromptSourcePaths returns the loaded system/append prompt files, base prompt
+// first (upstream getSystemPromptSource / getAppendSystemPromptSources).
+func (s *AgentSession) PromptSourcePaths() []string {
+	if s.SystemPromptOptions == nil {
+		return nil
+	}
+	return append([]string{}, s.SystemPromptOptions.PromptSourcePaths...)
+}
+
 func (s *AgentSession) ContextFiles() []ContextFile {
 	if s.SystemPromptOptions == nil {
 		return nil

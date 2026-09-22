@@ -197,17 +197,21 @@ type sessionListenerKey struct {
 
 // SessionConfig configures NewAgentSession.
 type SessionConfig struct {
-	Cwd           string
-	Model         *ai.Model
-	StreamFn      agent.StreamFn
-	APIKey        string
-	SystemPrompt  string
-	Tools         []agent.AgentTool
-	Sessions      *SessionManager
-	Settings      SessionSettings
-	ThinkingLevel ai.ThinkingLevel
-	Skills        []Skill
-	ContextFiles  []ContextFile
+	Cwd          string
+	Model        *ai.Model
+	StreamFn     agent.StreamFn
+	APIKey       string
+	SystemPrompt string
+	// AppendSystemPrompt is appended to the prompt (before project context).
+	AppendSystemPrompt string
+	// PromptSourcePaths are the loaded system/append prompt files.
+	PromptSourcePaths []string
+	Tools             []agent.AgentTool
+	Sessions          *SessionManager
+	Settings          SessionSettings
+	ThinkingLevel     ai.ThinkingLevel
+	Skills            []Skill
+	ContextFiles      []ContextFile
 	// SkillDiagnostics are the skill loader's warnings/collisions, surfaced in
 	// the interactive loaded-resources area.
 	SkillDiagnostics []ResourceDiagnostic
@@ -269,8 +273,9 @@ func NewAgentSession(config *SessionConfig) (*AgentSession, error) {
 		Cwd:      config.Cwd,
 		streamFn: config.StreamFn,
 		SystemPromptOptions: &BuildSystemPromptOptions{
-			CustomPrompt: config.SystemPrompt, Cwd: config.Cwd,
+			CustomPrompt: config.SystemPrompt, AppendSystemPrompt: config.AppendSystemPrompt, Cwd: config.Cwd,
 			Skills: config.Skills, ContextFiles: config.ContextFiles,
+			PromptSourcePaths: append([]string{}, config.PromptSourcePaths...),
 		},
 		skillDiagnostics: config.SkillDiagnostics,
 	}

@@ -262,10 +262,17 @@ func (a *App) ShowLoadedResources(force bool) {
 		a.LoadedResourcesContainer.AddChild(tui.NewSpacer(1))
 	}
 
+	// The Context section lists the loaded prompt files first, then the
+	// context files (upstream spreads getSystemPromptSource and
+	// getAppendSystemPromptSources ahead of the agents files).
 	contextFiles := a.Session.ContextFiles()
-	if len(contextFiles) > 0 {
+	promptSources := a.Session.PromptSourcePaths()
+	if len(contextFiles) > 0 || len(promptSources) > 0 {
 		cwd := a.options.Cwd
-		paths := make([]string, 0, len(contextFiles))
+		paths := make([]string, 0, len(promptSources)+len(contextFiles))
+		for _, source := range promptSources {
+			paths = append(paths, formatContextPath(source, cwd))
+		}
 		for _, file := range contextFiles {
 			paths = append(paths, formatContextPath(file.Path, cwd))
 		}
