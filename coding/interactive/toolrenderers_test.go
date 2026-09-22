@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dat267/pier/coding"
 	"github.com/dat267/pier/tui"
@@ -193,4 +194,69 @@ func TestToolRendererShellComponent(t *testing.T) {
 		t.Fatalf("bash preview missing output: %q", rendered)
 	}
 	_ = tui.NewSpacer(1)
+}
+
+// TestShellElapsedDuration covers the running-time display for shell tools: a
+// partial result keeps the timer running and the label keeps ticking (upstream
+// arms a 1s invalidate), and the final result freezes it as "Took". The port
+// set endedAtMS on the *partial* update (inverting upstream's
+// `!isPartial || isError`), so the timer froze at the first update, and it
+// never armed a redraw, so the elapsed value never advanced.
+func TestShellElapsedDuration(t *testing.T) {
+	theme := newRendererTestTheme(t)
+	ctx := &ToolRenderContext{Cwd: "/tmp/proj", Args: map[string]any{"command": "sleep 5"}, ExecutionStarted: true}
+	bashRenderers.RenderCall(ctx.Args, theme, ctx)
+	state, ok := ctx.State.(*shellCallState)
+	if !ok || state.startedAtMS == 0 {
+		t.Fatalf("execution start did not start the timer: %+v", ctx.State)
+	}
+
+	result := textResult("partial output")
+	component := bashRenderers.RenderResult(result, ToolRenderResultOptions{IsPartial: true}, theme, ctx)
+	if state.endedAtMS != 0 {
+		t.Fatal("a partial result must not stop the timer")
+	}
+
+	// The running label recomputes from the clock on every render.
+	state.startedAtMS = time.Now().Add(-5 * time.Second).UnixMilli()
+	rendered := coding.StripAnsi(strings.Join(component.Render(120), "\n"))
+	if !strings.Contains(rendered, "Elapsed 5.") {
+		t.Fatalf("running duration = %q, want an Elapsed 5.x", rendered)
+	}
+
+	// The component animates while the call runs so the label keeps ticking.
+	container, ok := component.(*tui.Container)
+	if !ok {
+		t.Fatalf("result component = %T", component)
+	}
+	animated := false
+	for _, child := range container.Children {
+		if animator, ok := child.(tui.Animator); ok {
+			want, delay := animator.AnimationFrame(time.Now())
+			if !want || delay <= 0 || delay > time.Second {
+				t.Fatalf("running animator = want %v delay %v", want, delay)
+			}
+			animated = true
+		}
+	}
+	if !animated {
+		t.Fatal("running tool has no animator driving the elapsed label")
+	}
+
+	// The final result freezes the label as "Took".
+	component = bashRenderers.RenderResult(result, ToolRenderResultOptions{}, theme, ctx)
+	if state.endedAtMS == 0 {
+		t.Fatal("the final result must stop the timer")
+	}
+	rendered = coding.StripAnsi(strings.Join(component.Render(120), "\n"))
+	if !strings.Contains(rendered, "Took ") {
+		t.Fatalf("final duration = %q, want a Took line", rendered)
+	}
+	for _, child := range component.(*tui.Container).Children {
+		if animator, ok := child.(tui.Animator); ok {
+			if want, _ := animator.AnimationFrame(time.Now()); want {
+				t.Fatal("a finished tool must not keep animating")
+			}
+		}
+	}
 }

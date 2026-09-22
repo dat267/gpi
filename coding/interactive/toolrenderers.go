@@ -564,7 +564,7 @@ func formatDuration(ms float64) string {
 	if minutes < 60 {
 		return fmt.Sprintf("%dm %ds", minutes, remainder)
 	}
-	return fmt.Sprintf("%dh %dm %ds", minutes/60, minutes, remainder)
+	return fmt.Sprintf("%dh %dm %ds", minutes/60, minutes%60, remainder)
 }
 
 func formatShellCall(args map[string]any, prompt string, theme *Theme) string {
@@ -592,18 +592,6 @@ type bashResultState struct {
 	cachedLines    []string
 	cachedSkipped  int
 	cachedRendered []string
-}
-
-func bashStateFor(context *ToolRenderContext) *bashResultState {
-	if context == nil {
-		return &bashResultState{}
-	}
-	if state, ok := context.State.(*bashResultState); ok {
-		return state
-	}
-	state := &bashResultState{}
-	context.State = state
-	return state
 }
 
 func rebuildBashResult(result *SortToolResultContent, options ToolRenderResultOptions, theme *Theme,
@@ -724,7 +712,9 @@ func CreateShellRenderers(prompt string) ToolRenderers {
 		},
 		RenderResult: func(result *SortToolResultContent, options ToolRenderResultOptions, theme *Theme, context *ToolRenderContext) tui.Component {
 			state := shellCallStateFor(context)
-			if state.startedAtMS != 0 && options.IsPartial && state.endedAtMS == 0 {
+			// Upstream stops the timer on the final (or error) result
+			// (`!isPartial || isError`), not on a partial update.
+			if state.startedAtMS != 0 && state.endedAtMS == 0 && (!options.IsPartial || (context != nil && context.IsError)) {
 				state.endedAtMS = time.Now().UnixMilli()
 			}
 			container := &tui.Container{}
@@ -734,20 +724,11 @@ func CreateShellRenderers(prompt string) ToolRenderers {
 				}
 			}
 			container.Clear()
-			for _, child := range rebuildBashResult(result, options, theme, context.ShowImages, bashStateFor(context)) {
+			for _, child := range rebuildBashResult(result, options, theme, context.ShowImages, &state.preview) {
 				container.AddChild(child)
 			}
 			if state.startedAtMS != 0 {
-				label := "Took"
-				if options.IsPartial {
-					label = "Elapsed"
-				}
-				end := state.endedAtMS
-				if end == 0 {
-					end = time.Now().UnixMilli()
-				}
-				container.AddChild(tui.NewText("\n"+theme.Fg("muted",
-					fmt.Sprintf("%s %s", label, formatDuration(float64(end-state.startedAtMS)))), 0, 0, nil))
+				container.AddChild(&shellElapsedComponent{state: state, theme: theme})
 			}
 			return container
 		},
@@ -757,6 +738,45 @@ func CreateShellRenderers(prompt string) ToolRenderers {
 type shellCallState struct {
 	startedAtMS int64
 	endedAtMS   int64
+	// preview caches the collapsed bash preview. It lives here (upstream keeps
+	// it on the result component) because the render context has a single
+	// State slot: a second bashStateFor(context) used to overwrite the shell
+	// timer state, resetting the elapsed duration on every update.
+	preview bashResultState
+}
+
+// shellElapsedComponent renders the running/final duration. The value is
+// computed at render time (so a frame shows the current elapsed time), and
+// AnimationFrame keeps the owner re-rendering once a second while the call
+// runs. Upstream arms the same 1s redraw with setInterval(context.invalidate).
+type shellElapsedComponent struct {
+	state *shellCallState
+	theme *Theme
+}
+
+func (c *shellElapsedComponent) Render(width int) []string {
+	if c.state.startedAtMS == 0 {
+		return nil
+	}
+	label := "Took"
+	if c.state.endedAtMS == 0 {
+		label = "Elapsed"
+	}
+	end := c.state.endedAtMS
+	if end == 0 {
+		end = time.Now().UnixMilli()
+	}
+	return []string{"", c.theme.Fg("muted", fmt.Sprintf("%s %s", label, formatDuration(float64(end-c.state.startedAtMS))))}
+}
+
+func (c *shellElapsedComponent) Invalidate() {}
+
+// AnimationFrame keeps the elapsed label ticking while the call runs.
+func (c *shellElapsedComponent) AnimationFrame(now time.Time) (bool, time.Duration) {
+	if c.state.startedAtMS == 0 || c.state.endedAtMS != 0 {
+		return false, 0
+	}
+	return true, time.Second
 }
 
 func shellCallStateFor(context *ToolRenderContext) *shellCallState {
