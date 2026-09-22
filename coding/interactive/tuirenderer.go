@@ -30,6 +30,22 @@ var clipboardCopier CopySelectionFn
 // SetClipboardCopier installs the clipboard copier (D106).
 func SetClipboardCopier(copier CopySelectionFn) { clipboardCopier = copier }
 
+// ClipboardReadFn reads plain text from the system clipboard.
+type ClipboardReadFn func() (string, error)
+
+var clipboardReader ClipboardReadFn = coding.ReadClipboardText
+
+// SetClipboardReader installs the clipboard reader (D106 test seam).
+func SetClipboardReader(reader ClipboardReadFn) { clipboardReader = reader }
+
+// readClipboardText runs the configured clipboard reader.
+func readClipboardText() (string, error) {
+	if clipboardReader == nil {
+		return coding.ReadClipboardText()
+	}
+	return clipboardReader()
+}
+
 // CreateInteractiveTui builds the renderer for the requested mode. The
 // interactive mode drives rendering from its own loop, so the renderer's
 // internal timer is replaced by the tick channel (stage 2).

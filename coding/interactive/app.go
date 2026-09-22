@@ -220,6 +220,7 @@ func NewApp(options AppOptions) *App {
 		LogDirectory:           options.AgentDir,
 		Terminal:               terminal,
 		FullscreenCopyOnSelect: appBoolPtr(options.Settings.GetFullscreenCopyOnSelect()),
+		OnRightClickPaste:      app.handleRightClickPaste,
 	})
 	app.initialUI = aInitialUI
 	app.UI = tui.NewTuiReference(func() tui.TUI {
@@ -365,6 +366,7 @@ func NewApp(options AppOptions) *App {
 				LogDirectory:           options.AgentDir,
 				Terminal:               terminal,
 				FullscreenCopyOnSelect: appBoolPtr(options.Settings.GetFullscreenCopyOnSelect()),
+				OnRightClickPaste:      app.handleRightClickPaste,
 			})
 		},
 		Session:      app.Session,
@@ -601,6 +603,7 @@ func NewApp(options AppOptions) *App {
 			}
 			return true, ""
 		},
+		WriteDebugLog:   WriteDebugLogFile,
 		EditorContainer: app.EditorContainer,
 		Editor:          app.DefaultEditor,
 		RunDetached: func(fn func()) {
@@ -627,7 +630,7 @@ func NewApp(options AppOptions) *App {
 			// Upstream handleClipboardPaste pastes a clipboard image first and
 			// falls back to text; image transports are out of scope (D41
 			// scope note in AGENTS.md), so the text path is ported.
-			text, err := coding.ReadClipboardText()
+			text, err := readClipboardText()
 			if err != nil || text == "" {
 				return
 			}
@@ -712,8 +715,10 @@ func NewApp(options AppOptions) *App {
 				})
 				return nil
 			},
-			HandleReloadCommand:  func() error { app.Commands.HandleReloadCommand(); return nil },
-			HandleDebugCommand:   func() { app.Commands.HandleDebugCommand("") },
+			HandleReloadCommand: func() error { app.Commands.HandleReloadCommand(); return nil },
+			HandleDebugCommand: func() {
+				app.Commands.HandleDebugCommand(time.Now().UTC().Format("2006-01-02T15:04:05.000Z"))
+			},
 			HandleArminSaysHi:    func() { app.Commands.HandleArminSaysHi(app.UI, time.Now().UnixNano()) },
 			HandleDementedDelves: app.Commands.HandleDementedDelves,
 			ShowSessionSelector:  app.Sessions.ShowSessionSelector,
@@ -896,6 +901,32 @@ func (a *App) LoopResizes() <-chan struct{} { return a.loopResizes }
 // runDetached runs event-only work in its own goroutine without occupying
 // RunWork's single work slot, so it cannot queue behind the active turn. It
 // uses the run loop's context so shutdown cancellation still reaches it.
+// handleRightClickPaste reads the clipboard and feeds it to the focused
+// component as a bracketed paste, mirroring upstream's onRightClickPaste
+// (interactive-mode.ts handleRightClickPaste). The renderer only invokes it on
+// a Windows terminal session. Clipboard errors are swallowed (platform may
+// have no clipboard tool or deny access); the focus is re-read after the read
+// like upstream guards against it moving.
+func (a *App) handleRightClickPaste() {
+	target := a.UI.GetFocusedComponent()
+	if target == nil {
+		return
+	}
+	text, err := readClipboardText()
+	if err != nil || text == "" {
+		return
+	}
+	if a.UI.GetFocusedComponent() != target {
+		return
+	}
+	handler, ok := target.(tui.InputHandler)
+	if !ok {
+		return
+	}
+	handler.HandleInput("\x1b[200~" + text + "\x1b[201~")
+	a.UI.RequestRender(false)
+}
+
 func (a *App) runDetached(fn func(ctx context.Context) error) {
 	ctx := context.Background()
 	if a.Runner != nil {
