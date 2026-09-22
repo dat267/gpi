@@ -137,21 +137,21 @@ type Renderer struct {
 
 	focusedComponent Component
 	inputListeners   []TuiInputListener
-	posted           []func()
+	// postMu guards the posted-callback queue: Post is called from off-loop
+	// goroutines (loaders, watchers) and drained by the owner's render pass
+	// (D146: queue serialization only — no UI state under the lock).
+	postMu  sync.Mutex
+	posted  []func()
+	stopped atomic.Bool
 
-	renderRequested          bool
-	autoRenderDisabled       bool
-	immediateRenderScheduled bool
-	renderTimer              *time.Timer
-	lastRenderAt             time.Time
-	fullRedrawCount          int
-	stopped                  bool
+	renderRequested bool
+	fullRedrawCount int
 
 	// terminal color queries (port of the TuiBase query surface)
 	pendingOSC11Replies  int
 	pendingOSC11Queries  []*pendingOSC11Query
 	colorSchemeListeners []colorSchemeListener
-	colorSchemeNotifyOn  bool
+	colorSchemeNotifyOn  atomic.Bool
 	nextColorSchemeID    int
 
 	overlayStack           []*overlayEntry
@@ -167,15 +167,9 @@ type Renderer struct {
 	loopInput  func(string)
 	loopResize func()
 
-	// renderMu serializes paints against focused-component input handling for
-	// the renderer's own timer mode (the standalone session picker and library
-	// users). In loop mode (renderTicks set) the owner goroutine both paints and
-	// dispatches input, so the lock is never taken — see the lock inventory.
-	renderMu sync.Mutex
-	// renderTicks, when non-nil, replaces the render timer: requestRender
-	// signals on it (capacity 1, so bursts coalesce) and the owner renders on
-	// its own goroutine (stage 2 of the UI-loop refactor). A channel send,
-	// rather than a callback, keeps user code out of the renderer lock.
+	// renderTicks receives render requests (capacity 1, so bursts coalesce):
+	// the owner renders on its own goroutine (D146: there is no internal
+	// render timer — input and paints share the owner goroutine).
 	renderTicks chan struct{}
 	// renderCount counts completed paints (test seam for coalescing).
 	renderCount int64
@@ -184,7 +178,6 @@ type Renderer struct {
 	// Upstream is single-threaded (Node's event loop); the Go port drives the
 	// renderer from one goroutine but timer callbacks arrive on others
 	// (divergence D45).
-	mu sync.Mutex
 }
 
 // NewRenderer creates a renderer rooted at the given terminal.
@@ -193,31 +186,26 @@ func NewRenderer(terminal Terminal) *Renderer {
 		Terminal:            terminal,
 		KeyReleaseDetector:  IsKeyRelease,
 		clock:               time.Now,
+		renderTicks:         make(chan struct{}, 1),
 		overlayFocusRestore: overlayFocusRestoreState{status: "inactive"},
 	}
 }
 
 // FullRedraws returns the number of full redraws performed.
-func (t *Renderer) FullRedraws() int { t.mu.Lock(); defer t.mu.Unlock(); return t.fullRedrawCount }
+func (t *Renderer) FullRedraws() int { return t.fullRedrawCount }
 
 // GetFocusedComponent returns the component with keyboard focus.
 func (t *Renderer) GetFocusedComponent() Component {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	return t.focusedComponent
 }
 
 // GetShowHardwareCursor reports whether the hardware cursor is enabled.
 func (t *Renderer) GetShowHardwareCursor() bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	return t.ShowHardwareCursor
 }
 
 // SetShowHardwareCursor toggles the hardware cursor.
 func (t *Renderer) SetShowHardwareCursor(enabled bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	if t.ShowHardwareCursor == enabled {
 		return
 	}
@@ -225,27 +213,21 @@ func (t *Renderer) SetShowHardwareCursor(enabled bool) {
 	if !enabled {
 		t.Terminal.HideCursor()
 	}
-	t.requestRenderLocked(false)
+	t.requestRender(false)
 }
 
 // GetClearOnShrink reports whether empty rows are cleared when content shrinks.
 func (t *Renderer) GetClearOnShrink() bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	return t.ClearOnShrink
 }
 
 // SetClearOnShrink sets the shrink behaviour.
 func (t *Renderer) SetClearOnShrink(enabled bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	t.ClearOnShrink = enabled
 }
 
 // Invalidate invalidates all mounted roots and overlays.
 func (t *Renderer) Invalidate() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	for _, root := range t.GetMountedRoots() {
 		root.Invalidate()
 	}
@@ -306,10 +288,8 @@ func nextAnimationFor(components []Component, now time.Time) (bool, time.Duratio
 
 // Start starts the terminal and requests the first render.
 func (t *Renderer) Start() {
-	t.mu.Lock()
-	t.stopped = false
+	t.stopped.Store(false)
 	loopInput, loopResize := t.loopInput, t.loopResize
-	t.mu.Unlock()
 	if t.OnBeforeTerminalStart != nil {
 		t.OnBeforeTerminalStart()
 	}
@@ -328,13 +308,12 @@ func (t *Renderer) Start() {
 
 // Stop stops the renderer and restores the terminal.
 func (t *Renderer) Stop(options TuiStopOptions) {
-	t.mu.Lock()
-	t.stopped = true
-	t.cancelRenderTimerLocked()
-	disableColorSchemeNotifications := t.colorSchemeNotifyOn
-	t.colorSchemeNotifyOn = false
-	t.mu.Unlock()
-	if disableColorSchemeNotifications {
+	t.stopped.Store(true)
+	if t.colorSchemeNotifyOn.Load() {
+		t.colorSchemeNotifyOn.Store(false)
+		t.Terminal.Write("\x1b[?2031l")
+	}
+	if false {
 		t.Terminal.Write("[?2031l")
 	}
 	if t.OnBeforeTerminalStop != nil {
@@ -358,8 +337,6 @@ func (t *Renderer) Stop(options TuiStopOptions) {
 
 // AddInputListener registers an input listener and returns a removal function.
 func (t *Renderer) AddInputListener(listener TuiInputListener) func() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	t.inputListeners = append(t.inputListeners, listener)
 	return func() { t.RemoveInputListener(listener) }
 }
@@ -368,8 +345,6 @@ func (t *Renderer) AddInputListener(listener TuiInputListener) func() {
 // comparable, so listeners are identified by their code pointer (upstream's
 // Set.remove compares object identity: divergence D47).
 func (t *Renderer) RemoveInputListener(listener TuiInputListener) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	target := reflect.ValueOf(listener).Pointer()
 	for i := range t.inputListeners {
 		if reflect.ValueOf(t.inputListeners[i]).Pointer() == target {
@@ -379,31 +354,21 @@ func (t *Renderer) RemoveInputListener(listener TuiInputListener) {
 	}
 }
 
-// EnableRenderTicks switches the renderer from its internal timer to the
-// caller-driven tick channel: requestRender signals RenderTicks() instead of
-// arming a timer, and the owner renders with RenderNow. Bursts coalesce in the
-// capacity-1 channel.
-func (t *Renderer) EnableRenderTicks() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.renderTicks == nil {
-		t.renderTicks = make(chan struct{}, 1)
-	}
-}
+// EnableRenderTicks is retained for compatibility: every renderer is
+// tick-driven since D146 removed the internal timer (the channel is created
+// at construction, so requests never race its initialization).
+func (t *Renderer) EnableRenderTicks() {}
 
 // RenderTicks returns the render-request channel (nil until EnableRenderTicks).
 func (t *Renderer) RenderTicks() <-chan struct{} {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	return t.renderTicks
 }
 
 // RenderCount reports completed paints (test seam).
 func (t *Renderer) RenderCount() int64 { return atomic.LoadInt64(&t.renderCount) }
 
-// signalRenderLocked coalesces a render request onto the tick channel.
-// Callers hold the lock; a channel send is not user code, so it is safe here.
-func (t *Renderer) signalRenderLocked() {
+// signalRender coalesces a render request onto the tick channel.
+func (t *Renderer) signalRender() {
 	if t.renderTicks == nil {
 		return
 	}
@@ -413,143 +378,43 @@ func (t *Renderer) signalRenderLocked() {
 	}
 }
 
-// RenderNow renders immediately.
+// RenderNow paints immediately.
 func (t *Renderer) RenderNow(force bool) {
-	t.mu.Lock()
 	if force {
 		t.resetRenderState()
 	}
 	t.renderRequested = false
-	t.cancelRenderTimerLocked()
-	t.lastRenderAt = t.clock()
-	t.mu.Unlock()
 	t.doRender()
 }
-
-// loopMode reports whether the renderer is driven by the owner's tick channel
-// instead of its own timer (stage 2). Callers must hold t.mu.
-func (t *Renderer) loopMode() bool { return t.renderTicks != nil }
 
 // EnableLoopInput routes terminal input and resize notifications to the given
 // sinks instead of dispatching them inline; the owner must call
 // HandleTerminalInput and render. Call before Start (stage 3).
 func (t *Renderer) EnableLoopInput(onInput func(string), onResize func()) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	t.loopInput = onInput
 	t.loopResize = onResize
 }
 
-// RequestRender schedules a throttled render (or an immediate one when forced).
+// RequestRender requests a paint. With a tick channel the request coalesces
+// onto it and the owner paints (D146: no internal timer, no throttling).
 func (t *Renderer) RequestRender(force bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.requestRenderLocked(force)
+	t.signalRender()
 }
 
-// DisableAutoRender turns RequestRender into a no-op so tests can drive
-// rendering deterministically with RenderNow (the Go renderer schedules real
-// timers, unlike upstream's injectable seam: divergence D83).
-func (t *Renderer) DisableAutoRender() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.autoRenderDisabled = true
+// DisableAutoRender is retained as a no-op for compatibility: rendering is
+// always owner-driven (D146 removed the internal timer the seam used to
+// disable; divergence D83).
+func (t *Renderer) DisableAutoRender() {}
+
+// requestRender is RequestRender for internal callers.
+func (t *Renderer) requestRender(force bool) {
+	t.RequestRender(force)
 }
 
-// requestRenderLocked is RequestRender for callers that hold the lock.
-func (t *Renderer) requestRenderLocked(force bool) {
-	if t.autoRenderDisabled {
-		return
-	}
-	if force {
-		t.resetRenderState()
-		t.requestImmediateRenderLocked()
-		return
-	}
-	if t.renderTicks != nil {
-		// Loop mode: coalesce onto the tick channel instead of arming a timer.
-		t.renderRequested = true
-		t.signalRenderLocked()
-		return
-	}
-	if t.renderRequested {
-		return
-	}
-	t.renderRequested = true
-	t.scheduleRenderLocked()
-}
-
-// requestImmediateRenderLocked schedules a next-tick render. Callers hold the
-// lock. Auto-render is disabled in tests (D83), including this path.
-func (t *Renderer) requestImmediateRenderLocked() {
-	if t.autoRenderDisabled {
-		return
-	}
-	if t.renderTicks != nil {
-		// Loop mode: input latency is the loop's business; just signal.
-		t.renderRequested = true
-		t.signalRenderLocked()
-		return
-	}
-	t.cancelRenderTimerLocked()
-	t.renderRequested = true
-	if t.immediateRenderScheduled {
-		return
-	}
-	t.immediateRenderScheduled = true
-	// Upstream defers to process.nextTick; Go runs the callback on a goroutine.
-	time.AfterFunc(0, func() {
-		t.mu.Lock()
-		t.immediateRenderScheduled = false
-		if t.stopped || !t.renderRequested {
-			t.mu.Unlock()
-			return
-		}
-		// A previously queued scheduleRender can create a timer before this
-		// callback runs. User input must preempt that throttled frame.
-		t.cancelRenderTimerLocked()
-		t.renderRequested = false
-		t.lastRenderAt = t.clock()
-		t.mu.Unlock()
-		t.doRender()
-	})
-}
-
-func (t *Renderer) cancelRenderTimerLocked() {
-	if t.renderTimer == nil {
-		return
-	}
-	t.renderTimer.Stop()
-	t.renderTimer = nil
-}
-
-// scheduleRenderLocked arms the throttled render timer. Callers hold the lock.
-func (t *Renderer) scheduleRenderLocked() {
-	if t.stopped || t.renderTimer != nil || !t.renderRequested {
-		return
-	}
-	elapsed := t.clock().Sub(t.lastRenderAt)
-	delay := MinRenderIntervalMS*time.Millisecond - elapsed
-	if delay < 0 {
-		delay = 0
-	}
-	t.renderTimer = time.AfterFunc(delay, func() {
-		t.mu.Lock()
-		t.renderTimer = nil
-		if t.stopped || !t.renderRequested {
-			t.mu.Unlock()
-			return
-		}
-		t.renderRequested = false
-		t.lastRenderAt = t.clock()
-		t.mu.Unlock()
-		t.doRender()
-		t.mu.Lock()
-		if t.renderRequested {
-			t.scheduleRenderLocked()
-		}
-		t.mu.Unlock()
-	})
+// requestImmediateRender requests a paint (owner-driven; same as
+// RequestRender now that the internal timer is gone).
+func (t *Renderer) requestImmediateRender() {
+	t.RequestRender(false)
 }
 
 // resetRenderState invokes the screen's reset hook.
@@ -560,10 +425,6 @@ func (t *Renderer) resetRenderState() {
 }
 
 func (t *Renderer) doRender() {
-	if !t.loopMode() {
-		t.renderMu.Lock()
-		defer t.renderMu.Unlock()
-	}
 	t.drainPosted()
 	if t.DoRender != nil {
 		t.DoRender()
@@ -571,25 +432,26 @@ func (t *Renderer) doRender() {
 	atomic.AddInt64(&t.renderCount, 1)
 }
 
-// Post schedules fn to run on the UI side: drained at the next render, under
-// the render lock, so it is serialized with renders and input handling and
-// never concurrent with a paint. Callbacks may call back into the renderer
-// (RequestRender/SetFocus are fine) but must not call RenderNow or Stop.
+// Post schedules fn to run on the UI side: drained at the next render pass,
+// serialized with renders and input handling by the owner goroutine. The
+// queue itself takes postMu (Post is called from off-loop goroutines).
+// Callbacks may call back into the renderer (RequestRender/SetFocus are
+// fine) but must not call RenderNow or Stop.
 func (t *Renderer) Post(fn func()) {
-	t.mu.Lock()
+	t.postMu.Lock()
 	t.posted = append(t.posted, fn)
-	t.mu.Unlock()
-	t.RequestRender(false)
+	t.postMu.Unlock()
+	t.requestRender(false)
 }
 
 // drainPosted runs queued callbacks. Looping
 // covers callbacks that post more work.
 func (t *Renderer) drainPosted() {
 	for {
-		t.mu.Lock()
+		t.postMu.Lock()
 		pending := t.posted
 		t.posted = nil
-		t.mu.Unlock()
+		t.postMu.Unlock()
 		if len(pending) == 0 {
 			return
 		}
@@ -619,14 +481,10 @@ type colorSchemeListener struct {
 
 // OnTerminalColorSchemeChange subscribes to terminal color-scheme reports.
 func (t *Renderer) OnTerminalColorSchemeChange(listener func(TerminalColorScheme)) func() {
-	t.mu.Lock()
 	t.nextColorSchemeID++
 	id := t.nextColorSchemeID
 	t.colorSchemeListeners = append(t.colorSchemeListeners, colorSchemeListener{id: id, listener: listener})
-	t.mu.Unlock()
 	return func() {
-		t.mu.Lock()
-		defer t.mu.Unlock()
 		filtered := t.colorSchemeListeners[:0]
 		for _, entry := range t.colorSchemeListeners {
 			if entry.id != id {
@@ -639,15 +497,12 @@ func (t *Renderer) OnTerminalColorSchemeChange(listener func(TerminalColorScheme
 
 // SetTerminalColorSchemeNotifications enables the `CSI ? 2031` notifications.
 func (t *Renderer) SetTerminalColorSchemeNotifications(enabled bool) {
-	t.mu.Lock()
-	if t.colorSchemeNotifyOn == enabled {
-		t.mu.Unlock()
+	if t.colorSchemeNotifyOn.Load() == enabled {
 		return
 	}
-	t.colorSchemeNotifyOn = enabled
-	stopped := t.stopped
+	t.colorSchemeNotifyOn.Store(enabled)
+	stopped := t.stopped.Load()
 	terminal := t.Terminal
-	t.mu.Unlock()
 	if !stopped && terminal != nil {
 		if enabled {
 			terminal.Write("[?2031h")
@@ -661,11 +516,9 @@ func (t *Renderer) SetTerminalColorSchemeNotifications(enabled bool) {
 // OSC 11. It returns ok=false on timeout or an unparsable reply.
 func (t *Renderer) QueryTerminalBackgroundColor(timeoutMS int) (RgbColor, bool) {
 	query := &pendingOSC11Query{result: make(chan osc11Result, 1)}
-	t.mu.Lock()
 	t.pendingOSC11Queries = append(t.pendingOSC11Queries, query)
 	t.pendingOSC11Replies++
 	terminal := t.Terminal
-	t.mu.Unlock()
 
 	if terminal == nil {
 		return RgbColor{}, false
@@ -678,11 +531,9 @@ func (t *Renderer) QueryTerminalBackgroundColor(timeoutMS int) (RgbColor, bool) 
 	case result := <-query.result:
 		return result.color, result.ok
 	case <-timer.C:
-		t.mu.Lock()
 		if !query.settled {
 			query.settled = true
 		}
-		t.mu.Unlock()
 		return RgbColor{}, false
 	}
 }
@@ -698,9 +549,7 @@ func (t *Renderer) QueryTerminalColorScheme(timeoutMS int) (TerminalColorScheme,
 		}
 	})
 	defer unsubscribe()
-	t.mu.Lock()
 	terminal := t.Terminal
-	t.mu.Unlock()
 	if terminal == nil {
 		return "", false
 	}
@@ -718,18 +567,14 @@ func (t *Renderer) QueryTerminalColorScheme(timeoutMS int) (TerminalColorScheme,
 
 // consumeOSC11BackgroundResponse resolves the oldest pending OSC 11 query.
 func (t *Renderer) consumeOSC11BackgroundResponse(data string) bool {
-	t.mu.Lock()
 	if t.pendingOSC11Replies <= 0 {
-		t.mu.Unlock()
 		return false
 	}
-	t.mu.Unlock()
 	if !IsOsc11BackgroundColorResponse(data) {
 		return false
 	}
 	color, ok := ParseOsc11BackgroundColor(data)
 
-	t.mu.Lock()
 	t.pendingOSC11Replies--
 	var query *pendingOSC11Query
 	if len(t.pendingOSC11Queries) > 0 {
@@ -743,7 +588,6 @@ func (t *Renderer) consumeOSC11BackgroundResponse(data string) bool {
 		default:
 		}
 	}
-	t.mu.Unlock()
 	return true
 }
 
@@ -753,9 +597,7 @@ func (t *Renderer) consumeTerminalColorSchemeReport(data string) bool {
 	if !ok {
 		return false
 	}
-	t.mu.Lock()
 	listeners := append([]colorSchemeListener{}, t.colorSchemeListeners...)
-	t.mu.Unlock()
 	for _, entry := range listeners {
 		entry.listener(scheme)
 	}
@@ -769,14 +611,11 @@ func (t *Renderer) HandleTerminalInput(data string) {
 	if t.consumeTerminalColorSchemeReport(data) {
 		return
 	}
-	// Listeners are user code and may call back into the renderer; run them
-	// from a snapshot without the lock.
-	t.mu.Lock()
-	listeners := append([]TuiInputListener(nil), t.inputListeners...)
-	t.mu.Unlock()
-
+	// Listeners are user code and may call back into the renderer. They run
+	// from a snapshot; the listener registry itself only changes during setup
+	// and teardown (loop goroutine).
 	current := data
-	for _, listener := range listeners {
+	for _, listener := range t.inputListeners {
 		result := listener(current)
 		if result.Consume {
 			return
@@ -785,19 +624,15 @@ func (t *Renderer) HandleTerminalInput(data string) {
 			current = result.Data
 		}
 	}
-	if len(current) == 0 {
-		return
-	}
 	data = current
-
-	t.mu.Lock()
-	if t.MatchesDebugKey != nil && t.OnDebug != nil && t.MatchesDebugKey(data) {
-		onDebug := t.OnDebug
-		t.mu.Unlock()
-		onDebug()
+	if len(data) == 0 {
 		return
 	}
-	defer t.mu.Unlock()
+
+	if t.MatchesDebugKey != nil && t.OnDebug != nil && t.MatchesDebugKey(data) {
+		t.OnDebug()
+		return
+	}
 
 	// If the focused component is an overlay, verify it is still visible
 	// (visibility can change due to terminal resize or a visible() callback).
@@ -829,7 +664,8 @@ func (t *Renderer) HandleTerminalInput(data string) {
 	}
 
 	// Pass input to the focused component (including Ctrl+C); the component
-	// decides how to handle it.
+	// decides how to handle it. No locks are held: input and paints share the
+	// owner goroutine (D146).
 	handler, ok := t.focusedComponent.(InputHandler)
 	if ok && t.focusedComponent != nil {
 		if releaseDetector := t.KeyReleaseDetector; releaseDetector != nil && releaseDetector(data) {
@@ -837,22 +673,10 @@ func (t *Renderer) HandleTerminalInput(data string) {
 				return
 			}
 		}
-		// The component handler runs without the renderer lock (it may call
-		// back into the renderer, e.g. requestRender or setFocus). Input is
-		// serialized against paints only in timer mode: in loop mode the owner
-		// goroutine does both, so no render lock is involved (stage 3).
-		loopMode := t.loopMode()
-		t.mu.Unlock()
-		if !loopMode {
-			t.renderMu.Lock()
-		}
 		handler.HandleInput(data)
-		if !loopMode {
-			t.renderMu.Unlock()
-		}
-		t.mu.Lock()
-		// Keyboard input is latency-sensitive: avoid the throttled path.
-		t.requestImmediateRenderLocked()
+		// Keyboard input is latency-sensitive: the owner paints on the next
+		// tick (coalesced).
+		t.signalRender()
 	}
 }
 
@@ -860,8 +684,6 @@ func (t *Renderer) HandleTerminalInput(data string) {
 
 // SetFocus sets keyboard focus.
 func (t *Renderer) SetFocus(component Component) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	t.setFocusInternal(component, "clear")
 }
 
@@ -1026,8 +848,6 @@ func (t *Renderer) isOverlayComponent(component Component) bool {
 // ShowOverlay shows an overlay component with configurable positioning. The
 // returned handle controls the overlay's visibility.
 func (t *Renderer) ShowOverlay(component Component, options *OverlayOptions) OverlayHandle {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	t.focusOrderCounter++
 	entry := &overlayEntry{
 		component:  component,
@@ -1042,7 +862,7 @@ func (t *Renderer) ShowOverlay(component Component, options *OverlayOptions) Ove
 		t.setFocusInternal(component, "clear")
 	}
 	t.Terminal.HideCursor()
-	t.requestRenderLocked(false)
+	t.requestRender(false)
 
 	return &overlayHandle{renderer: t, entry: entry, component: component, nonCapturing: nonCapturing}
 }
@@ -1056,8 +876,6 @@ type overlayHandle struct {
 
 func (h *overlayHandle) Hide() {
 	t := h.renderer
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	index := t.overlayIndexOf(h.entry)
 	if index == -1 {
 		return
@@ -1075,13 +893,11 @@ func (h *overlayHandle) Hide() {
 	if len(t.overlayStack) == 0 {
 		t.Terminal.HideCursor()
 	}
-	t.requestRenderLocked(false)
+	t.requestRender(false)
 }
 
 func (h *overlayHandle) SetHidden(hidden bool) {
 	t := h.renderer
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	if h.entry.hidden == hidden {
 		return
 	}
@@ -1100,32 +916,26 @@ func (h *overlayHandle) SetHidden(hidden bool) {
 		h.entry.focusOrder = t.focusOrderCounter
 		t.setFocusInternal(h.component, "clear")
 	}
-	t.requestRenderLocked(false)
+	t.requestRender(false)
 }
 
 func (h *overlayHandle) IsHidden() bool {
-	h.renderer.mu.Lock()
-	defer h.renderer.mu.Unlock()
 	return h.entry.hidden
 }
 
 func (h *overlayHandle) Focus() {
 	t := h.renderer
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	if t.overlayIndexOf(h.entry) == -1 || !t.isOverlayVisible(h.entry) {
 		return
 	}
 	t.focusOrderCounter++
 	h.entry.focusOrder = t.focusOrderCounter
 	t.setFocusInternal(h.component, "clear")
-	t.requestRenderLocked(false)
+	t.requestRender(false)
 }
 
 func (h *overlayHandle) Unfocus(target Component, hasTarget bool) {
 	t := h.renderer
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	isFocused := t.focusedComponent == h.component
 	state := t.overlayFocusRestore
 	hasPendingRestore := state.status != "inactive" && state.overlay == h.entry
@@ -1140,7 +950,7 @@ func (h *overlayHandle) Unfocus(target Component, hasTarget bool) {
 		} else {
 			t.clearOverlayFocusRestore()
 		}
-		t.requestRenderLocked(false)
+		t.requestRender(false)
 		return
 	}
 	t.clearOverlayFocusRestoreFor(h.entry)
@@ -1156,19 +966,15 @@ func (h *overlayHandle) Unfocus(target Component, hasTarget bool) {
 			t.setFocusInternal(fallbackTarget, "clear")
 		}
 	}
-	t.requestRenderLocked(false)
+	t.requestRender(false)
 }
 
 func (h *overlayHandle) IsFocused() bool {
-	h.renderer.mu.Lock()
-	defer h.renderer.mu.Unlock()
 	return h.renderer.focusedComponent == h.component
 }
 
 func (h *overlayHandle) GetBounds() (OverlayBounds, bool) {
 	t := h.renderer
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	if t.overlayIndexOf(h.entry) == -1 || !t.isOverlayVisible(h.entry) || !h.entry.hasBounds {
 		return OverlayBounds{}, false
 	}
@@ -1177,8 +983,6 @@ func (h *overlayHandle) GetBounds() (OverlayBounds, bool) {
 
 // HideOverlay hides the topmost overlay and restores previous focus.
 func (t *Renderer) HideOverlay() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	if len(t.overlayStack) == 0 {
 		return
 	}
@@ -1196,13 +1000,11 @@ func (t *Renderer) HideOverlay() {
 	if len(t.overlayStack) == 0 {
 		t.Terminal.HideCursor()
 	}
-	t.requestRenderLocked(false)
+	t.requestRender(false)
 }
 
 // HasOverlay reports whether any overlay is visible.
 func (t *Renderer) HasOverlay() bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	for _, entry := range t.overlayStack {
 		if t.isOverlayVisible(entry) {
 			return true
@@ -1213,15 +1015,11 @@ func (t *Renderer) HasOverlay() bool {
 
 // HasOverlayEntries reports whether the overlay stack is non-empty.
 func (t *Renderer) HasOverlayEntries() bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	return len(t.overlayStack) > 0
 }
 
 // IsOverlayFocused reports whether the focused component is a visible overlay.
 func (t *Renderer) IsOverlayFocused() bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	entry := t.findOverlay(t.focusedComponent)
 	return entry != nil && t.isOverlayVisible(entry)
 }
@@ -1271,8 +1069,6 @@ func (t *Renderer) getTopmostVisibleOverlay() *overlayEntry {
 // DispatchMouseToOverlay dispatches to the visually topmost overlay under the
 // pointer, reporting whether an overlay captured the point.
 func (t *Renderer) DispatchMouseToOverlay(event TuiMouseEvent) (bool, *TuiMouseDispatchResult) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	for index := len(t.renderedOverlayLayouts) - 1; index >= 0; index-- {
 		layout := t.renderedOverlayLayouts[index]
 		if event.ScreenX < layout.col || event.ScreenX >= layout.col+layout.width ||
@@ -1300,8 +1096,6 @@ func (t *Renderer) DispatchMouseToOverlay(event TuiMouseEvent) (bool, *TuiMouseD
 // ResolveMouseFocusTarget keeps overlay containers as keyboard focus owners
 // when a nested control is clicked.
 func (t *Renderer) ResolveMouseFocusTarget(component Component) Component {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	for index := len(t.overlayStack) - 1; index >= 0; index-- {
 		overlay := t.overlayStack[index]
 		if t.isOverlayVisible(overlay) && t.containsComponent(overlay.component, component) {
@@ -1314,8 +1108,6 @@ func (t *Renderer) ResolveMouseFocusTarget(component Component) Component {
 // CompositeOverlays composites all overlays into content lines (sorted by
 // focusOrder, higher = on top).
 func (t *Renderer) CompositeOverlays(lines []string, termWidth int, termHeight int) []string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	if len(t.overlayStack) == 0 {
 		t.renderedOverlayLayouts = nil
 		return lines

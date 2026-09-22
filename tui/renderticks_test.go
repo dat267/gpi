@@ -32,33 +32,25 @@ func TestRequestRenderCoalescesIntoTicks(t *testing.T) {
 	}
 }
 
-// TestEnableRenderTicksDisablesTimer asserts loop mode stops arming the
-// internal render timer (stage 2 deletes the timer goroutine on this path).
-func TestEnableRenderTicksDisablesTimer(t *testing.T) {
+// TestRequestRenderNeverArmsATimer pins the D146 contract: there is no
+// internal render timer — requests only coalesce onto the tick channel, and
+// the owner paints.
+func TestRequestRenderNeverArmsATimer(t *testing.T) {
 	terminal := &fakePostTerminal{width: 40, height: 10}
 	screen := NewMainScreen(terminal, false, "")
+
+	// Without a tick channel the request is dropped (no owner to paint).
 	screen.RequestRender(false)
-	screen.mu.Lock()
-	armed := screen.renderTimer != nil
-	screen.mu.Unlock()
-	if !armed {
-		t.Fatal("timer mode should arm the render timer")
+	if got := screen.RenderCount(); got != 0 {
+		t.Fatalf("renders without a tick channel = %d, want 0", got)
 	}
 
 	screen.EnableRenderTicks()
-	screen.mu.Lock()
-	screen.cancelRenderTimerLocked()
-	screen.renderTimer = nil
-	screen.mu.Unlock()
-
 	screen.RequestRender(false)
-	screen.mu.Lock()
-	armedAfter := screen.renderTimer != nil
-	screen.mu.Unlock()
-	if armedAfter {
-		t.Fatal("loop mode must not arm the render timer")
-	}
 	if got := len(screen.RenderTicks()); got != 1 {
 		t.Fatalf("pending ticks = %d, want 1", got)
+	}
+	if screen.RenderCount() != 0 {
+		t.Fatalf("renders before the owner paints = %d, want 0", screen.RenderCount())
 	}
 }

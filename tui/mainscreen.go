@@ -226,8 +226,6 @@ func (s *MainScreen) resetRenderState() {
 func (s *MainScreen) beforeTerminalStop(options TuiStopOptions) {
 	// The transcript-replay reads render-mutated state; serialize against an
 	// in-flight timer render, which writes the same fields under s.mu.
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if options.PreserveScreen || len(s.previousLines) == 0 {
 		return
 	}
@@ -323,10 +321,7 @@ func (s *MainScreen) deleteChangedKittyImages(firstChanged int, lastChanged int)
 }
 
 func (s *MainScreen) doRender() {
-	s.mu.Lock()
-	stopped := s.stopped
-	s.mu.Unlock()
-	if stopped {
+	if s.stopped.Load() {
 		return
 	}
 	width := s.Terminal.Columns()
@@ -405,14 +400,12 @@ func (s *MainScreen) doRender() {
 		bufferLength := maxInt(height, len(newLines))
 		// Commit the render state under s.mu: the stop path reads it
 		// concurrently with in-flight timer renders.
-		s.mu.Lock()
 		s.previousViewportTop = maxInt(0, bufferLength-height)
 		s.positionHardwareCursor(cursorPos.Row, cursorPos.Col, cursorPos.Has, len(newLines))
 		s.previousLines = newLines
 		s.previousKittyImageIDs = s.collectKittyImageIDs(newLines)
 		s.previousWidth = width
 		s.previousHeight = height
-		s.mu.Unlock()
 	}
 
 	// First render: output everything without clearing (assumes a clean screen).
@@ -518,14 +511,12 @@ func (s *MainScreen) doRender() {
 			s.cursorRow = targetRow
 			s.hardwareCursorRow = targetRow
 		}
-		s.mu.Lock()
 		s.positionHardwareCursor(cursorPos.Row, cursorPos.Col, cursorPos.Has, len(newLines))
 		s.previousLines = newLines
 		s.previousKittyImageIDs = s.collectKittyImageIDs(newLines)
 		s.previousWidth = width
 		s.previousHeight = height
 		s.previousViewportTop = prevViewportTop
-		s.mu.Unlock()
 		return
 	}
 
@@ -622,7 +613,6 @@ func (s *MainScreen) doRender() {
 	output.Append("\x1b[?2026l")
 	output.Flush()
 
-	s.mu.Lock()
 	s.cursorRow = maxInt(0, len(newLines)-1)
 	s.hardwareCursorRow = finalCursorRow
 	s.maxLinesRendered = maxInt(s.maxLinesRendered, len(newLines))
@@ -634,7 +624,6 @@ func (s *MainScreen) doRender() {
 	s.previousKittyImageIDs = s.collectKittyImageIDs(newLines)
 	s.previousWidth = width
 	s.previousHeight = height
-	s.mu.Unlock()
 }
 
 // reportOverwideLine writes the crash log and reports the error (upstream
@@ -712,14 +701,10 @@ func (s *MainScreen) positionHardwareCursor(row int, col int, hasCursor bool, to
 
 // renderLocked renders the component tree under the renderer lock.
 func (s *MainScreen) renderLocked(width int) []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.Container.Render(width)
 }
 
 func (s *MainScreen) hasOverlayEntriesLocked() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return len(s.overlayStack) > 0
 }
 

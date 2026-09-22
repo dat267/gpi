@@ -724,6 +724,7 @@ func (l *SessionList) buildTreePrefix(node flatSessionNode) string {
 
 // HandleInput processes the list input.
 func (l *SessionList) HandleInput(keyData string) {
+	println("LIST-INPUT", len(keyData), len(l.filtered))
 	kb := tui.GetKeybindings()
 
 	if l.confirmingDeletePath != nil {

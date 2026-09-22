@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"strings"
-	"sync"
 	"unicode/utf8"
 )
 
@@ -67,8 +66,6 @@ type layoutLine struct {
 
 // Editor is the multi-line input component.
 type Editor struct {
-	mu sync.Mutex
-
 	host     EditorHost
 	theme    EditorTheme
 	paddingX int
@@ -167,21 +164,17 @@ func (e *Editor) Invalidate() {}
 
 // PaddingX returns the horizontal padding.
 func (e *Editor) PaddingX() int {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	return e.paddingX
 }
 
 // SetPaddingX updates the horizontal padding.
 func (e *Editor) SetPaddingX(padding int) {
-	e.mu.Lock()
 	newPadding := padding
 	if newPadding < 0 {
 		newPadding = 0
 	}
 	changed := e.paddingX != newPadding
 	e.paddingX = newPadding
-	e.mu.Unlock()
 	if changed {
 		e.requestRender()
 	}
@@ -189,8 +182,6 @@ func (e *Editor) SetPaddingX(padding int) {
 
 // AutocompleteMaxVisible returns the visible suggestion count.
 func (e *Editor) AutocompleteMaxVisible() int {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	return e.autocompleteMaxVisible
 }
 
@@ -203,10 +194,8 @@ func (e *Editor) SetAutocompleteMaxVisible(maxVisible int) {
 	if clamped > 20 {
 		clamped = 20
 	}
-	e.mu.Lock()
 	changed := e.autocompleteMaxVisible != clamped
 	e.autocompleteMaxVisible = clamped
-	e.mu.Unlock()
 	if changed {
 		e.requestRender()
 	}
@@ -214,13 +203,11 @@ func (e *Editor) SetAutocompleteMaxVisible(maxVisible int) {
 
 // SetAutocompleteProvider installs the completion provider.
 func (e *Editor) SetAutocompleteProvider(provider AutocompleteProvider) {
-	e.mu.Lock()
 	e.cancelAutocompleteLocked()
 	e.autocompleteProvider = provider
 	if provider != nil {
 		e.setAutocompleteTriggerCharactersLocked(provider.TriggerCharacters())
 	}
-	e.mu.Unlock()
 }
 
 func (e *Editor) requestRender() {
@@ -235,8 +222,6 @@ func (e *Editor) AddToHistory(text string) {
 	if trimmed == "" {
 		return
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	if len(e.history) > 0 && e.history[0] == trimmed {
 		return
 	}
@@ -357,8 +342,6 @@ func (e *Editor) renderBottomBorder(width int, hiddenLineCount int) string {
 
 // Render renders the editor.
 func (e *Editor) Render(width int) []string {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	maxPadding := maxInt(0, (width-1)/2)
 	paddingX := minInt(e.paddingX, maxPadding)
@@ -461,8 +444,6 @@ func (e *Editor) Render(width int) []string {
 
 // HandleMouse handles clicks in the editor and its autocomplete list.
 func (e *Editor) HandleMouse(event TuiMouseEvent) *TuiMouseDispatchResult {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	autocompleteStartRow := e.renderedVisibleLineCount + 2
 	if e.autocompleteState != "" && e.autocompleteList != nil &&
@@ -545,11 +526,9 @@ func (e *Editor) HandleMouse(event TuiMouseEvent) *TuiMouseDispatchResult {
 
 // HandleInput processes a key/input chunk.
 func (e *Editor) HandleInput(data string) {
-	e.mu.Lock()
 	e.handleInputLocked(data)
 	pending := e.pendingSubmit
 	e.pendingSubmit = nil
-	e.mu.Unlock()
 	// Invoke the submit handler outside the lock (D136).
 	if pending != nil && e.OnSubmit != nil {
 		e.OnSubmit(*pending)
@@ -846,8 +825,6 @@ func (e *Editor) getTextLocked() string { return strings.Join(e.state.lines, "\n
 
 // GetText returns the editor text (with paste markers).
 func (e *Editor) GetText() string {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	return e.getTextLocked()
 }
 
@@ -862,29 +839,21 @@ func (e *Editor) expandPasteMarkersLocked(text string) string {
 
 // GetExpandedText returns the text with paste markers expanded.
 func (e *Editor) GetExpandedText() string {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	return e.expandPasteMarkersLocked(e.getTextLocked())
 }
 
 // GetLines returns a copy of the editor lines.
 func (e *Editor) GetLines() []string {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	return append([]string(nil), e.state.lines...)
 }
 
 // Cursor returns the cursor line and column.
 func (e *Editor) Cursor() (line int, col int) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	return e.state.cursorLine, e.state.cursorCol
 }
 
 // SetText replaces the editor text.
 func (e *Editor) SetText(text string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.cancelAutocompleteLocked()
 	e.lastAction = ""
 	e.exitHistoryBrowsing()
@@ -902,8 +871,6 @@ func (e *Editor) InsertTextAtCursor(text string) {
 	if text == "" {
 		return
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.cancelAutocompleteLocked()
 	e.pushUndoSnapshot()
 	e.lastAction = ""
@@ -2131,8 +2098,6 @@ func (e *Editor) cancelAutocompleteLocked() {
 
 // IsShowingAutocomplete reports whether the suggestion list is visible.
 func (e *Editor) IsShowingAutocomplete() bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	return e.autocompleteState != ""
 }
 

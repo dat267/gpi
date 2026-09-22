@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"sync"
 	"time"
 )
 
@@ -45,7 +44,6 @@ type ScrollView struct {
 	thumbStyle  func(text string) string
 	hideDelayMS int
 
-	mu                        sync.Mutex
 	currentScrollbar          ScrollViewScrollbar
 	currentScrollTop          int
 	contentHeight             int
@@ -55,7 +53,10 @@ type ScrollView struct {
 	requestRenderCallback     func()
 	transientScrollbarVisible bool
 	scrollbarActive           bool
-	scrollbarHideTimer        *time.Timer
+	// scrollbarHideDeadline drives the transient scrollbar's lazy hide: the
+	// consumer's animation walk wakes on it and the next Render hides the
+	// scrollbar (D146: no internal timer, no mutex — loop-owned state).
+	scrollbarHideDeadline time.Time
 }
 
 // NewScrollView wraps a component in a scroll view.
@@ -96,24 +97,32 @@ func NewScrollView(component Component, options ScrollViewOptions) *ScrollView {
 	return view
 }
 
+// AnimationFrame implements Animator: wake when the transient scrollbar's
+// hide deadline passes.
+func (s *ScrollView) AnimationFrame(now time.Time) (bool, time.Duration) {
+	if s.scrollbarHideDeadline.IsZero() {
+		return false, 0
+	}
+	if now.Before(s.scrollbarHideDeadline) {
+		return true, s.scrollbarHideDeadline.Sub(now)
+	}
+	// Expired: hide and ask for one more frame to repaint without it.
+	s.hideTransientScrollbar()
+	return true, time.Millisecond
+}
+
 // ScrollTop returns the current scroll offset.
 func (s *ScrollView) ScrollTop() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.currentScrollTop
 }
 
 // IsFollowingEnd reports whether the view follows the content end.
 func (s *ScrollView) IsFollowingEnd() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.followingEnd
 }
 
 // ViewportHeight returns the last laid-out viewport height.
 func (s *ScrollView) ViewportHeight() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.currentViewportHeight
 }
 
@@ -128,15 +137,11 @@ func (s *ScrollView) Overscroll() string { return s.overscroll }
 
 // Scrollbar returns the current scrollbar mode.
 func (s *ScrollView) Scrollbar() ScrollViewScrollbar {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.currentScrollbar
 }
 
 // IsScrollbarVisible reports whether the scrollbar is shown.
 func (s *ScrollView) IsScrollbarVisible() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.currentScrollbar == ScrollbarAlways {
 		return s.currentViewportHeight > 0
 	}
@@ -145,26 +150,21 @@ func (s *ScrollView) IsScrollbarVisible() bool {
 
 // IsScrollbarActive reports whether the scrollbar shows the active thumb.
 func (s *ScrollView) IsScrollbarActive() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.scrollbarActive
 }
 
 // SetScrollbar changes the scrollbar mode.
 func (s *ScrollView) SetScrollbar(scrollbar ScrollViewScrollbar) {
-	s.mu.Lock()
 	if scrollbar == s.currentScrollbar {
-		s.mu.Unlock()
 		return
 	}
 	s.currentScrollbar = scrollbar
 	callback := s.requestRenderCallback
 	if scrollbar != ScrollbarAuto {
-		s.hideTransientScrollbarLocked()
+		s.hideTransientScrollbar()
 	} else if s.scrollbarActive {
 		s.markScrollbarActivityLocked()
 	}
-	s.mu.Unlock()
 	if callback != nil {
 		callback()
 	}
@@ -173,8 +173,6 @@ func (s *ScrollView) SetScrollbar(scrollbar ScrollViewScrollbar) {
 // GetContentWidth returns the child width (one column less when the scrollbar
 // is always visible).
 func (s *ScrollView) GetContentWidth(width int) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.currentScrollbar == ScrollbarAlways && width > 1 {
 		return width - 1
 	}
@@ -186,45 +184,25 @@ func (s *ScrollView) markScrollbarActivityLocked() {
 		return
 	}
 	s.transientScrollbarVisible = true
-	if s.scrollbarHideTimer != nil {
-		s.scrollbarHideTimer.Stop()
-		s.scrollbarHideTimer = nil
-	}
+	s.scrollbarHideDeadline = time.Now().Add(time.Duration(s.hideDelayMS) * time.Millisecond)
 	if s.scrollbarActive {
 		return
 	}
-	s.scrollbarHideTimer = time.AfterFunc(time.Duration(s.hideDelayMS)*time.Millisecond, func() {
-		s.mu.Lock()
-		s.scrollbarHideTimer = nil
-		s.transientScrollbarVisible = false
-		callback := s.requestRenderCallback
-		s.mu.Unlock()
-		if callback != nil {
-			callback()
-		}
-	})
 }
 
-func (s *ScrollView) hideTransientScrollbarLocked() {
+func (s *ScrollView) hideTransientScrollbar() {
 	s.transientScrollbarVisible = false
-	if s.scrollbarHideTimer == nil {
-		return
-	}
-	s.scrollbarHideTimer.Stop()
-	s.scrollbarHideTimer = nil
+	s.scrollbarHideDeadline = time.Time{}
 }
 
 // SetScrollbarActive marks the scrollbar active (dragging).
 func (s *ScrollView) SetScrollbarActive(active bool) {
-	s.mu.Lock()
 	if active == s.scrollbarActive {
-		s.mu.Unlock()
 		return
 	}
 	s.scrollbarActive = active
 	s.markScrollbarActivityLocked()
 	callback := s.requestRenderCallback
-	s.mu.Unlock()
 	if callback != nil {
 		callback()
 	}
@@ -241,7 +219,6 @@ func (s *ScrollView) ScrollTo(scrollTop int, options ...ScrollToRequest) {
 	if len(options) > 0 {
 		disableFollow = options[0].DisableFollow
 	}
-	s.mu.Lock()
 	requested := scrollTop
 	maxScrollTop := maxInt(0, s.contentHeight-s.currentViewportHeight)
 	next := maxInt(0, minInt(maxScrollTop, requested))
@@ -249,7 +226,6 @@ func (s *ScrollView) ScrollTo(scrollTop int, options ...ScrollToRequest) {
 	nextFollowingEnd := !nextFollowSuppressedAtEnd && s.followEnd && next == maxScrollTop
 	if next == s.currentScrollTop && nextFollowingEnd == s.followingEnd &&
 		nextFollowSuppressedAtEnd == s.followSuppressedAtEnd {
-		s.mu.Unlock()
 		return
 	}
 	moved := next != s.currentScrollTop
@@ -261,7 +237,6 @@ func (s *ScrollView) ScrollTo(scrollTop int, options ...ScrollToRequest) {
 		s.markScrollbarActivityLocked()
 		callback = s.requestRenderCallback
 	}
-	s.mu.Unlock()
 	if callback != nil {
 		callback()
 	}
@@ -272,7 +247,6 @@ func (s *ScrollView) ScrollBy(lines int) int {
 	if lines == 0 {
 		return 0
 	}
-	s.mu.Lock()
 	maxScrollTop := maxInt(0, s.contentHeight-s.currentViewportHeight)
 	start := s.currentScrollTop
 	if s.followingEnd {
@@ -291,7 +265,6 @@ func (s *ScrollView) ScrollBy(lines int) int {
 	if moved != 0 || s.followingEnd != wasFollowingEnd {
 		callback = s.requestRenderCallback
 	}
-	s.mu.Unlock()
 	if callback != nil {
 		callback()
 	}
@@ -300,7 +273,6 @@ func (s *ScrollView) ScrollBy(lines int) int {
 
 // ScrollToStart scrolls to the top.
 func (s *ScrollView) ScrollToStart() {
-	s.mu.Lock()
 	changed := s.currentScrollTop != 0 ||
 		s.followingEnd != (s.followEnd && s.contentHeight <= s.currentViewportHeight)
 	s.currentScrollTop = 0
@@ -311,7 +283,6 @@ func (s *ScrollView) ScrollToStart() {
 		s.markScrollbarActivityLocked()
 		callback = s.requestRenderCallback
 	}
-	s.mu.Unlock()
 	if callback != nil {
 		callback()
 	}
@@ -319,7 +290,6 @@ func (s *ScrollView) ScrollToStart() {
 
 // ScrollToEnd scrolls to the end.
 func (s *ScrollView) ScrollToEnd() {
-	s.mu.Lock()
 	next := maxInt(0, s.contentHeight-s.currentViewportHeight)
 	changed := s.currentScrollTop != next || s.followingEnd != s.followEnd
 	s.currentScrollTop = next
@@ -330,7 +300,6 @@ func (s *ScrollView) ScrollToEnd() {
 		s.markScrollbarActivityLocked()
 		callback = s.requestRenderCallback
 	}
-	s.mu.Unlock()
 	if callback != nil {
 		callback()
 	}
@@ -338,8 +307,6 @@ func (s *ScrollView) ScrollToEnd() {
 
 // UpdateLayout records the content and viewport heights (layout interface).
 func (s *ScrollView) UpdateLayout(contentHeight int, viewportHeight int, requestRender func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.contentHeight = maxInt(0, contentHeight)
 	s.currentViewportHeight = maxInt(0, viewportHeight)
 	s.requestRenderCallback = requestRender
@@ -356,7 +323,7 @@ func (s *ScrollView) UpdateLayout(contentHeight int, viewportHeight int, request
 		s.followingEnd = true
 	}
 	if s.contentHeight <= s.currentViewportHeight {
-		s.hideTransientScrollbarLocked()
+		s.hideTransientScrollbar()
 	}
 }
 
@@ -380,7 +347,13 @@ func (s *ScrollView) Child() Component { return s.child }
 
 // Render renders the child at the content width, padding a trailing column
 // when the scrollbar takes one.
+// Render renders the scrolled view, lazily expiring the transient scrollbar's
+// hide deadline (D146: the deadline is driven by the consumer's animation
+// walk; the next render after it passes hides the scrollbar).
 func (s *ScrollView) Render(width int) []string {
+	if !s.scrollbarHideDeadline.IsZero() && !time.Now().Before(s.scrollbarHideDeadline) {
+		s.hideTransientScrollbar()
+	}
 	contentWidth := s.GetContentWidth(width)
 	lines := s.child.Render(contentWidth)
 	if contentWidth == width {

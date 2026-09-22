@@ -200,7 +200,25 @@ func waitForConditionWithin(t *testing.T, condition func() bool, timeout time.Du
 	t.Fatal("condition not met before timeout")
 }
 
+// renderAppChat renders the chat without racing the app's loop: when the loop
+// is running it executes the render on the loop goroutine (the containers are
+// loop-owned since D146 removed the container lock); otherwise nothing else
+// paints and the test renders directly.
 func renderAppChat(app *App) string {
-	lines := app.Chat.Render(80)
-	return coding.StripAnsi(strings.Join(lines, "\n"))
+	done := make(chan []string, 1)
+	app.UI.Post(func() {
+		lines := app.Chat.Render(80)
+		select {
+		case done <- lines:
+		default:
+		}
+	})
+	select {
+	case lines := <-done:
+		return coding.StripAnsi(strings.Join(lines, "\n"))
+	case <-time.After(200 * time.Millisecond):
+		// No loop consumer: render from the test goroutine.
+		lines := app.Chat.Render(80)
+		return coding.StripAnsi(strings.Join(lines, "\n"))
+	}
 }

@@ -53,17 +53,13 @@ func TestPostRunsSerializedWithRenders(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		screen.RenderNow(true)
-		screen.mu.Lock()
 		pending := len(screen.posted)
-		screen.mu.Unlock()
 		if pending == 0 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	screen.mu.Lock()
 	pending := len(screen.posted)
-	screen.mu.Unlock()
 	if pending != 0 {
 		t.Fatalf("%d posted callbacks never ran", pending)
 	}
@@ -77,9 +73,21 @@ func TestPostRunsSerializedWithRenders(t *testing.T) {
 func TestPostCallbackMayRequestRender(t *testing.T) {
 	terminal := &fakePostTerminal{width: 40, height: 10}
 	screen := NewMainScreen(terminal, false, "")
+	screen.EnableRenderTicks()
 	done := make(chan struct{})
+	drain := make(chan struct{})
+	go func() {
+		defer close(drain)
+		for screen.RenderCount() == 0 {
+			<-screen.RenderTicks()
+			screen.RenderNow(false)
+		}
+	}()
 	screen.Start()
-	defer screen.Stop(TuiStopOptions{})
+	defer func() {
+		<-drain // the owner loop stops painting before Stop reads render state
+		screen.Stop(TuiStopOptions{})
+	}()
 	screen.Post(func() {
 		screen.RequestRender(false)
 		close(done)

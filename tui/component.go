@@ -1,7 +1,5 @@
 package tui
 
-import "sync"
-
 // Port of the component model from src/tui.ts: the Component interface, the
 // mouse event types, focusability, and the Container.
 
@@ -196,7 +194,6 @@ type Container struct {
 	// session-event goroutines mutate the chat/document containers while the
 	// render timer renders them (upstream is single-threaded; D141's race
 	// report made this one explicit).
-	mu               sync.Mutex
 	mouseLayout      []mouseChild
 	mouseLayoutWidth int
 }
@@ -211,16 +208,12 @@ func (c *Container) childComponents() []Component { return c.Children }
 
 // AddChild appends a child component.
 func (c *Container) AddChild(component Component) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.Children = append(c.Children, component)
 }
 
 // InsertChildAt inserts a child at the given index (clamped to the current
 // range).
 func (c *Container) InsertChildAt(index int, component Component) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	if index < 0 || index > len(c.Children) {
 		index = len(c.Children)
 	}
@@ -231,8 +224,6 @@ func (c *Container) InsertChildAt(index int, component Component) {
 
 // RemoveChild removes a child component.
 func (c *Container) RemoveChild(component Component) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	for i, child := range c.Children {
 		if child == component {
 			c.Children = append(c.Children[:i], c.Children[i+1:]...)
@@ -243,8 +234,6 @@ func (c *Container) RemoveChild(component Component) {
 
 // Clear removes all children.
 func (c *Container) Clear() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.Children = nil
 }
 
@@ -252,9 +241,7 @@ func (c *Container) Clear() {
 func (c *Container) Invalidate() {
 	// Snapshot under the lock, deliver outside it: a child's Invalidate may
 	// re-enter (AssistantMessageComponent.Invalidate rebuilds its content).
-	c.mu.Lock()
 	children := append([]Component{}, c.Children...)
-	c.mu.Unlock()
 	for _, child := range children {
 		child.Invalidate()
 	}
@@ -265,11 +252,9 @@ func (c *Container) HandleMouse(event TuiMouseEvent) *TuiMouseDispatchResult {
 	if event.Y < 0 || event.Y >= event.Height {
 		return nil
 	}
-	c.mu.Lock()
 	mouseChildren := c.mouseLayout
 	mouseLayoutWidth := c.mouseLayoutWidth
 	children := append([]Component{}, c.Children...)
-	c.mu.Unlock()
 	if mouseLayoutWidth != event.Width {
 		mouseChildren = make([]mouseChild, 0, len(children))
 		for _, child := range children {
@@ -298,9 +283,7 @@ func (c *Container) HandleMouse(event TuiMouseEvent) *TuiMouseDispatchResult {
 
 // Render renders every child and records the mouse layout.
 func (c *Container) Render(width int) []string {
-	c.mu.Lock()
 	children := append([]Component{}, c.Children...)
-	c.mu.Unlock()
 	var lines []string
 	mouseChildren := make([]mouseChild, 0, len(children))
 	for _, child := range children {
@@ -308,10 +291,8 @@ func (c *Container) Render(width int) []string {
 		mouseChildren = append(mouseChildren, mouseChild{component: child, height: len(childLines)})
 		lines = append(lines, childLines...)
 	}
-	c.mu.Lock()
 	c.mouseLayout = mouseChildren
 	c.mouseLayoutWidth = width
-	c.mu.Unlock()
 	return lines
 }
 
@@ -320,10 +301,8 @@ func (c *Container) MouseLayout() (width int, children []struct {
 	Component Component
 	Height    int
 }) {
-	c.mu.Lock()
 	mouseLayout := append([]mouseChild{}, c.mouseLayout...)
 	mouseLayoutWidth := c.mouseLayoutWidth
-	c.mu.Unlock()
 	out := make([]struct {
 		Component Component
 		Height    int

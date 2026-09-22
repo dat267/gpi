@@ -32,6 +32,27 @@ func startLoopApp(t *testing.T, app *App) func() {
 	}
 }
 
+// editorText snapshots the editor text on the app's loop goroutine (the editor
+// is loop-owned since D146 removed the editor lock). Falls back to a direct
+// read when no loop is running.
+func editorText(app *App) string {
+	done := make(chan string, 1)
+	app.UI.Post(func() {
+		text := app.DefaultEditor.GetText()
+		select {
+		case done <- text:
+		default:
+		}
+	})
+	select {
+	case text := <-done:
+		return text
+	case <-time.After(200 * time.Millisecond):
+		// No loop consumer: read from the test goroutine.
+		return app.DefaultEditor.GetText()
+	}
+}
+
 // TestLoopDispatchesTerminalInput asserts the stdin producer path: a terminal
 // sequence posted on the input channel is dispatched to the focused editor by
 // the loop (stage 3), not by the reader goroutine.
@@ -43,7 +64,7 @@ func TestLoopDispatchesTerminalInput(t *testing.T) {
 
 	app.PostTerminalInput("hi there")
 	waitForConditionWithin(t, func() bool {
-		return strings.Contains(app.DefaultEditor.GetText(), "hi there")
+		return strings.Contains(editorText(app), "hi there")
 	}, 6*time.Second)
 }
 
@@ -87,25 +108,20 @@ func TestLoopDispatchesSignals(t *testing.T) {
 	waitForConditionWithin(t, func() bool { return handled.Load() == 1 }, 6*time.Second)
 }
 
-// TestLoopModeTakesNoRenderLock encodes the stage-3 invariant: in loop mode the
-// renderer never takes its timer-mode render lock (input dispatch and painting
-// share the loop goroutine).
+// TestLoopModeTakesNoRenderLock encodes the D146 invariant: the renderer has
+// no timer-mode render lock at all — input dispatch and painting share the
+// owner goroutine, and the renderer arms no internal timers.
 func TestLoopModeTakesNoRenderLock(t *testing.T) {
 	source, err := os.ReadFile("../../tui/render.go")
 	if err != nil {
 		t.Fatalf("read renderer source: %v", err)
 	}
 	text := string(source)
-	for _, guarded := range []string{
-		"if !t.loopMode() {\n\t\tt.renderMu.Lock()", // paint path
-		"if !loopMode {\n\t\t\tt.renderMu.Lock()",   // input path
-	} {
-		if !strings.Contains(text, guarded) {
-			t.Fatalf("renderMu must be loop-mode conditional; missing %q", guarded)
-		}
+	if strings.Contains(text, "renderMu") {
+		t.Fatal("renderMu must be gone (D146): input dispatch and painting share the owner goroutine")
 	}
-	if strings.Contains(text, "t.renderMu.Lock()\n\tdefer t.renderMu.Unlock()\n\tt.drainPosted()") {
-		t.Fatal("doRender still takes renderMu unconditionally")
+	if strings.Contains(text, "time.AfterFunc") {
+		t.Fatal("the renderer must not arm internal timers (D146)")
 	}
 }
 
@@ -129,7 +145,7 @@ func TestConcurrentTerminalProducersStayOrdered(t *testing.T) {
 	}
 	wg.Wait()
 	waitForConditionWithin(t, func() bool {
-		return strings.Count(app.DefaultEditor.GetText(), "ab") == 40
+		return strings.Count(editorText(app), "ab") == 40
 	}, 6*time.Second)
 }
 
@@ -181,7 +197,7 @@ func TestCompactCommandDoesNotBlockInput(t *testing.T) {
 	// The loop is free while the compaction blocks.
 	app.PostTerminalInput("still typing")
 	waitForConditionWithin(t, func() bool {
-		return strings.Contains(app.DefaultEditor.GetText(), "still typing")
+		return strings.Contains(editorText(app), "still typing")
 	}, 6*time.Second)
 
 	close(session.release)
@@ -231,7 +247,7 @@ func TestCompactCommandDuringTurnDoesNotQueueBehindIt(t *testing.T) {
 
 	app.PostTerminalInput("long running turn")
 	waitForConditionWithin(t, func() bool {
-		return strings.Contains(app.DefaultEditor.GetText(), "long running turn")
+		return strings.Contains(editorText(app), "long running turn")
 	}, 6*time.Second)
 	app.PostTerminalInput("\r")
 	select {
@@ -262,4 +278,6 @@ func TestCompactCommandDuringTurnDoesNotQueueBehindIt(t *testing.T) {
 	}
 
 	close(releaseTurn)
-}
+} // TestLoopModeTakesNoRenderLock encodes the D146 invariant: the renderer has
+// no timer-mode render lock at all — input dispatch and painting share the
+// owner goroutine.

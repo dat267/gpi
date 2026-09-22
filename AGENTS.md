@@ -235,10 +235,11 @@ Stage 4 result: **20 of the original 30 locks are retired** (input handoff,
 model/scoped/session selectors, footer cache, lifecycle flags, edit preview,
 theme registry + three seams, loader, flash container, kitty globals,
 keybindings manager + global registry, width cache, DrainInput tracking). The
-remaining exceptions are the D146 timer-mode locks (until D146 lands) plus
-the D147 `writeMu` and the D149 `FooterDataProvider.mu`; the interactive app
-itself runs lock-free — `grep 'sync.Mutex' tui/ coding/interactive/` outside
-tests returns only those documented locks.
+remaining exceptions are the D147 `writeMu`, the D146 `postMu` (posted-
+callback queue serialization — Post is called from off-loop goroutines and
+drained by the owner's render pass) and the D149 `FooterDataProvider.mu`;
+`grep 'sync.Mutex' tui/ coding/interactive/` outside tests returns only
+those documented locks.
 - **Go 1.27 quirk.** Function literals passed as arguments need an explicit
   result type when the parameter's function type has one.
 - **RE2 regex** (no lookaround/backreferences). Put `-` first in a character
@@ -296,13 +297,16 @@ summarized in the README scoreboard. The range is **D1–D139**. Representative:
   is retired in stage 1 (the submission handoff is a buffered channel); the
   others retire in stages 3-4.
 - D132 — branch summarization is tracked as compaction and abortable.
-- D146 — the timer-mode UI locks are kept: `Renderer.mu` (main/alt screen render
-  state), `Renderer.renderMu`, `Container.mu`, `Editor.mu`, `AltScreen.mu` and
-  `ScrollView.mu` serialize input against timer-driven renders for the
-  standalone `-r` session picker and library users. The interactive app runs in
-  loop mode (`EnableRenderTicks`), where the loop is the only renderer and the
-  only mutator, so those locks are always uncontended there; `renderMu` is
-  taken only when `!loopMode()`.
+- D146 — **retired**: the renderer's internal timer is gone (D146 removed the
+  timer-mode render path outright) and the standalone `-r` session picker runs
+  its own loop (raw input → dispatch → paint on one goroutine), so input
+  dispatch and painting share the owner goroutine everywhere.
+  `Renderer.mu`, `renderMu`, `Container.mu`, `Editor.mu`, `AltScreen.mu` and
+  `ScrollView.mu` are deleted; render requests coalesce onto the tick channel
+  and callbacks cross goroutines only through `Post` (queue under `postMu`).
+  The ScrollView's transient-scrollbar hide timer became a lazy deadline
+  driven by the animation walk. Off-loop readers in tests go through
+  `Post`-based snapshot helpers.
 - D147 — **retired** (the decoder lock and the terminal's UI-state mutex are
   gone): `StdinBuffer` is owned by the input consumer — the interactive UI
   loop feeds raw stdin chunks through `ProcessTerminal.FeedInput` and drives

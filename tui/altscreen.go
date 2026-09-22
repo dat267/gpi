@@ -5,7 +5,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -139,8 +138,6 @@ type AltScreenOptions struct {
 type AltScreen struct {
 	*Renderer
 
-	mu sync.Mutex
-
 	previousScreen       []string
 	lastDocument         []string
 	previousScreenWidth  int
@@ -252,22 +249,16 @@ type implicitDocumentComponent struct {
 }
 
 func (c *implicitDocumentComponent) Render(width int) []string {
-	c.renderer.mu.Lock()
-	defer c.renderer.mu.Unlock()
 	return c.renderer.Container.Render(width)
 }
 
 func (c *implicitDocumentComponent) Invalidate() {
-	c.renderer.mu.Lock()
-	defer c.renderer.mu.Unlock()
 	for _, child := range c.renderer.Children {
 		child.Invalidate()
 	}
 }
 
 func (c *implicitDocumentComponent) HandleMouse(event TuiMouseEvent) *TuiMouseDispatchResult {
-	c.renderer.mu.Lock()
-	defer c.renderer.mu.Unlock()
 	return c.renderer.Container.HandleMouse(event)
 }
 
@@ -295,46 +286,34 @@ func (s *AltScreen) setLayoutRootValue(component Component) {
 
 // ViewportTop returns the primary scroll view's scroll offset.
 func (s *AltScreen) ViewportTop() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.getPrimaryScrollViewLocked().ScrollTop()
 }
 
 // IsFollowingOutput reports whether the primary scroll view follows the end.
 func (s *AltScreen) IsFollowingOutput() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.getPrimaryScrollViewLocked().IsFollowingEnd()
 }
 
 // GetCopyOnSelect reports whether selecting copies automatically.
 func (s *AltScreen) GetCopyOnSelect() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.copyOnSelect
 }
 
 // SetCopyOnSelect toggles copy-on-select.
 func (s *AltScreen) SetCopyOnSelect(enabled bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.copyOnSelect = enabled
 }
 
 // HasActiveSelection reports whether the fullscreen viewport has a non-empty
 // text selection.
 func (s *AltScreen) HasActiveSelection() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	text, ok := s.getActiveSelectionTextLocked()
 	return ok && text != ""
 }
 
 // CopyActiveSelectionToClipboard copies the active selection.
 func (s *AltScreen) CopyActiveSelectionToClipboard() bool {
-	s.mu.Lock()
 	text, ok := s.getActiveSelectionTextLocked()
-	s.mu.Unlock()
 	if !ok || text == "" {
 		return false
 	}
@@ -343,14 +322,11 @@ func (s *AltScreen) CopyActiveSelectionToClipboard() bool {
 
 // SetLayoutRoot installs the viewport layout root.
 func (s *AltScreen) SetLayoutRoot(component Component) {
-	s.mu.Lock()
 	if s.getLayoutRoot() == component {
-		s.mu.Unlock()
 		return
 	}
 	s.setLayoutRootValue(component)
 	s.currentLayout = nil
-	s.mu.Unlock()
 	s.RequestRender(false)
 }
 
@@ -375,8 +351,6 @@ func (s *AltScreen) getPrimaryScrollViewLocked() *ScrollView {
 }
 
 func (s *AltScreen) beforeTerminalStart() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.stopSelectionAutoScrollLocked()
 	s.selectionPressActive = false
 	s.setScrollbarHoverLocked(nil)
@@ -414,8 +388,6 @@ func (s *AltScreen) beforeTerminalStart() {
 }
 
 func (s *AltScreen) beforeTerminalStop(options TuiStopOptions) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.closeSearchLocked()
 	s.stopSelectionAutoScrollLocked()
 	s.selectionPressActive = false
@@ -434,8 +406,6 @@ func (s *AltScreen) beforeTerminalStop(options TuiStopOptions) {
 }
 
 func (s *AltScreen) afterTerminalStop(options TuiStopOptions) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.altScreenActive {
 		return
 	}
@@ -495,8 +465,6 @@ func deleteAllKittyImages() string     { return DeleteAllKittyImages() }
 func deleteAllKittyPlacements() string { return DeleteAllKittyPlacements() }
 
 func (s *AltScreen) resetRenderState() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.resetRenderStateLocked()
 }
 
@@ -509,25 +477,19 @@ func (s *AltScreen) resetRenderStateLocked() {
 
 // ScrollBy scrolls the primary view by n lines.
 func (s *AltScreen) ScrollBy(lines int) {
-	s.mu.Lock()
 	s.getPrimaryScrollViewLocked().ScrollBy(lines)
-	s.mu.Unlock()
 	s.RequestRender(false)
 }
 
 // ScrollToTop scrolls to the start.
 func (s *AltScreen) ScrollToTop() {
-	s.mu.Lock()
 	s.getPrimaryScrollViewLocked().ScrollToStart()
-	s.mu.Unlock()
 	s.RequestRender(false)
 }
 
 // ScrollToBottom scrolls to the end.
 func (s *AltScreen) ScrollToBottom() {
-	s.mu.Lock()
 	s.getPrimaryScrollViewLocked().ScrollToEnd()
-	s.mu.Unlock()
 	s.RequestRender(false)
 }
 
@@ -596,10 +558,8 @@ func (s *AltScreen) closeSearchLocked() {
 }
 
 func (s *AltScreen) updateSearchQuery(query string) {
-	s.mu.Lock()
 	search := s.activeSearch
 	if search == nil || query == search.Query {
-		s.mu.Unlock()
 		return
 	}
 	if search.SelectedIndex >= 0 && search.SelectedIndex < len(search.Matches) {
@@ -610,7 +570,6 @@ func (s *AltScreen) updateSearchQuery(query string) {
 	search.Query = query
 	search.SelectionMode = "query"
 	search.Component.SetResult(-1, 0)
-	s.mu.Unlock()
 	s.RequestRender(false)
 }
 
@@ -799,8 +758,6 @@ func (s *AltScreen) shouldDeferViewportInputToOverlayLocked() bool {
 // ---- Input ----
 
 func (s *AltScreen) handleViewportInput(data string) TuiInputListenerResult {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if data == focusOut {
 		hadActiveSelection := s.selectionPressActive
@@ -1567,8 +1524,6 @@ func (s *AltScreen) AnimationFrame(now time.Time) (bool, time.Duration) {
 }
 
 func (s *AltScreen) autoScrollSelection() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.selectionAnchor == nil || s.selectionAnchor.ScrollView == nil ||
 		s.selectionDragPointer == nil || s.selectionAutoScrollDirection == 0 {
 		s.stopSelectionAutoScrollLocked()
@@ -2111,9 +2066,7 @@ func (s *AltScreen) compositeFlashes(screen []string, width int, height int) []s
 }
 
 func (s *AltScreen) doRender() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.stopped || !s.altScreenActive {
+	if s.stopped.Load() || !s.altScreenActive {
 		return
 	}
 	width := maxInt(1, s.Terminal.Columns())
