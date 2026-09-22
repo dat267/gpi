@@ -578,6 +578,14 @@ func NewApp(options AppOptions) *App {
 		RequestRender:        func() { app.UI.RequestRender(false) },
 		ClearStatusIndicator: func() { app.UIState.ClearStatusIndicator("", false) },
 		MarkdownTheme:        func() tui.MarkdownTheme { return *app.markdownTheme() },
+		ExportToHTML: func(outputPath string) (string, error) {
+			themeSetting := app.Settings.GetThemeSetting()
+			themeName := ""
+			if themeSetting != nil {
+				themeName = *themeSetting
+			}
+			return app.Session.ExportSessionToHTML(outputPath, themeName)
+		},
 
 		EditorContainer: app.EditorContainer,
 		Editor:          app.DefaultEditor,

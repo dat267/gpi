@@ -132,7 +132,9 @@ func GetResolvedThemeColors(themeName string) (map[string]string, error) {
 // IsLightTheme reports whether a theme name is the light theme.
 func IsLightTheme(themeName string) bool { return themeName == "light" }
 
-// GetThemeExportColors returns the explicit export colors of a theme.
+// GetThemeExportColors returns the explicit export colors of a theme
+// (upstream getThemeExportColors: var references resolved, palette indexes
+// converted to hex).
 func GetThemeExportColors(themeName string) (pageBg string, cardBg string, infoBg string, err error) {
 	name := themeName
 	if name == "" {
@@ -141,9 +143,9 @@ func GetThemeExportColors(themeName string) (pageBg string, cardBg string, infoB
 	if name == "" {
 		name = GetDefaultTheme()
 	}
-	themeJSON, err := loadThemeJSON(name)
-	if err != nil {
-		return "", "", "", err
+	themeJSON, themeErr := loadThemeJSON(name)
+	if themeErr != nil {
+		return "", "", "", themeErr
 	}
 	if themeJSON.Export == nil {
 		return "", "", "", nil
@@ -152,13 +154,14 @@ func GetThemeExportColors(themeName string) (pageBg string, cardBg string, infoB
 		if value == nil {
 			return ""
 		}
-		if value.IsIndex {
-			return ansi256ToHex(value.Index)
+		resolved := resolveVarRefs(*value, themeJSON.Vars, map[string]bool{})
+		if resolved.IsIndex {
+			return ansi256ToHex(resolved.Index)
 		}
-		if value.Value == "" {
+		if resolved.Value == "" {
 			return ""
 		}
-		return value.Value
+		return resolved.Value
 	}
 	return colorValue(themeJSON.Export.PageBg), colorValue(themeJSON.Export.CardBg), colorValue(themeJSON.Export.InfoBg), nil
 }
