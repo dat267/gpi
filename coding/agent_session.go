@@ -319,10 +319,13 @@ func (s *AgentSession) emit(event *SessionEvent) {
 // handleAgentEvent ports the persistence/queue/compaction event handling.
 func (s *AgentSession) handleAgentEvent(event *agent.AgentEvent) {
 	// Queue display tracking: user message starts remove queued entries
-	// BEFORE the event fans out.
+	// BEFORE the event fans out. Text is extracted Blocks-aware: queued
+	// messages are built with block content (queueSteer), whose Text field is
+	// empty — matching on Content.Text alone left the dock banner showing the
+	// steered message after it was pushed into the transcript.
 	if event.Type == agent.MessageStart && event.Message != nil && ai.RoleOf(event.Message) == ai.RoleUser {
 		if user, ok := event.Message.(*ai.UserMessage); ok {
-			messageText := user.Content.Text
+			messageText := contentTextJoinedNoSep(user.Content)
 			if messageText != "" {
 				if idx := indexOf(s.steeringMessages, messageText); idx != -1 {
 					s.steeringMessages = append(s.steeringMessages[:idx], s.steeringMessages[idx+1:]...)
