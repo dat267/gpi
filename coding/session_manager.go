@@ -36,6 +36,15 @@ type SessionManager struct {
 	labelsByID      map[string]string
 	labelTimestamps map[string]string
 	leafID          *string
+
+	// branchCache memoizes the current leaf's root path. GetBranch("") is
+	// called on every footer paint (context usage) and rebuilding a long
+	// session's branch is O(entries). The key is (leaf, entry count); the
+	// result is shared read-only.
+	branchCache      []SessionEntry
+	branchCacheLeaf  string
+	branchCacheCount int
+	branchCacheValid bool
 }
 
 // SessionManagerOptions are the constructor inputs.
@@ -235,6 +244,7 @@ func (m *SessionManager) buildIndex() {
 	m.labelsByID = map[string]string{}
 	m.labelTimestamps = map[string]string{}
 	m.leafID = nil
+	m.branchCacheValid = false
 	for i := range m.fileEntries {
 		entry := m.fileEntries[i].Entry
 		if entry == nil {
@@ -504,7 +514,9 @@ func (m *SessionManager) AppendLabelChange(targetID string, label *string) (stri
 	return id, nil
 }
 
-// GetBranch walks from an entry (or the leaf) to the root.
+// GetBranch walks from an entry (or the leaf) to the root. The result is
+// shared and must be treated as read-only; the current leaf's path is cached
+// and only rebuilt when the leaf or the entry set changes.
 func (m *SessionManager) GetBranch(fromID string) []SessionEntry {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -514,6 +526,9 @@ func (m *SessionManager) GetBranch(fromID string) []SessionEntry {
 			return nil
 		}
 		startID = *m.leafID
+		if m.branchCacheValid && m.branchCacheLeaf == startID && m.branchCacheCount == len(m.byID) {
+			return m.branchCache
+		}
 	}
 	var path []SessionEntry
 	current := m.byID[startID]
@@ -527,6 +542,15 @@ func (m *SessionManager) GetBranch(fromID string) []SessionEntry {
 	}
 	for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
 		path[i], path[j] = path[j], path[i]
+	}
+	if fromID == "" {
+		// Drop the spare capacity so a caller's append cannot write into the
+		// shared cache's backing array.
+		path = path[:len(path):len(path)]
+		m.branchCache = path
+		m.branchCacheLeaf = startID
+		m.branchCacheCount = len(m.byID)
+		m.branchCacheValid = true
 	}
 	return path
 }
