@@ -1,12 +1,9 @@
 package coding
 
 import (
-	"archive/zip"
 	ctxpkg "context"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -263,54 +260,6 @@ func TestRemoteCatalogStaleOverlayIgnored(t *testing.T) {
 	}
 }
 
-func TestWriteBugReportArchive(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "report.zip")
-	bundle := BugReportBundle{
-		Metadata:    map[string]any{"id": "abc"},
-		Diagnostics: map[string]any{"entryCount": float64(2)},
-		Summary:     "## What went wrong",
-	}
-	if err := WriteBugReportArchive(bundle, path); err != nil {
-		t.Fatal(err)
-	}
-	reader, err := zip.OpenReader(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reader.Close()
-	names := make([]string, 0, len(reader.File))
-	contents := map[string]string{}
-	for _, file := range reader.File {
-		names = append(names, file.Name)
-		if file.Method != zip.Deflate {
-			t.Errorf("%s must be deflated", file.Name)
-		}
-		handle, err := file.Open()
-		if err != nil {
-			t.Fatal(err)
-		}
-		data, err := io.ReadAll(handle)
-		if err != nil {
-			t.Fatal(err)
-		}
-		contents[file.Name] = string(data)
-		handle.Close()
-	}
-	if strings.Join(names, ",") != "report.json,diagnostics.json,summary.md" {
-		t.Fatalf("names = %v", names)
-	}
-	if !strings.Contains(contents["report.json"], `"id": "abc"`) {
-		t.Fatalf("report = %s", contents["report.json"])
-	}
-	if !strings.HasPrefix(contents["summary.md"], "## What went wrong") {
-		t.Fatalf("summary = %q", contents["summary.md"])
-	}
-	if BugReportArchiveFileName("abc") != "pi-bug-report-abc.zip" {
-		t.Fatal("archive name")
-	}
-}
-
 func TestBuiltinSlashCommands(t *testing.T) {
 	found := map[string]bool{}
 	for _, command := range BuiltinSlashCommands {
@@ -319,12 +268,12 @@ func TestBuiltinSlashCommands(t *testing.T) {
 			t.Errorf("%s must have a description", command.Name)
 		}
 	}
-	for _, expected := range []string{"model", "compact", "bug", "login", "quit"} {
+	for _, expected := range []string{"model", "compact", "login", "quit"} {
 		if !found[expected] {
 			t.Errorf("missing command %q", expected)
 		}
 	}
-	if len(BuiltinSlashCommands) != 24 {
+	if len(BuiltinSlashCommands) != 22 {
 		t.Fatalf("commands = %d", len(BuiltinSlashCommands))
 	}
 	if !strings.Contains(BuiltinSlashCommands[len(BuiltinSlashCommands)-1].Description, AppName) {

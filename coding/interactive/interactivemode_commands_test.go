@@ -3,8 +3,6 @@ package interactive
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -248,32 +246,6 @@ func TestCommandSessionInfo(t *testing.T) {
 	}
 }
 
-// TestCommandChangelog covers the changelog command.
-func TestCommandChangelog(t *testing.T) {
-	wiring, _, _ := newCommandTestWiring(t)
-	dir := t.TempDir()
-	coding.SetPackageDir(dir)
-	defer coding.SetPackageDir("")
-	if err := os.WriteFile(filepath.Join(dir, "CHANGELOG.md"), []byte("## [1.0.0] - 2026-01-01\n\n- First\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	wiring.HandleChangelogCommand()
-	lines := coding.StripAnsi(strings.Join(wiring.Chat.Render(100), "\n"))
-	if !strings.Contains(lines, "What's New") || !strings.Contains(lines, "First") {
-		t.Fatalf("changelog = %q", lines)
-	}
-
-	// A missing changelog reports the fallback.
-	empty, _, _ := newCommandTestWiring(t)
-	coding.SetPackageDir(filepath.Join(dir, "missing"))
-	empty.HandleChangelogCommand()
-	lines = coding.StripAnsi(strings.Join(empty.Chat.Render(100), "\n"))
-	if !strings.Contains(lines, "No changelog entries found.") {
-		t.Fatalf("empty changelog = %q", lines)
-	}
-}
-
-// TestCommandHotkeys covers the hotkeys table.
 func TestCommandHotkeys(t *testing.T) {
 	wiring, _, _ := newCommandTestWiring(t)
 	wiring.HandleHotkeysCommand()

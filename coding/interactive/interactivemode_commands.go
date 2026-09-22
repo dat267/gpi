@@ -62,8 +62,6 @@ type CommandWiring struct {
 	PromptForMissingCwd func(ctx context.Context, message string) (string, bool)
 	// ShareSession runs the session-share flow.
 	ShareSession func(ctx context.Context) error
-	// ReportBug runs the bug-report flow.
-	ReportBug func(ctx context.Context, hint string) error
 	// CopyToClipboard copies text, returning (ok, message).
 	CopyToClipboard func(text string) (bool, string)
 	// CopyActiveSelection copies the alt-screen selection.
@@ -213,16 +211,6 @@ func (w *CommandWiring) HandleShareCommand(ctx context.Context) {
 		return
 	}
 	if err := w.ShareSession(ctx); err != nil {
-		w.showError(err.Error())
-	}
-}
-
-// HandleBugCommand runs the bug-report flow.
-func (w *CommandWiring) HandleBugCommand(ctx context.Context, hint string) {
-	if w.ReportBug == nil {
-		return
-	}
-	if err := w.ReportBug(ctx, hint); err != nil {
 		w.showError(err.Error())
 	}
 }
@@ -383,28 +371,6 @@ func (w *CommandWiring) HandleSessionCommand(now int64) {
 
 	w.Chat.AddChild(tui.NewSpacer(1))
 	w.Chat.AddChild(tui.NewText(info.String(), 1, 0, nil))
-	w.requestRender()
-}
-
-// HandleChangelogCommand renders the full changelog.
-func (w *CommandWiring) HandleChangelogCommand() {
-	theme := ActiveTheme()
-	entries := coding.ParseChangelog(coding.GetChangelogPath())
-	markdown := "No changelog entries found."
-	if len(entries) > 0 {
-		parts := make([]string, 0, len(entries))
-		for index := len(entries) - 1; index >= 0; index-- {
-			entry := entries[index]
-			parts = append(parts, coding.NormalizeChangelogLinks(entry.Content, changelogEntryVersion(entry)))
-		}
-		markdown = strings.Join(parts, "\n\n")
-	}
-	w.Chat.AddChild(tui.NewSpacer(1))
-	w.Chat.AddChild(NewDynamicBorder(nil))
-	w.Chat.AddChild(tui.NewText(theme.Bold(theme.Fg("accent", "What's New")), 1, 0, nil))
-	w.Chat.AddChild(tui.NewSpacer(1))
-	w.Chat.AddChild(tui.NewMarkdown(markdown, 1, 1, w.markdownTheme(), nil, tui.MarkdownOptions{}))
-	w.Chat.AddChild(NewDynamicBorder(nil))
 	w.requestRender()
 }
 

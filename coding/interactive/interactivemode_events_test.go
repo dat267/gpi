@@ -204,16 +204,6 @@ func TestEventDispatcherAbortedMessage(t *testing.T) {
 		t.Fatalf("aborted render = %q", lines)
 	}
 
-	// Error stop suggests a bug report.
-	suggested := 0
-	dispatcher.SuggestBugReport = func() { suggested++ }
-	errorMessage := "boom"
-	errored := &ai.AssistantMessage{Content: ai.ContentList{}, StopReason: ai.StopError, ErrorMessage: &errorMessage}
-	dispatcher.HandleEvent(&coding.SessionEvent{Type: coding.SessionMessageStart, Agent: agentEvent("message_start", errored)})
-	dispatcher.HandleEvent(&coding.SessionEvent{Type: coding.SessionMessageEnd, Agent: agentEvent("message_end", errored)})
-	if suggested != 1 {
-		t.Fatalf("bug report suggestions = %d", suggested)
-	}
 }
 
 // TestEventDispatcherToolExecution covers the tool execution events.

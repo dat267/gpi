@@ -58,7 +58,7 @@ func TestCrashHelpers(t *testing.T) {
 	wiring, _, _ := newHelpersTestWiring(t)
 	wiring.SessionFile = func() string { return "" }
 
-	if instructions := wiring.CrashReportInstructions(); !strings.Contains(instructions, "start pi and run /bug") {
+	if instructions := wiring.CrashReportInstructions(); !strings.Contains(instructions, "Start") {
 		t.Fatalf("instructions = %q", instructions)
 	}
 	wiring.SessionFile = func() string { return "/tmp/sess.jsonl" }
@@ -74,13 +74,6 @@ func TestCrashHelpers(t *testing.T) {
 		t.Fatal("crash not recorded")
 	}
 
-	// The bug-report hint is shown once.
-	wiring.SuggestBugReport()
-	wiring.SuggestBugReport()
-	lines := coding.StripAnsi(strings.Join(wiring.Chat.Render(100), "\n"))
-	if count := strings.Count(lines, "/bug sends a report"); count != 1 {
-		t.Fatalf("hint count = %d: %q", count, lines)
-	}
 }
 
 // TestFatalRuntimeError covers the fatal error path.
@@ -103,7 +96,7 @@ func TestFatalRuntimeError(t *testing.T) {
 		t.Fatalf("watcher = %d, stop = %q, exit = %d", stoppedWatcher, stopped, exitCode)
 	}
 	lines := coding.StripAnsi(strings.Join(wiring.Chat.Render(100), "\n"))
-	if !strings.Contains(lines, "run /bug") {
+	if !strings.Contains(lines, "Start pi to begin a new session.") {
 		t.Fatalf("chat = %q", lines)
 	}
 }

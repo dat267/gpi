@@ -38,8 +38,6 @@ type EventDispatcher struct {
 	TerminalProgress func(active bool)
 	// ShowError reports an error to the user.
 	ShowError func(message string)
-	// SuggestBugReport offers the bug-report flow.
-	SuggestBugReport func()
 	// UpdatePendingMessagesDisplay refreshes the queued steering/follow-up
 	// banner. Runs on queue_update so consumed messages clear the banner
 	// (upstream parity: updatePendingMessagesDisplay).
@@ -247,9 +245,6 @@ func (d *EventDispatcher) HandleEvent(event *coding.SessionEvent) {
 				}
 				d.ShowError("Retry failed after " + itoa(event.Attempt) + " attempts: " + finalError)
 			}
-			if d.SuggestBugReport != nil {
-				d.SuggestBugReport()
-			}
 		}
 		d.requestRender()
 
@@ -420,9 +415,6 @@ func (d *EventDispatcher) handleMessageEnd(event *coding.SessionEvent) {
 			}, false)
 		}
 		d.pendingTools = map[string]*ToolExecutionComponent{}
-		if assistant.StopReason == ai.StopError && d.SuggestBugReport != nil {
-			d.SuggestBugReport()
-		}
 	} else {
 		for _, component := range d.pendingTools {
 			component.SetArgsComplete()

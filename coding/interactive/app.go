@@ -313,7 +313,6 @@ func NewApp(options AppOptions) *App {
 	app.Events.HiddenThinkingLabel = app.UIState.DefaultHiddenThinkingLabel
 	app.Events.OutputPad = options.Settings.GetOutputPad()
 	app.Events.MarkdownTheme = app.markdownTheme()
-	app.Events.SuggestBugReport = app.Trust.SuggestBugReport
 	app.Events.TerminalProgress = func(active bool) { terminal.SetProgress(active) }
 	app.Events.FlushCompactionQueue = func(willRetry bool) {
 		app.Queue.FlushCompactionQueue(context.Background(), willRetry)
@@ -622,11 +621,9 @@ func NewApp(options AppOptions) *App {
 			HandleExportCommand:     func(text string) error { app.Commands.HandleExportCommand(context.Background(), text); return nil },
 			HandleImportCommand:     func(text string) error { app.Commands.HandleImportCommand(context.Background(), text); return nil },
 			HandleShareCommand:      func() error { app.Commands.HandleShareCommand(context.Background()); return nil },
-			HandleBugCommand:        func(hint string) error { app.Commands.HandleBugCommand(context.Background(), hint); return nil },
 			HandleCopyCommand:       func() error { app.Commands.HandleCopyCommand(false, false); return nil },
 			HandleNameCommand:       app.Commands.HandleNameCommand,
 			HandleSessionCommand:    func() { app.Commands.HandleSessionCommand(time.Now().UnixMilli()) },
-			HandleChangelogCommand:  app.Commands.HandleChangelogCommand,
 			HandleHotkeysCommand:    app.Commands.HandleHotkeysCommand,
 			ShowUserMessageSelector: func() { app.Selectors.ShowUserMessageSelector(context.Background()) },
 			ShowTreeSelector:        func() { app.Selectors.ShowTreeSelector(context.Background(), "", false) },

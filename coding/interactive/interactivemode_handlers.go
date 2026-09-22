@@ -165,11 +165,9 @@ type SubmitHandlers struct {
 	HandleExportCommand     func(text string) error
 	HandleImportCommand     func(text string) error
 	HandleShareCommand      func() error
-	HandleBugCommand        func(hint string) error
 	HandleCopyCommand       func() error
 	HandleNameCommand       func(text string)
 	HandleSessionCommand    func()
-	HandleChangelogCommand  func()
 	HandleHotkeysCommand    func()
 	ShowUserMessageSelector func()
 	HandleCloneCommand      func() error
@@ -288,13 +286,6 @@ func (w *SubmitWiring) HandleSubmit(ctx context.Context, text string) {
 		}
 		clearEditor()
 		return
-	case text == "/bug" || strings.HasPrefix(text, "/bug "):
-		hint := strings.TrimSpace(text[len("/bug"):])
-		clearEditor()
-		if w.Handlers.HandleBugCommand != nil {
-			_ = w.Handlers.HandleBugCommand(hint)
-		}
-		return
 	case text == "/copy":
 		if w.Handlers.HandleCopyCommand != nil {
 			_ = w.Handlers.HandleCopyCommand()
@@ -310,12 +301,6 @@ func (w *SubmitWiring) HandleSubmit(ctx context.Context, text string) {
 	case text == "/session":
 		if w.Handlers.HandleSessionCommand != nil {
 			w.Handlers.HandleSessionCommand()
-		}
-		clearEditor()
-		return
-	case text == "/changelog":
-		if w.Handlers.HandleChangelogCommand != nil {
-			w.Handlers.HandleChangelogCommand()
 		}
 		clearEditor()
 		return

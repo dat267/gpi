@@ -45,7 +45,6 @@ type TrustCrashWiring struct {
 	ShowExtensionConfirm func(ctx context.Context, title string, message string) (bool, error)
 
 	// bugReportHintShown dedupes the /bug hint.
-	bugReportHintShown bool
 }
 
 func (w *TrustCrashWiring) requestRender() {
@@ -128,25 +127,12 @@ func (w *TrustCrashWiring) RecordCrash(kind string, err error) bool {
 	}, coding.GetCrashLogPath(w.AgentDir)) != nil
 }
 
-// CrashReportInstructions returns the /bug hint.
+// CrashReportInstructions returns the post-crash resume hint.
 func (w *TrustCrashWiring) CrashReportInstructions() string {
-	resume := "start pi and"
 	if w.SessionFile != nil && w.SessionFile() != "" {
-		resume = "run `" + w.AppName + " -r` to resume the session, then"
+		return "Run `" + w.AppName + " -r` to resume the session."
 	}
-	return "To report this crash: " + resume + " run /bug. The crash details are attached automatically."
-}
-
-// SuggestBugReport shows the /bug hint once.
-func (w *TrustCrashWiring) SuggestBugReport() {
-	if w.bugReportHintShown || w.Chat == nil {
-		return
-	}
-	w.bugReportHintShown = true
-	theme := ActiveTheme()
-	w.Chat.AddChild(tui.NewText(theme.Fg("muted",
-		"If this looks like a "+w.AppName+" bug, /bug sends a report to the developers."), w.OutputPad, 0, nil))
-	w.requestRender()
+	return "Start " + w.AppName + " to begin a new session."
 }
 
 // MaybeSaveImplicitProjectTrustAfterReload saves the implicit trust decision.
