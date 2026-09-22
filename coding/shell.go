@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"unicode/utf8"
 )
 
 // Port of utils/shell.ts (shell resolution and binary-output sanitizing).
@@ -146,20 +147,64 @@ func GetPowerShellConfig() (ShellConfig, error) {
 // SanitizeBinaryOutput removes characters that crash display handling:
 // control characters (except tab, newline, carriage return) and the Unicode
 // Format range FFF9-FFFB (upstream sanitizeBinaryOutput).
+//
+// Clean text — the overwhelming majority — is returned as-is. The sanitizer
+// runs over the whole accumulated tool output on every streaming result
+// update, so rebuilding it rune by rune cost 670 us per update on a 155 KB
+// build log (and quadratic work over a long command).
 func SanitizeBinaryOutput(text string) string {
+	if !hasBinaryOutput(text) {
+		return text
+	}
 	var builder strings.Builder
 	builder.Grow(len(text))
-	for _, char := range text {
-		switch {
-		case char == 0x09 || char == 0x0a || char == 0x0d:
-			builder.WriteRune(char)
-		case char <= 0x1f:
+	start := 0
+	for i := 0; i < len(text); {
+		char, size := utf8.DecodeRuneInString(text[i:])
+		if sanitizeDrops(char) || (char == utf8.RuneError && size <= 1) {
+			if start < i {
+				builder.WriteString(text[start:i])
+			}
+			if char == utf8.RuneError && size <= 1 {
+				// A range over a string yields U+FFFD per invalid byte; keep
+				// that substitution exactly.
+				builder.WriteRune(utf8.RuneError)
+			}
+			i += size
+			start = i
 			continue
-		case char >= 0xfff9 && char <= 0xfffb:
-			continue
-		default:
-			builder.WriteRune(char)
 		}
+		i += size
+	}
+	if start < len(text) {
+		builder.WriteString(text[start:])
 	}
 	return builder.String()
+}
+
+// hasBinaryOutput reports whether SanitizeBinaryOutput would change text.
+// ASCII — nearly all shell output — is tested a byte at a time; only non-ASCII
+// bytes pay for a rune decode.
+func hasBinaryOutput(text string) bool {
+	for i := 0; i < len(text); i++ {
+		char := text[i]
+		if char < utf8.RuneSelf {
+			if char < 0x20 && char != 0x09 && char != 0x0a && char != 0x0d {
+				return true
+			}
+			continue
+		}
+		decoded, size := utf8.DecodeRuneInString(text[i:])
+		if sanitizeDrops(decoded) || (decoded == utf8.RuneError && size <= 1) {
+			return true
+		}
+		i += size - 1
+	}
+	return false
+}
+
+// sanitizeDrops reports whether a decoded rune is removed.
+func sanitizeDrops(char rune) bool {
+	return char <= 0x1f && char != 0x09 && char != 0x0a && char != 0x0d ||
+		char >= 0xfff9 && char <= 0xfffb
 }
