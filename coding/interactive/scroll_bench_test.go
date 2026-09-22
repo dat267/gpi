@@ -17,7 +17,7 @@ func BenchmarkScrollLongTranscript(b *testing.B) {
 	app, cleanup := newTestAppB(b)
 	defer cleanup()
 
-	screen, _ := app.UI.(*tui.AltScreen)
+	screen, _ := app.initialUI.(*tui.AltScreen)
 	screen.Start()
 	screen.DisableAutoRender()
 

@@ -106,6 +106,17 @@ type Markdown struct {
 	hasCachedWidth bool
 	cachedLines    []string
 	hasCachedLines bool
+
+	// Incremental render cache. Streaming appends to the source, so the token
+	// list keeps a stable prefix; cacheTokenLines holds the final (wrapped,
+	// padded) lines for cacheTokens[:len(cacheTokens)-1] so an append only
+	// re-renders the changed tail instead of the whole message.
+	cacheTokens     []*MdToken
+	cacheTokenLines [][]string
+	cacheWidth      int
+
+	// renderedTokens counts renderToken calls (test seam).
+	renderedTokens int
 }
 
 // NewMarkdown creates a markdown component.
@@ -169,10 +180,14 @@ func withDefaultMarkdownTheme(theme MarkdownTheme) MarkdownTheme {
 	return theme
 }
 
-// SetText updates the markdown source.
+// SetText updates the markdown source. The incremental cache is kept: Render
+// reuses the prefix that is still identical and re-renders the changed tail.
 func (m *Markdown) SetText(text string) {
 	m.Text = text
-	m.Invalidate()
+	m.cachedLines = nil
+	m.hasCachedLines = false
+	m.hasCachedText = false
+	m.hasCachedWidth = false
 }
 
 // Invalidate drops the render cache.
@@ -182,6 +197,9 @@ func (m *Markdown) Invalidate() {
 	m.hasCachedText = false
 	m.hasCachedWidth = false
 	m.hasStylePrefix = false
+	m.cacheTokens = nil
+	m.cacheTokenLines = nil
+	m.cacheWidth = 0
 }
 
 // Render renders the markdown at the given width.
@@ -203,6 +221,9 @@ func (m *Markdown) Render(width int) []string {
 		m.hasCachedWidth = true
 		m.cachedLines = []string{}
 		m.hasCachedLines = true
+		m.cacheTokens = nil
+		m.cacheTokenLines = nil
+		m.cacheWidth = width
 		return m.cachedLines
 	}
 
@@ -211,23 +232,9 @@ func (m *Markdown) Render(width int) []string {
 	tokens := LexMarkdown(normalizedText)
 	TrimPartialClosingFences(tokens)
 
-	var renderedLines []string
-	for index, token := range tokens {
-		nextType := ""
-		if index+1 < len(tokens) {
-			nextType = tokens[index+1].Type
-		}
-		renderedLines = append(renderedLines, m.renderToken(token, contentWidth, nextType, nil)...)
-	}
-
-	var wrappedLines []string
-	for _, line := range renderedLines {
-		if IsImageLine(line) {
-			wrappedLines = append(wrappedLines, line)
-			continue
-		}
-		wrappedLines = append(wrappedLines, WrapTextWithAnsi(line, contentWidth)...)
-	}
+	// Reuse the final lines of every token that did not change since the last
+	// render; only the changed tail is re-parsed and re-styled.
+	reuse := m.reusableTokens(tokens, width)
 
 	leftMargin := repeatSpaces(maxInt(0, m.PaddingX))
 	rightMargin := leftMargin
@@ -237,19 +244,27 @@ func (m *Markdown) Render(width int) []string {
 	}
 
 	var contentLines []string
-	for _, line := range wrappedLines {
-		if IsImageLine(line) {
-			contentLines = append(contentLines, line)
-			continue
-		}
-		lineWithMargins := leftMargin + line + rightMargin
-		if bgFn != nil {
-			contentLines = append(contentLines, ApplyBackgroundToLine(lineWithMargins, width, bgFn))
+	tokenLines := make([][]string, 0, maxInt(0, len(tokens)-1))
+	for index, token := range tokens {
+		var final []string
+		if index < reuse {
+			final = m.cacheTokenLines[index]
 		} else {
-			paddingNeeded := maxInt(0, width-VisibleWidth(lineWithMargins))
-			contentLines = append(contentLines, lineWithMargins+repeatSpaces(paddingNeeded))
+			nextType := ""
+			if index+1 < len(tokens) {
+				nextType = tokens[index+1].Type
+			}
+			m.renderedTokens++
+			final = m.finalizeTokenLines(m.renderToken(token, contentWidth, nextType, nil), width, contentWidth, leftMargin, rightMargin, bgFn)
+		}
+		contentLines = append(contentLines, final...)
+		if index < len(tokens)-1 {
+			tokenLines = append(tokenLines, final)
 		}
 	}
+	m.cacheTokens = tokens
+	m.cacheTokenLines = tokenLines
+	m.cacheWidth = width
 
 	emptyLine := repeatSpaces(width)
 	var emptyLines []string
@@ -277,6 +292,78 @@ func (m *Markdown) Render(width int) []string {
 		return result
 	}
 	return []string{""}
+}
+
+// reusableTokens returns how many leading tokens of the current render can
+// reuse the cached final lines. A token's lines were rendered with the next
+// token's type as context, so the last matching token is only reused when its
+// successor also matches.
+func (m *Markdown) reusableTokens(tokens []*MdToken, width int) int {
+	if m.cacheWidth != width || len(m.cacheTokenLines) == 0 {
+		return 0
+	}
+	limit := len(tokens)
+	if len(m.cacheTokens) < limit {
+		limit = len(m.cacheTokens)
+	}
+	matched := 0
+	for matched < limit && sameMarkdownToken(tokens[matched], m.cacheTokens[matched]) {
+		matched++
+	}
+	reuse := matched - 1
+	maxReuse := len(m.cacheTokenLines)
+	if len(tokens)-1 < maxReuse {
+		maxReuse = len(tokens) - 1
+	}
+	if maxReuse < 0 {
+		maxReuse = 0
+	}
+	if reuse > maxReuse {
+		reuse = maxReuse
+	}
+	if reuse < 0 {
+		reuse = 0
+	}
+	return reuse
+}
+
+// sameMarkdownToken reports whether two parse tokens are the same source
+// region rendered the same way. Raw is the exact source slice, so equal Raw
+// and Type imply an identical parse.
+func sameMarkdownToken(a, b *MdToken) bool {
+	if a == b {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Type == b.Type && a.Raw == b.Raw && a.Depth == b.Depth && a.Text == b.Text &&
+		a.Href == b.Href && a.Title == b.Title && a.Lang == b.Lang &&
+		a.Ordered == b.Ordered && a.Start == b.Start && a.HasStart == b.HasStart &&
+		a.CellAlign == b.CellAlign && a.HasCellAlign == b.HasCellAlign &&
+		len(a.Align) == len(b.Align) && len(a.Items) == len(b.Items) && len(a.Tokens) == len(b.Tokens)
+}
+
+// finalizeTokenLines wraps one token's rendered lines and applies the left and
+// right margins and the background/padding.
+func (m *Markdown) finalizeTokenLines(rendered []string, width int, contentWidth int, leftMargin string, rightMargin string, bgFn func(text string) string) []string {
+	out := make([]string, 0, len(rendered))
+	for _, line := range rendered {
+		if IsImageLine(line) {
+			out = append(out, line)
+			continue
+		}
+		for _, wrapped := range WrapTextWithAnsi(line, contentWidth) {
+			lineWithMargins := leftMargin + wrapped + rightMargin
+			if bgFn != nil {
+				out = append(out, ApplyBackgroundToLine(lineWithMargins, width, bgFn))
+			} else {
+				paddingNeeded := maxInt(0, width-VisibleWidth(lineWithMargins))
+				out = append(out, lineWithMargins+repeatSpaces(paddingNeeded))
+			}
+		}
+	}
+	return out
 }
 
 // applyDefaultStyle applies the default text style (the background is applied

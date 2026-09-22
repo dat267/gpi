@@ -27,6 +27,18 @@ type AssistantMessageComponent struct {
 	hasToolCalls                bool
 	isStreaming                 bool
 	thinkingVisibilityOverrides map[int]bool
+
+	// blockComponents reuses the block components across streaming updates so a
+	// reused tui.Markdown keeps its incremental render cache (upstream mutates
+	// `content` in place on every delta).
+	blockComponents map[assistantBlockKey]tui.Component
+}
+
+// assistantBlockKey identifies one block component across updates.
+type assistantBlockKey struct {
+	index  int
+	kind   string // "text" | "thinking"
+	hidden bool
 }
 
 // NewAssistantMessageComponent creates the component.
@@ -43,6 +55,7 @@ func NewAssistantMessageComponent(message *ai.AssistantMessage, hideThinkingBloc
 		outputPad:                   outputPad,
 		transformers:                transformers,
 		thinkingVisibilityOverrides: map[int]bool{},
+		blockComponents:             map[assistantBlockKey]tui.Component{},
 	}
 	component.AddChild(component.contentContainer)
 	if message != nil {
@@ -120,6 +133,8 @@ func (c *AssistantMessageComponent) UpdateContent(message *ai.AssistantMessage, 
 	}
 
 	theme := ActiveTheme()
+	previous := c.blockComponents
+	c.blockComponents = map[assistantBlockKey]tui.Component{}
 	thinkingRunIndex := 0
 	for i := 0; i < len(blocks); i++ {
 		switch content := blocks[i].(type) {
@@ -127,10 +142,18 @@ func (c *AssistantMessageComponent) UpdateContent(message *ai.AssistantMessage, 
 			if !trimmedNonEmpty(content.Text) {
 				continue
 			}
-			c.contentContainer.AddChild(tui.NewMarkdown(strings.TrimSpace(content.Text), c.outputPad, 0, c.markdownTheme, nil,
-				tui.MarkdownOptions{
-					Transform: CreateMarkdownTransform("assistant", c.isStreaming, c.transformers),
-				}))
+			key := assistantBlockKey{index: i, kind: "text"}
+			markdown, _ := previous[key].(*tui.Markdown)
+			if markdown == nil {
+				markdown = tui.NewMarkdown("", c.outputPad, 0, c.markdownTheme, nil, tui.MarkdownOptions{})
+			}
+			markdown.PaddingX = c.outputPad
+			markdown.Options = tui.MarkdownOptions{
+				Transform: CreateMarkdownTransform("assistant", c.isStreaming, c.transformers),
+			}
+			markdown.SetText(strings.TrimSpace(content.Text))
+			c.blockComponents[key] = markdown
+			c.contentContainer.AddChild(markdown)
 		case ai.ThinkingContent:
 			var thinkingBlocks []string
 			for ; i < len(blocks); i++ {
@@ -172,16 +195,26 @@ func (c *AssistantMessageComponent) UpdateContent(message *ai.AssistantMessage, 
 				hidden = override
 			}
 
+			key := assistantBlockKey{index: i, kind: "thinking", hidden: hidden}
 			var thinkingComponent tui.Component
 			if hidden {
 				thinkingComponent = tui.NewText(theme.Italic(theme.Fg("thinkingText", c.hiddenThinkingLabel)), c.outputPad, 0, nil)
 			} else {
-				thinkingComponent = tui.NewMarkdown(joinThinkingBlocks(thinkingBlocks), c.outputPad, 0, c.markdownTheme,
-					&tui.DefaultTextStyle{Color: func(text string) string { return theme.Fg("thinkingText", text) }, Italic: true},
-					tui.MarkdownOptions{
-						Transform: CreateMarkdownTransform("assistant-thinking", c.isStreaming, c.transformers),
-					})
+				markdown, _ := previous[key].(*tui.Markdown)
+				if markdown == nil {
+					markdown = tui.NewMarkdown("", c.outputPad, 0, c.markdownTheme, nil, tui.MarkdownOptions{})
+				}
+				markdown.PaddingX = c.outputPad
+				markdown.DefaultTextStyle = &tui.DefaultTextStyle{
+					Color: func(text string) string { return theme.Fg("thinkingText", text) }, Italic: true,
+				}
+				markdown.Options = tui.MarkdownOptions{
+					Transform: CreateMarkdownTransform("assistant-thinking", c.isStreaming, c.transformers),
+				}
+				markdown.SetText(joinThinkingBlocks(thinkingBlocks))
+				thinkingComponent = markdown
 			}
+			c.blockComponents[key] = thinkingComponent
 			c.contentContainer.AddChild(tui.NewMouseRegion(thinkingComponent, func(event tui.TuiMouseEvent) *tui.TuiMouseDispatchResult {
 				if event.Type != tui.MouseClick || event.Button != tui.MouseButtonLeft {
 					return nil
