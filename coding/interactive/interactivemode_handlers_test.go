@@ -210,12 +210,13 @@ func TestSubmitCommandDispatch(t *testing.T) {
 	submit.Handlers.HandleNameCommand = func(text string) { calls = append(calls, "name") }
 	submit.Handlers.ShowTreeSelector = func() { calls = append(calls, "tree") }
 	submit.Handlers.HandleLoginCommand = func(providerRef string) error { calls = append(calls, "login:"+providerRef); return nil }
+	submit.Handlers.ShowOAuthSelector = func(mode string) { calls = append(calls, "oauth:"+mode) }
 	submit.Handlers.HandleCompactCommand = func(instructions string) error { calls = append(calls, "compact:"+instructions); return nil }
 	submit.Handlers.Shutdown = func() error { calls = append(calls, "quit"); return nil }
 
 	inputs := []string{
 		"/settings", "/model", "/model gpt", "/thinking high",
-		"/name", "/tree", "/login", "/login anthropic", "/compact", "/compact now", "/quit",
+		"/name", "/tree", "/login", "/login anthropic", "/logout", "/compact", "/compact now", "/quit",
 	}
 	for _, input := range inputs {
 		editor.SetText(input)
@@ -223,7 +224,7 @@ func TestSubmitCommandDispatch(t *testing.T) {
 	}
 	want := []string{
 		"settings", "model:", "model:gpt", "thinking:high",
-		"name", "tree", "login:", "login:anthropic", "compact:", "compact:now", "quit",
+		"name", "tree", "login:", "login:anthropic", "oauth:logout", "compact:", "compact:now", "quit",
 	}
 	if strings.Join(calls, ",") != strings.Join(want, ",") {
 		t.Fatalf("calls = %v", calls)

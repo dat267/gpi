@@ -671,6 +671,7 @@ func NewApp(options AppOptions) *App {
 				app.Auth.HandleLoginCommand(context.Background(), providerRef)
 				return nil
 			},
+			ShowOAuthSelector:  func(mode string) { app.Auth.ShowOAuthSelector(context.Background(), mode) },
 			HandleClearCommand: func() error { app.Commands.HandleClearCommand(context.Background()); return nil },
 			HandleCompactCommand: func(instructions string) error {
 				// The indicator is UI state (loop side); the compaction itself
