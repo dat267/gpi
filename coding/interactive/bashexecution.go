@@ -122,8 +122,11 @@ func RenderToolPath(rawPath *string, theme *Theme, cwd string, emptyFallback str
 type BashExecutionComponent struct {
 	*tui.Container
 
-	command          string
-	outputLines      []string
+	command     string
+	outputLines []string
+	// totalBytes is len(strings.Join(outputLines, "\n")), kept incrementally:
+	// the display is recomputed on every streamed chunk.
+	totalBytes       int
 	status           string // running | complete | cancelled | error
 	exitCode         *int
 	loader           *tui.Loader
@@ -187,6 +190,7 @@ func (c *BashExecutionComponent) AppendOutput(chunk string) {
 	clean = strings.ReplaceAll(clean, "\r\n", "\n")
 	clean = strings.ReplaceAll(clean, "\r", "\n")
 
+	c.totalBytes += len(clean)
 	newLines := strings.Split(clean, "\n")
 	if len(c.outputLines) > 0 && len(newLines) > 0 {
 		c.outputLines[len(c.outputLines)-1] += newLines[0]
@@ -216,16 +220,14 @@ func (c *BashExecutionComponent) SetComplete(exitCode *int, cancelled bool, trun
 
 func (c *BashExecutionComponent) updateDisplay() {
 	theme := ActiveTheme()
-	fullOutput := strings.Join(c.outputLines, "\n")
-	contextTruncation := coding.TruncateTail(fullOutput, coding.TruncationOptions{
-		MaxLines: coding.DefaultMaxLines,
-		MaxBytes: coding.DefaultMaxBytes,
-	})
-
-	var availableLines []string
-	if contextTruncation.Content != "" {
-		availableLines = strings.Split(contextTruncation.Content, "\n")
-	}
+	// The tail window comes from the line buffer: joining and re-splitting the
+	// whole output here ran on every streamed chunk (14 ms per chunk once a
+	// command had produced 2000 lines, i.e. quadratic over the run).
+	availableLines, contextTruncated := coding.TruncateTailLines(c.outputLines, c.totalBytes,
+		coding.TruncationOptions{
+			MaxLines: coding.DefaultMaxLines,
+			MaxBytes: coding.DefaultMaxBytes,
+		})
 
 	previewLogicalLines := availableLines
 	if len(previewLogicalLines) > previewLines {
@@ -279,7 +281,7 @@ func (c *BashExecutionComponent) updateDisplay() {
 		statusParts = append(statusParts, theme.Fg("error", "(exit "+itoa(exitCode)+")"))
 	}
 
-	wasTruncated := contextTruncation.Truncated || (c.truncation != nil && c.truncation.Truncated)
+	wasTruncated := contextTruncated || (c.truncation != nil && c.truncation.Truncated)
 	if wasTruncated && c.fullOutputPath != "" {
 		statusParts = append(statusParts, theme.Fg("warning", "Output truncated. Full output: "+c.fullOutputPath))
 	}

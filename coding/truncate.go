@@ -148,6 +148,69 @@ func TruncateHead(content string, options TruncationOptions) TruncationResult {
 	}
 }
 
+// TruncateTailLines is the line-slice path of TruncateTail: the caller already
+// holds the logical lines (bash streams into a line buffer and recomputes its
+// display on every chunk, where re-joining and re-splitting the whole output
+// was quadratic). `lines` is strings.Split(content, "\n") and totalBytes is
+// len(content).
+//
+// It returns the tail window (nil when the truncated content is empty, so a
+// caller can treat nil as "no lines", matching a TruncateTail Content of "")
+// and whether truncation happened. The count fields are not materialized: the
+// caller keeps the lines.
+func TruncateTailLines(lines []string, totalBytes int, options TruncationOptions) ([]string, bool) {
+	maxLines := options.MaxLines
+	if maxLines == 0 {
+		maxLines = DefaultMaxLines
+	}
+	maxBytes := options.MaxBytes
+	if maxBytes == 0 {
+		maxBytes = DefaultMaxBytes
+	}
+
+	// splitLinesForCounting drops the element after a trailing newline.
+	counted := lines
+	totalLines := len(counted)
+	if totalLines > 0 && counted[totalLines-1] == "" {
+		counted = counted[:totalLines-1]
+		totalLines--
+	}
+
+	if totalLines <= maxLines && totalBytes <= maxBytes {
+		return emptyWindowToNil(lines), false
+	}
+
+	window := make([]string, 0, min(maxLines, totalLines))
+	outputBytesCount := 0
+	for i := totalLines - 1; i >= 0 && len(window) < maxLines; i-- {
+		lineBytes := len(counted[i])
+		if len(window) > 0 {
+			lineBytes++ // +1 for the newline
+		}
+		if outputBytesCount+lineBytes > maxBytes {
+			if len(window) == 0 {
+				window = append(window, truncateStringToBytesFromEnd(counted[i], maxBytes))
+			}
+			break
+		}
+		window = append(window, counted[i])
+		outputBytesCount += lineBytes
+	}
+	for i, j := 0, len(window)-1; i < j; i, j = i+1, j-1 {
+		window[i], window[j] = window[j], window[i]
+	}
+	return emptyWindowToNil(window), true
+}
+
+// emptyWindowToNil reports an empty window as nil, matching TruncateTail's
+// empty Content: strings.Join([]string{""}, "\n") is "".
+func emptyWindowToNil(window []string) []string {
+	if len(window) == 1 && window[0] == "" {
+		return nil
+	}
+	return window
+}
+
 // TruncateTail keeps the last N lines/bytes (bash output). May return a
 // partial first line when the last original line exceeds the byte limit.
 func TruncateTail(content string, options TruncationOptions) TruncationResult {
