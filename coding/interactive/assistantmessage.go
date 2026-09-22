@@ -16,6 +16,7 @@ type AssistantMessageComponent struct {
 	*tui.Container
 
 	contentContainer *tui.Container
+	zones            zoneMarkedLines
 
 	hideThinkingBlock   bool
 	markdownTheme       tui.MarkdownTheme
@@ -100,12 +101,10 @@ func (c *AssistantMessageComponent) SetOutputPad(padding int) {
 // Render renders the message with the OSC 133 zone markers.
 func (c *AssistantMessageComponent) Render(width int) []string {
 	lines := c.Container.Render(width)
-	if c.hasToolCalls || len(lines) == 0 {
+	if c.hasToolCalls {
 		return lines
 	}
-	lines[0] = osc133ZoneStart + lines[0]
-	lines[len(lines)-1] = osc133ZoneEnd + osc133ZoneFinal + lines[len(lines)-1]
-	return lines
+	return c.zones.get(lines)
 }
 
 // UpdateContent rebuilds the content for a message.

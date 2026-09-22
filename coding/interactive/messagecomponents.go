@@ -14,9 +14,36 @@ const (
 )
 
 // UserMessageComponent renders a user message with the user background.
+// zoneMarkedLines applies the OSC 133 zone markers to the first and last line
+// of a component's rendered output. The lines it is given are a render cache
+// shared with the parent — writing the markers into them in place grew the
+// markers on every paint — so the marked lines are cached and rebuilt only when
+// the container hands back a different slice.
+type zoneMarkedLines struct {
+	marked []string
+	source []string
+}
+
+func (z *zoneMarkedLines) get(lines []string) []string {
+	if len(lines) == 0 {
+		return lines
+	}
+	if len(z.source) == len(lines) && len(lines) > 0 && &z.source[0] == &lines[0] {
+		return z.marked
+	}
+	marked := make([]string, len(lines))
+	copy(marked, lines)
+	marked[0] = osc133ZoneStart + marked[0]
+	marked[len(marked)-1] = osc133ZoneEnd + osc133ZoneFinal + marked[len(marked)-1]
+	z.marked = marked
+	z.source = lines
+	return marked
+}
+
 type UserMessageComponent struct {
 	*tui.Container
 
+	zones         zoneMarkedLines
 	text          string
 	markdownTheme tui.MarkdownTheme
 	outputPad     int
@@ -71,13 +98,7 @@ func (c *UserMessageComponent) rebuild() {
 
 // Render renders the message with the OSC 133 zone markers.
 func (c *UserMessageComponent) Render(width int) []string {
-	lines := c.Container.Render(width)
-	if len(lines) == 0 {
-		return lines
-	}
-	lines[0] = osc133ZoneStart + lines[0]
-	lines[len(lines)-1] = osc133ZoneEnd + osc133ZoneFinal + lines[len(lines)-1]
-	return lines
+	return c.zones.get(c.Container.Render(width))
 }
 
 // EntryRenderer renders a custom session entry (extension surface; the

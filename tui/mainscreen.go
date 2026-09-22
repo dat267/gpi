@@ -344,7 +344,11 @@ func (s *MainScreen) doRender() {
 		return targetScreenRow - currentScreenRow
 	}
 
-	newLines := s.renderLocked(width)
+	// The component layer hands back render caches that are reused between
+	// frames, and this screen owns its buffer: ExtractCursorPosition and
+	// ApplyLineResets both write into the lines they are given, so the
+	// rendered lines are copied before any of them runs.
+	newLines := append([]string(nil), s.renderLocked(width)...)
 
 	if s.hasOverlayEntriesLocked() {
 		newLines = s.CompositeOverlays(newLines, width, height)

@@ -195,9 +195,19 @@ type Container struct {
 	mouseLayout      []mouseChild
 	mouseLayoutWidth int
 
+	// cacheLines is the concatenation of the children's lines at cacheWidth.
+	// Reusing it keeps a warm frame off the heap: rebuilding it every paint
+	// allocated (and then garbage-collected) the whole transcript.
+	cacheLines []string
+	// cacheChildren holds each child's rendered lines from that pass, compared
+	// to decide whether cacheLines is still current.
+	cacheChildren [][]string
+	cacheWidth    int
+
 	// frame scratch, reused across renders so a frame does not allocate for
 	// every child and every line.
 	childrenSnapshot []Component
+	childRenders     [][]string
 	lineScratch      []string
 }
 
@@ -212,6 +222,7 @@ func (c *Container) childComponents() []Component { return c.Children }
 // AddChild appends a child component.
 func (c *Container) AddChild(component Component) {
 	c.Children = append(c.Children, component)
+	c.dropRenderCache()
 }
 
 // InsertChildAt inserts a child at the given index (clamped to the current
@@ -223,6 +234,7 @@ func (c *Container) InsertChildAt(index int, component Component) {
 	c.Children = append(c.Children, nil)
 	copy(c.Children[index+1:], c.Children[index:])
 	c.Children[index] = component
+	c.dropRenderCache()
 }
 
 // RemoveChild removes a child component.
@@ -230,6 +242,7 @@ func (c *Container) RemoveChild(component Component) {
 	for i, child := range c.Children {
 		if child == component {
 			c.Children = append(c.Children[:i], c.Children[i+1:]...)
+			c.dropRenderCache()
 			return
 		}
 	}
@@ -238,10 +251,19 @@ func (c *Container) RemoveChild(component Component) {
 // Clear removes all children.
 func (c *Container) Clear() {
 	c.Children = nil
+	c.dropRenderCache()
+}
+
+// dropRenderCache clears the cached concatenation.
+func (c *Container) dropRenderCache() {
+	c.cacheLines = nil
+	c.cacheChildren = nil
+	c.cacheWidth = 0
 }
 
 // Invalidate invalidates every child.
 func (c *Container) Invalidate() {
+	c.dropRenderCache()
 	// Snapshot under the lock, deliver outside it: a child's Invalidate may
 	// re-enter (AssistantMessageComponent.Invalidate rebuilds its content).
 	children := append([]Component{}, c.Children...)
@@ -299,19 +321,56 @@ func (c *Container) Render(width int) []string {
 	} else {
 		c.mouseLayout = c.mouseLayout[:0]
 	}
-	c.lineScratch = c.lineScratch[:0]
-	for _, child := range c.childrenSnapshot {
+	if cap(c.childRenders) < len(c.childrenSnapshot) {
+		c.childRenders = make([][]string, len(c.childrenSnapshot))
+	}
+	c.childRenders = c.childRenders[:len(c.childrenSnapshot)]
+	for i, child := range c.childrenSnapshot {
 		childLines := child.Render(width)
+		c.childRenders[i] = childLines
 		c.mouseLayout = append(c.mouseLayout, mouseChild{component: child, height: len(childLines)})
-		c.lineScratch = append(c.lineScratch, childLines...)
 	}
 	c.mouseLayoutWidth = width
 
-	// Return a fresh slice: callers (a parent's render cache) hold on to it, so
-	// handing back the scratch would alias every frame.
+	if c.matchRenderCache(width) {
+		return c.cacheLines
+	}
+
+	c.lineScratch = c.lineScratch[:0]
+	for _, childLines := range c.childRenders {
+		c.lineScratch = append(c.lineScratch, childLines...)
+	}
 	lines := make([]string, len(c.lineScratch))
 	copy(lines, c.lineScratch)
+
+	c.cacheLines = lines
+	c.cacheChildren = append(c.cacheChildren[:0], c.childRenders...)
+	c.cacheWidth = width
 	return lines
+}
+
+// matchRenderCache reports whether cacheLines still describes the children's
+// current lines.
+func (c *Container) matchRenderCache(width int) bool {
+	if c.cacheLines == nil || c.cacheWidth != width || len(c.cacheChildren) != len(c.childRenders) {
+		return false
+	}
+	for i, cached := range c.cacheChildren {
+		lines := c.childRenders[i]
+		if len(cached) != len(lines) {
+			return false
+		}
+		// A child that reuses its slice is unchanged by definition.
+		if len(lines) > 0 && &cached[0] == &lines[0] {
+			continue
+		}
+		for j, line := range lines {
+			if cached[j] != line {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // MouseLayout returns the layout recorded by the last Render.
