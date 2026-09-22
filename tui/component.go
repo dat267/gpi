@@ -190,12 +190,15 @@ type childrenHolder interface {
 type Container struct {
 	Children []Component
 
-	// mu guards the mutation/read pairs on Children and the mouse layout:
-	// session-event goroutines mutate the chat/document containers while the
-	// render timer renders them (upstream is single-threaded; D141's race
-	// report made this one explicit).
+	// mouseLayout is the child hit-test layout from the last render. Render is
+	// loop-owned (D146), so it needs no lock.
 	mouseLayout      []mouseChild
 	mouseLayoutWidth int
+
+	// frame scratch, reused across renders so a frame does not allocate for
+	// every child and every line.
+	childrenSnapshot []Component
+	lineScratch      []string
 }
 
 type mouseChild struct {
@@ -283,16 +286,31 @@ func (c *Container) HandleMouse(event TuiMouseEvent) *TuiMouseDispatchResult {
 
 // Render renders every child and records the mouse layout.
 func (c *Container) Render(width int) []string {
-	children := append([]Component{}, c.Children...)
-	var lines []string
-	mouseChildren := make([]mouseChild, 0, len(children))
-	for _, child := range children {
-		childLines := child.Render(width)
-		mouseChildren = append(mouseChildren, mouseChild{component: child, height: len(childLines)})
-		lines = append(lines, childLines...)
+	// Snapshot the children: a child's Render may re-enter and mutate
+	// c.Children. The scratch buffer is reused, not reallocated.
+	if cap(c.childrenSnapshot) < len(c.Children) {
+		c.childrenSnapshot = make([]Component, len(c.Children))
 	}
-	c.mouseLayout = mouseChildren
+	c.childrenSnapshot = c.childrenSnapshot[:len(c.Children)]
+	copy(c.childrenSnapshot, c.Children)
+
+	if cap(c.mouseLayout) < len(c.childrenSnapshot) {
+		c.mouseLayout = make([]mouseChild, 0, len(c.childrenSnapshot))
+	} else {
+		c.mouseLayout = c.mouseLayout[:0]
+	}
+	c.lineScratch = c.lineScratch[:0]
+	for _, child := range c.childrenSnapshot {
+		childLines := child.Render(width)
+		c.mouseLayout = append(c.mouseLayout, mouseChild{component: child, height: len(childLines)})
+		c.lineScratch = append(c.lineScratch, childLines...)
+	}
 	c.mouseLayoutWidth = width
+
+	// Return a fresh slice: callers (a parent's render cache) hold on to it, so
+	// handing back the scratch would alias every frame.
+	lines := make([]string, len(c.lineScratch))
+	copy(lines, c.lineScratch)
 	return lines
 }
 

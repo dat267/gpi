@@ -6,7 +6,11 @@ import "strings"
 // optional background to its children.
 
 type boxRenderCache struct {
-	childLines  []string
+	// childLines holds each child's rendered lines as returned by the child (no
+	// padding applied), so validating the cache does not build a padded copy of
+	// every line.
+	childLines  [][]string
+	paddingX    int
 	width       int
 	bgSample    string
 	hasBgSample bool
@@ -24,6 +28,10 @@ type Box struct {
 	cache            *boxRenderCache
 	mouseLayout      []mouseChild
 	mouseLayoutWidth int
+
+	// frame scratch, reused across renders (loop-owned).
+	childLines   [][]string
+	leftPadCache string
 }
 
 // NewBox creates a box with the given padding and optional background.
@@ -69,20 +77,27 @@ func (b *Box) Invalidate() {
 	}
 }
 
-func (b *Box) matchCache(width int, childLines []string, bgSample string, hasBgSample bool) bool {
+func (b *Box) matchCache(width int, bgSample string, hasBgSample bool) bool {
 	cache := b.cache
 	if cache == nil {
 		return false
 	}
-	if cache.width != width || cache.hasBgSample != hasBgSample || cache.bgSample != bgSample {
+	if cache.width != width || cache.paddingX != b.paddingX ||
+		cache.hasBgSample != hasBgSample || cache.bgSample != bgSample {
 		return false
 	}
-	if len(cache.childLines) != len(childLines) {
+	if len(cache.childLines) != len(b.childLines) {
 		return false
 	}
-	for i, line := range cache.childLines {
-		if line != childLines[i] {
+	for i, cached := range cache.childLines {
+		lines := b.childLines[i]
+		if len(cached) != len(lines) {
 			return false
+		}
+		for j, line := range lines {
+			if cached[j] != line {
+				return false
+			}
 		}
 	}
 	return true
@@ -126,21 +141,34 @@ func (b *Box) Render(width int) []string {
 	}
 
 	contentWidth := maxInt(1, width-b.paddingX*2)
-	leftPad := strings.Repeat(" ", maxInt(0, b.paddingX))
+	leftPad := ""
+	if b.paddingX > 0 {
+		if len(b.leftPadCache) != b.paddingX {
+			b.leftPadCache = strings.Repeat(" ", b.paddingX)
+		}
+		leftPad = b.leftPadCache
+	}
 
-	var childLines []string
-	mouseChildren := make([]mouseChild, 0, len(b.Children))
+	if cap(b.childLines) < len(b.Children) {
+		b.childLines = make([][]string, 0, len(b.Children))
+	} else {
+		b.childLines = b.childLines[:0]
+	}
+	if cap(b.mouseLayout) < len(b.Children) {
+		b.mouseLayout = make([]mouseChild, 0, len(b.Children))
+	} else {
+		b.mouseLayout = b.mouseLayout[:0]
+	}
+	totalLines := 0
 	for _, child := range b.Children {
 		lines := child.Render(contentWidth)
-		mouseChildren = append(mouseChildren, mouseChild{component: child, height: len(lines)})
-		for _, line := range lines {
-			childLines = append(childLines, leftPad+line)
-		}
+		b.childLines = append(b.childLines, lines)
+		b.mouseLayout = append(b.mouseLayout, mouseChild{component: child, height: len(lines)})
+		totalLines += len(lines)
 	}
-	b.mouseLayout = mouseChildren
 	b.mouseLayoutWidth = contentWidth
 
-	if len(childLines) == 0 {
+	if totalLines == 0 {
 		return nil
 	}
 
@@ -151,22 +179,27 @@ func (b *Box) Render(width int) []string {
 		hasBgSample = true
 	}
 
-	if b.matchCache(width, childLines, bgSample, hasBgSample) {
+	if b.matchCache(width, bgSample, hasBgSample) {
 		return b.cache.lines
 	}
 
-	var result []string
+	result := make([]string, 0, totalLines+b.paddingY*2)
 	for i := 0; i < b.paddingY; i++ {
 		result = append(result, b.applyBg("", width))
 	}
-	for _, line := range childLines {
-		result = append(result, b.applyBg(line, width))
+	for _, lines := range b.childLines {
+		for _, line := range lines {
+			result = append(result, b.applyBg(leftPad+line, width))
+		}
 	}
 	for i := 0; i < b.paddingY; i++ {
 		result = append(result, b.applyBg("", width))
 	}
 
-	b.cache = &boxRenderCache{childLines: childLines, width: width, bgSample: bgSample, hasBgSample: hasBgSample, lines: result}
+	b.cache = &boxRenderCache{
+		childLines: append([][]string{}, b.childLines...), paddingX: b.paddingX,
+		width: width, bgSample: bgSample, hasBgSample: hasBgSample, lines: result,
+	}
 	return result
 }
 
