@@ -69,7 +69,7 @@ func NewInteractiveUIState(ui tui.TUI) *InteractiveUIState {
 		extensionWidgetsAbove:      map[string]tui.Component{},
 		extensionWidgetsBelow:      map[string]tui.Component{},
 		inputSubscriptions:         map[int]func(){},
-		DefaultWorkingMessage:      "Working...",
+		DefaultWorkingMessage:      "Working",
 		DefaultHiddenThinkingLabel: "Thinking...",
 	}
 }
