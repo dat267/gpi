@@ -540,11 +540,61 @@ func newSubmitWiring(app *App) *SubmitWiring {
 				app.Models.ShowModelSelector(context.Background(), searchTerm)
 				return nil
 			},
-			HandleThinkingCommand:   app.Selectors.HandleThinkingCommand,
-			HandleExportCommand:     func(text string) error { app.Commands.HandleExportCommand(context.Background(), text); return nil },
-			HandleImportCommand:     func(text string) error { app.Commands.HandleImportCommand(context.Background(), text); return nil },
-			HandleCopyCommand:       func() error { app.Commands.HandleCopyCommand(false, false); return nil },
-			HandleNameCommand:       app.Commands.HandleNameCommand,
+			HandleThinkingCommand: app.Selectors.HandleThinkingCommand,
+			HandleExportCommand:   func(text string) error { app.Commands.HandleExportCommand(context.Background(), text); return nil },
+			HandleImportCommand:   func(text string) error { app.Commands.HandleImportCommand(context.Background(), text); return nil },
+			HandleCopyCommand:     func() error { app.Commands.HandleCopyCommand(false, false); return nil },
+			HandleNameCommand:     app.Commands.HandleNameCommand,
+			// `!command` from the editor. Upstream emits a user_bash extension event
+			// first; extension mechanics are out of scope (D41), so the built-in
+			// execution is the whole path. The command deliberately runs off the UI
+			// loop — upstream does not await it either — and every component
+			// mutation is posted back, because the renderer paints concurrently with
+			// this goroutine.
+			HandleBashCommand: func(command string, excludeFromContext bool) error {
+				app.runDetached(func(ctx context.Context) error {
+					component := NewBashExecutionComponent(command, app.UI, excludeFromContext)
+					deferred := app.Session.IsStreaming()
+					app.UI.Post(func() {
+						if deferred {
+							app.Queue.PendingBash = append(app.Queue.PendingBash, component)
+							app.PendingMessages.AddChild(component)
+						} else {
+							app.Chat.AddChild(component)
+						}
+						app.UI.RequestRender(false)
+					})
+
+					result, err := app.Session.ExecuteBash(ctx, command, func(chunk string) {
+						app.UI.Post(func() {
+							component.AppendOutput(chunk)
+							app.UI.RequestRender(false)
+						})
+					}, &coding.ExecuteBashOptions{ExcludeFromContext: excludeFromContext})
+					if err != nil {
+						app.UI.Post(func() {
+							component.SetComplete(nil, false, nil, "")
+							app.showError("Bash command failed: " + err.Error())
+						})
+						return err
+					}
+
+					var truncation *coding.TruncationResult
+					if result.Truncated {
+						truncation = &coding.TruncationResult{Truncated: true, Content: result.Output}
+					}
+					app.UI.Post(func() {
+						component.SetComplete(result.ExitCode, result.Cancelled, truncation, result.FullOutputPath)
+						// The result also joins the session history, which is what puts it in
+						// the transcript's replay (and keeps it out of the model's context
+						// for the `!!` form).
+						app.Session.RecordBashResult(command, *result, excludeFromContext)
+						app.UI.RequestRender(false)
+					})
+					return nil
+				})
+				return nil
+			},
 			HandleSessionCommand:    func() { app.Commands.HandleSessionCommand(time.Now().UnixMilli()) },
 			HandleHotkeysCommand:    app.Commands.HandleHotkeysCommand,
 			ShowUserMessageSelector: func() { app.Selectors.ShowUserMessageSelector(context.Background()) },
