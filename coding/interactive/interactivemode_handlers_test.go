@@ -351,3 +351,52 @@ func TestSubmitEmpty(t *testing.T) {
 		t.Fatal("empty submission prompted")
 	}
 }
+
+// ctrl+t has to toggle the state the app actually renders from. The handler
+// used to hand the toggle a copy of the display flag, so the second press read
+// the stale value back and produced the same state again — the setting stuck
+// after the first press instead of toggling.
+func TestThinkingToggleRoundTrips(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+
+	wiring := newKeyWiring(app)
+	before := app.Settings.GetHideThinkingBlock()
+	if app.Display.HideThinkingBlock != before {
+		t.Fatalf("display %v and settings %v disagree before toggling", app.Display.HideThinkingBlock, before)
+	}
+
+	wiring.OnThinkingToggle()
+	if got := app.Settings.GetHideThinkingBlock(); got == before {
+		t.Errorf("the setting did not toggle: %v", got)
+	}
+	if app.Display.HideThinkingBlock == before {
+		t.Errorf("the live display state did not toggle: %v", app.Display.HideThinkingBlock)
+	}
+
+	wiring.OnThinkingToggle()
+	if got := app.Settings.GetHideThinkingBlock(); got != before {
+		t.Errorf("the second press did not toggle back: %v, want %v", got, before)
+	}
+	if app.Display.HideThinkingBlock != before {
+		t.Errorf("the live display state did not toggle back: %v", app.Display.HideThinkingBlock)
+	}
+}
+
+// The two toggles are separate keys and must not fight over the same switch.
+func TestToolsExpandToggleRoundTrips(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+
+	wiring := newKeyWiring(app)
+	before := app.Display.ToolOutputExpanded
+
+	wiring.OnToolsExpand()
+	if app.Display.ToolOutputExpanded == before {
+		t.Errorf("the display state did not toggle: %v", app.Display.ToolOutputExpanded)
+	}
+	wiring.OnToolsExpand()
+	if app.Display.ToolOutputExpanded != before {
+		t.Errorf("the second press did not toggle back: %v", app.Display.ToolOutputExpanded)
+	}
+}

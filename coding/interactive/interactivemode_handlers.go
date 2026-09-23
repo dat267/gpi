@@ -500,8 +500,10 @@ func newKeyWiring(app *App) *KeyWiring {
 			})
 		},
 		OnThinkingToggle: func() {
-			hidden := app.Display.HideThinkingBlock
-			app.Queue.ToggleThinkingBlockVisibility(&hidden)
+			// Pass the live display flag, not a copy: it is what the next toggle
+			// reads, so a copy left it stale and the second press re-derived the
+			// same state — the setting stuck after one press.
+			app.Queue.ToggleThinkingBlockVisibility(&app.Display.HideThinkingBlock)
 		},
 		OnFollowUp:      func() { app.Queue.HandleFollowUp(context.Background()) },
 		OnDequeue:       app.Queue.HandleDequeue,
