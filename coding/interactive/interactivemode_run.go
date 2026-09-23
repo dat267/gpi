@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime/pprof"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -63,6 +66,11 @@ type RunWiring struct {
 	// (test seam: partial events are otherwise superseded no-ops without a
 	// streaming assistant component).
 	OnPartialEventApplied func()
+	// StallLogPath, when non-empty, receives a record with a goroutine dump for
+	// any UI-loop phase that exceeds StallLogThreshold. It exists to diagnose
+	// stutters that do not reproduce elsewhere: PIER_STALL_MS sets both.
+	StallLogPath      string
+	StallLogThreshold time.Duration
 	// OnThemeChange registers the theme-file watcher callback.
 	OnThemeChange func(callback func()) func()
 	// OnBranchChange registers the git-branch watcher callback.
@@ -498,6 +506,7 @@ func (w *RunWiring) renderTicks() <-chan struct{} {
 // drainReadyEvents applies every session event that is already queued. The
 // caller then paints once (loop-side coalescing).
 func (w *RunWiring) drainReadyEvents() {
+	defer w.phase("events")()
 	for {
 		select {
 		case event, ok := <-w.SessionEvents:
@@ -537,9 +546,44 @@ const minInteractiveFrameInterval = 16 * time.Millisecond
 
 // renderUI paints the current state (loop goroutine only).
 func (w *RunWiring) renderUI() {
+	defer w.phase("render")()
 	if w.UI != nil {
 		w.UI.RenderNow(false)
 	}
+}
+
+// phase measures one UI-loop phase, recording it (with the goroutine stacks)
+// when it exceeds the stall threshold. Usage: defer w.phase("render")().
+func (w *RunWiring) phase(name string) func() {
+	if w.StallLogThreshold <= 0 || w.StallLogPath == "" {
+		return func() {}
+	}
+	start := time.Now()
+	return func() {
+		if elapsed := time.Since(start); elapsed >= w.StallLogThreshold {
+			w.writeStallRecord(name, elapsed)
+		}
+	}
+}
+
+// stallLogMaxBytes bounds the stall log; an oversized file is truncated before
+// the next record.
+const stallLogMaxBytes = 4 << 20
+
+// writeStallRecord appends the slow phase and every goroutine stack, so a stall
+// names where the loop was instead of only how long it took.
+func (w *RunWiring) writeStallRecord(name string, elapsed time.Duration) {
+	flags := os.O_APPEND | os.O_CREATE | os.O_WRONLY
+	if info, err := os.Stat(w.StallLogPath); err == nil && info.Size() > stallLogMaxBytes {
+		flags = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	}
+	file, err := os.OpenFile(w.StallLogPath, flags, 0o644)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	fmt.Fprintf(file, "%s slow UI phase %q %v\n", time.Now().Format(time.RFC3339Nano), name, elapsed.Round(time.Millisecond))
+	_ = pprof.Lookup("goroutine").WriteTo(file, 1)
 }
 
 // armAnimation points the loop's timer at the next component animation frame
@@ -710,7 +754,10 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 	for {
 		w.beats.Add(1)
 		if w.OnBeat != nil {
-			w.OnBeat()
+			func() {
+				defer w.phase("beat")()
+				w.OnBeat()
+			}()
 		}
 		var (
 			inputsCh <-chan string
@@ -732,7 +779,10 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 				continue
 			}
 			if w.Events != nil {
-				w.Events.HandleEvent(event)
+				func() {
+					defer w.phase("event-apply")()
+					w.Events.HandleEvent(event)
+				}()
 			}
 		case event, ok := <-w.PartialEvents:
 			if !ok {
@@ -766,7 +816,10 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 			}
 			// Input is latency-sensitive: dispatch, then paint once.
 			if w.UI != nil {
-				w.UI.HandleTerminalInput(data)
+				func() {
+					defer w.phase("input")()
+					w.UI.HandleTerminalInput(data)
+				}()
 			}
 			w.drainReadyEvents()
 			paint()
@@ -886,6 +939,9 @@ func newRunWiring(app *App) *RunWiring {
 		TakeCrash: func() *coding.CrashRecord {
 			return coding.TakeUnnotifiedCrash(coding.GetCrashLogPath(app.options.AgentDir), time.Now().UnixMilli())
 		},
+		StallLogPath:      stallLogPath(app.options.AgentDir),
+		StallLogThreshold: stallLogThreshold(),
+
 		Prompt:      func(ctx context.Context, text string) error { return app.Session.Prompt(ctx, text, nil) },
 		ShowStatus:  func(message string) { app.Transcript.ShowStatus(message) },
 		ShowError:   app.RunnerShowChatError,
@@ -895,4 +951,25 @@ func newRunWiring(app *App) *RunWiring {
 		},
 		RequestRender: func() { app.UI.RequestRender(false) },
 	}
+}
+
+// stallLogThreshold reads PIER_STALL_MS: zero (the default) disables the log.
+func stallLogThreshold() time.Duration {
+	value := os.Getenv("PIER_STALL_MS")
+	if value == "" {
+		return 0
+	}
+	millis, err := strconv.Atoi(value)
+	if err != nil || millis <= 0 {
+		return 0
+	}
+	return time.Duration(millis) * time.Millisecond
+}
+
+// stallLogPath is where slow UI phases are recorded (next to the crash log).
+func stallLogPath(agentDir string) string {
+	if agentDir == "" {
+		return ""
+	}
+	return filepath.Join(agentDir, "pier-stall.log")
 }
