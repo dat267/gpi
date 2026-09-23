@@ -301,7 +301,14 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   resource loader, the extension runner, package/tools managers); seams are
   function values or return nil. The resource loader's non-extension pieces are
   ported: context files, skills, and the SYSTEM.md / APPEND_SYSTEM.md prompt
-  files (resolved at session creation; `/reload` does not re-read resources).
+  files. `/reload` follows upstream `AgentSession.reload` for them — settings
+  re-read and queue modes, `ai.ResetAPIProviders`, the resource files, then the
+  system prompt rebuilt from the active tool names — and the mode's keybindings,
+  implicit project trust and UI re-application. Not reloaded: the extension
+  runner and package manager (out of scope), the tool registry (built-in tools
+  capture no settings-dependent state; the bash tool reads the shell settings
+  per call), and prompt templates/theme files (the port does not load them at
+  boot either).
 - D133 — tool renderers always resolve to the built-in set (no extension
   definitions); `computeEditsPreview` is synchronous.
 - D140 — the user's provider extensions (hyper, commandcode) are compiled in as

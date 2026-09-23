@@ -716,12 +716,11 @@ func newCommandWiring(app *App) *CommandWiring {
 			app.runDetached(func(ctx context.Context) error { fn(); return nil })
 		},
 		ReloadNow: func() (string, bool, error) {
-			// Upstream session.reload's in-scope subset: settings re-read,
-			// session queue modes, keybindings, implicit project trust
-			// (extension runner and resource loader are out of scope, D41).
-			app.Settings.Reload()
-			app.Session.SetSteeringMode(app.Settings.GetSteeringMode())
-			app.Session.SetFollowUpMode(app.Settings.GetFollowUpMode())
+			// Upstream session.reload and then the mode's follow-ups: settings
+			// re-read, queue modes, resource files and the system prompt (the
+			// extension runner is out of scope, D41), keybindings, and implicit
+			// project trust.
+			app.Session.Reload()
 			app.Keybindings.Reload()
 			savedTrust := app.Trust.MaybeSaveImplicitProjectTrustAfterReload(app.AutoTrustOnReloadCwd)
 			return app.Session.ModelRuntime().GetError(), savedTrust, nil

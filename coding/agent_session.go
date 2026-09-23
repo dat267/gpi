@@ -189,6 +189,12 @@ type AgentSession struct {
 
 	// skillDiagnostics are the skill loader's warnings/collisions.
 	skillDiagnostics []ResourceDiagnostic
+
+	// agentDir and promptSources are the inputs Reload re-reads the resource
+	// files from (upstream ResourceLoader's config; its extension side is out
+	// of scope, D41/D140).
+	agentDir      string
+	promptSources PromptFileSources
 }
 
 type sessionListenerKey struct {
@@ -206,12 +212,19 @@ type SessionConfig struct {
 	AppendSystemPrompt string
 	// PromptSourcePaths are the loaded system/append prompt files.
 	PromptSourcePaths []string
-	Tools             []agent.AgentTool
-	Sessions          *SessionManager
-	Settings          SessionSettings
-	ThinkingLevel     ai.ThinkingLevel
-	Skills            []Skill
-	ContextFiles      []ContextFile
+	// AgentDir is the global agent directory: the resource files are re-read
+	// from it on Reload.
+	AgentDir string
+	// PromptSources are the explicit system/append prompt inputs (CLI text or
+	// paths); Reload re-resolves them against the current trust state and
+	// re-reads the discovered files when they are nil.
+	PromptSources *PromptFileSources
+	Tools         []agent.AgentTool
+	Sessions      *SessionManager
+	Settings      SessionSettings
+	ThinkingLevel ai.ThinkingLevel
+	Skills        []Skill
+	ContextFiles  []ContextFile
 	// SkillDiagnostics are the skill loader's warnings/collisions, surfaced in
 	// the interactive loaded-resources area.
 	SkillDiagnostics []ResourceDiagnostic
@@ -276,8 +289,13 @@ func NewAgentSession(config *SessionConfig) (*AgentSession, error) {
 			CustomPrompt: config.SystemPrompt, AppendSystemPrompt: config.AppendSystemPrompt, Cwd: config.Cwd,
 			Skills: config.Skills, ContextFiles: config.ContextFiles,
 			PromptSourcePaths: append([]string{}, config.PromptSourcePaths...),
+			SelectedTools:     agentToolNames(config.Tools),
 		},
 		skillDiagnostics: config.SkillDiagnostics,
+		agentDir:         config.AgentDir,
+	}
+	if config.PromptSources != nil {
+		s.promptSources = *config.PromptSources
 	}
 	// Always subscribed: session persistence, queue tracking, compaction,
 	// retry logic.

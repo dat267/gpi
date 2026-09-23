@@ -342,10 +342,11 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 	// The base/append system prompt follows the same rule as upstream's
 	// resource loader: an explicit --system-prompt / --append-system-prompt
 	// source wins, otherwise the project's (trusted) or agent-dir file.
-	promptOverrides := LoadPromptOverrides(PromptFileSources{
+	promptSources := PromptFileSources{
 		Cwd: cwd, AgentDir: agentDir, ProjectTrusted: projectTrusted,
 		SystemPrompt: options.SystemPrompt, AppendSystemPrompt: options.AppendSystemPrompt,
-	})
+	}
+	promptOverrides := LoadPromptOverrides(promptSources)
 
 	session, err := NewAgentSession(&SessionConfig{
 		Cwd:                cwd,
@@ -361,6 +362,8 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 		SystemPrompt:       promptOverrides.SystemPrompt,
 		AppendSystemPrompt: promptOverrides.AppendSystemPrompt,
 		PromptSourcePaths:  promptOverrides.SourcePaths,
+		AgentDir:           agentDir,
+		PromptSources:      &promptSources,
 		ConvertToLlm:       convertToLlmWithBlockImages,
 		SessionID:          sessionID,
 		SteeringMode:       settingsManager.GetSteeringMode(),

@@ -2,6 +2,7 @@ package interactive
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -100,6 +101,49 @@ func TestLoadedResourcesListsPromptSources(t *testing.T) {
 	}
 	if !(contextIndex < systemIndex && systemIndex < appendIndex && appendIndex < agentsIndex) {
 		t.Fatalf("prompt sources must precede the context files:\n%s", rendered)
+	}
+}
+
+// TestReloadNowRereadsResources pins /reload's resource half: the wiring's
+// reload re-reads the ported resource files (and the settings), so a prompt
+// file or skill added after startup takes effect without restarting pier.
+func TestReloadNowRereadsResources(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+	app.Init(context.Background())
+
+	if strings.Contains(app.Session.SystemPrompt(), "reloaded append") {
+		t.Fatal("the append file must not be loaded before it exists")
+	}
+	agentDir := app.options.AgentDir
+	if err := os.MkdirAll(filepath.Join(agentDir, "skills", "tdd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "APPEND_SYSTEM.md"), []byte("reloaded append"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "skills", "tdd", "SKILL.md"),
+		[]byte("---\nname: tdd\ndescription: Test-driven development\n---\n\nWrite the test first.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := app.Commands.ReloadNow(); err != nil {
+		t.Fatalf("reload failed: %v", err)
+	}
+
+	prompt := app.Session.SystemPrompt()
+	if !strings.Contains(prompt, "reloaded append") {
+		t.Fatalf("/reload did not re-read the prompt files:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "tdd") {
+		t.Fatalf("/reload did not re-read the skills:\n%s", prompt)
+	}
+
+	// The loaded-resources list follows the reloaded options.
+	app.ShowLoadedResources(true)
+	rendered := coding.StripAnsi(strings.Join(app.LoadedResourcesContainer.Render(100), "\n"))
+	if !strings.Contains(rendered, "APPEND_SYSTEM.md") || !strings.Contains(rendered, "tdd") {
+		t.Fatalf("loaded resources are stale after reload:\n%s", rendered)
 	}
 }
 
