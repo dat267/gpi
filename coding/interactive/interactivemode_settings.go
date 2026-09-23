@@ -355,10 +355,8 @@ func (w *SettingsWiring) BuildSettingsCallbacks(done func(), refresh func()) Set
 			if w.UI != nil {
 				w.UI.SetClearOnShrink(enabled)
 			}
-			if !enabled {
-				if w.ClearStatusContainerIfIdle != nil {
-					w.ClearStatusContainerIfIdle()
-				}
+			if !enabled && w.ClearStatusContainerIfIdle != nil {
+				w.ClearStatusContainerIfIdle()
 			}
 		},
 		OnShowTerminalProgressChange: func(enabled bool) { settings.SetShowTerminalProgress(enabled) },
@@ -435,6 +433,13 @@ func chatChildren(chat *tui.Container) []tui.Component {
 // newSettingsWiring assembles the SettingsWiring (port of the corresponding InteractiveMode wiring).
 func newSettingsWiring(app *App) *SettingsWiring {
 	return &SettingsWiring{
+		// Turning clear-on-shrink off drops a stale idle status line (upstream
+		// clears the status container when no indicator is active).
+		ClearStatusContainerIfIdle: func() {
+			if app.UIState != nil {
+				app.UIState.ClearStatusContainerIfIdle()
+			}
+		},
 		// The scrollbar row's side effect: the transcript's scroll view follows the
 		// setting, the same way a reload applies it.
 		ApplyFullscreenScrollbarSetting: func() { app.applyFullscreenScrollbarSetting() },

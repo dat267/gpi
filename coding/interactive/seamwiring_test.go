@@ -178,3 +178,29 @@ func TestAppConfirmDialogs(t *testing.T) {
 		}
 	})
 }
+
+// Turning clear-on-shrink off drops the status container's idle line, unless an
+// indicator is active (upstream clears it only when nothing is showing).
+func TestClearStatusContainerIfIdleWiring(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+
+	idle := &IdleStatus{}
+	app.UIState.StatusContainer.AddChild(idle)
+	callbacks := newSettingsWiring(app).BuildSettingsCallbacks(func() {}, func() {})
+	callbacks.OnClearOnShrinkChange(false)
+	if got := len(app.UIState.StatusContainer.Children); got != 0 {
+		t.Errorf("status container still holds %d children", got)
+	}
+
+	// With an indicator up, the container is left alone.
+	app.UIState.StatusContainer.AddChild(idle)
+	indicator := NewWorkingStatusIndicator(app.UIState.UI, "Working...", nil, nil)
+	app.UIState.ActiveStatusIndicator = indicator
+	app.UIState.ClearStatusContainerIfIdle()
+	if got := len(app.UIState.StatusContainer.Children); got != 1 {
+		t.Errorf("status container lost its children while an indicator was active (%d)", got)
+	}
+	app.UIState.ActiveStatusIndicator = nil
+	indicator.Dispose()
+}

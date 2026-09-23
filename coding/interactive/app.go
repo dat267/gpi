@@ -781,8 +781,8 @@ func (a *App) applyReloadedSettings() {
 	a.UI.SetShowHardwareCursor(a.Settings.GetShowHardwareCursor())
 	clearOnShrink := a.Settings.GetClearOnShrink()
 	a.UI.SetClearOnShrink(clearOnShrink)
-	if !clearOnShrink && a.UIState != nil && a.UIState.ActiveStatusIndicator == nil && a.StatusContainer != nil {
-		a.StatusContainer.Clear()
+	if !clearOnShrink && a.UIState != nil {
+		a.UIState.ClearStatusContainerIfIdle()
 	}
 	editorPad := a.Settings.GetEditorPaddingX()
 	maxVisible := a.Settings.GetAutocompleteMaxVisible()

@@ -175,6 +175,20 @@ func (s *InteractiveUIState) ShowWorkingStatusIndicator(thinkingLevel string) {
 	s.ShowStatusIndicator(NewWorkingStatusIndicator(s.UI, message, s.WorkingIndicatorOptions, colorFn))
 }
 
+// ClearStatusContainerIfIdle drops the status container's contents when no
+// indicator is active (upstream clears it when clear-on-shrink is turned off, so
+// a stale idle line does not linger).
+func (s *InteractiveUIState) ClearStatusContainerIfIdle() {
+	if s.ActiveStatusIndicator != nil || s.StatusContainer == nil {
+		return
+	}
+	if len(s.StatusContainer.Children) == 0 {
+		return
+	}
+	s.StatusContainer.Clear()
+	s.requestRender()
+}
+
 // SetWorkingVisible toggles the working indicator.
 func (s *InteractiveUIState) SetWorkingVisible(visible bool, isStreaming bool) {
 	s.WorkingVisible = visible
