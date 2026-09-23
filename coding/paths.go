@@ -207,9 +207,12 @@ func ResolveToCwd(filePath string, cwd string) string {
 
 const narrowNoBreakSpace = "\u202F"
 
+// macOSScreenshotTimeRegex matches the space before an AM/PM marker, which
+// macOS screenshot file names join with a narrow no-break space.
+var macOSScreenshotTimeRegex = regexp.MustCompile(` (?i)(AM|PM)\.`)
+
 func tryMacOSScreenshotPath(filePath string) string {
-	re := regexp.MustCompile(` (?i)(AM|PM)\.`)
-	return re.ReplaceAllString(filePath, narrowNoBreakSpace+"$1.")
+	return macOSScreenshotTimeRegex.ReplaceAllString(filePath, narrowNoBreakSpace+"$1.")
 }
 
 func tryNFDVariant(filePath string) string {

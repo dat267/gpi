@@ -161,10 +161,13 @@ func UUIDv7() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
+// sessionIDRegex matches a session id: alphanumeric at both ends, with
+// '-', '_' and '.' allowed inside.
+var sessionIDRegex = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$`)
+
 // AssertValidSessionID validates a user-provided session id.
 func AssertValidSessionID(id string) error {
-	re := regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$`)
-	if !re.MatchString(id) {
+	if !sessionIDRegex.MatchString(id) {
 		return fmt.Errorf("Session id must be non-empty, contain only alphanumeric characters, '-', '_', and '.', and start and end with an alphanumeric character")
 	}
 	return nil

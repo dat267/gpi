@@ -126,8 +126,11 @@ func buildSearchCorpus(lines []string) searchCorpus {
 	return searchCorpus{text: strings.Join(chunks, ""), spans: spans}
 }
 
+// searchQueryWhitespaceRegex collapses runs of whitespace in a search query.
+var searchQueryWhitespaceRegex = regexp.MustCompile(`\s+`)
+
 func normalizeSearchQuery(query string) string {
-	return strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(query, " "))
+	return strings.TrimSpace(searchQueryWhitespaceRegex.ReplaceAllString(query, " "))
 }
 
 func findSearchCorpusMatches(corpus searchCorpus, normalizedQuery string) []AltScreenSearchMatch {

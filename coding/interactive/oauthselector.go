@@ -52,8 +52,11 @@ type MatchResult struct {
 	Score   float64
 }
 
+// whitespaceRunRegex collapses runs of whitespace, for fuzzy matching.
+var whitespaceRunRegex = regexp.MustCompile(`\s+`)
+
 func normalizeWhitespaceLower(text string) string {
-	return strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(strings.ToLower(text), " "))
+	return strings.TrimSpace(whitespaceRunRegex.ReplaceAllString(strings.ToLower(text), " "))
 }
 
 func getSessionSearchText(session coding.SessionInfo) string {

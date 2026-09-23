@@ -29,6 +29,7 @@ var (
 	osc11BackgroundColorResponsePattern = regexp.MustCompile(`(?is)^\x1b\]11;([^\x07\x1b]*)(?:\x07|\x1b\\)$`)
 	colorSchemeReportPattern            = regexp.MustCompile(`^(?:\x1b\[\?997;(1|2)n)+$`)
 	oscHexChannelPattern                = regexp.MustCompile(`(?i)^[0-9a-f]+$`)
+	cssRGBPrefixPattern                 = regexp.MustCompile(`(?i)^rgba?:`)
 )
 
 // IsOsc11BackgroundColorResponse reports whether data is an OSC 11 reply.
@@ -63,7 +64,7 @@ func ParseOsc11BackgroundColor(data string) (RgbColor, bool) {
 		return RgbColor{}, false
 	}
 
-	rgbValue := regexp.MustCompile(`(?i)^rgba?:`).ReplaceAllString(value, "")
+	rgbValue := cssRGBPrefixPattern.ReplaceAllString(value, "")
 	parts := strings.Split(rgbValue, "/")
 	if len(parts) < 3 {
 		return RgbColor{}, false

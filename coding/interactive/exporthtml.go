@@ -237,8 +237,15 @@ func AnsiLinesToHTML(lines []string) string {
 
 // ---- Export color derivation (index.ts) ----
 
+// exportHexColorRegex and exportRGBColorRegex match the CSS colour forms the
+// export stylesheet uses.
+var (
+	exportHexColorRegex = regexp.MustCompile(`^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$`)
+	exportRGBColorRegex = regexp.MustCompile(`^rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$`)
+)
+
 func parseExportColor(color string) (r, g, b int, ok bool) {
-	hex := regexp.MustCompile(`^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$`).FindStringSubmatch(color)
+	hex := exportHexColorRegex.FindStringSubmatch(color)
 	if hex != nil {
 		values := make([]int, 3)
 		for i := 0; i < 3; i++ {
@@ -250,7 +257,7 @@ func parseExportColor(color string) (r, g, b int, ok bool) {
 		}
 		return values[0], values[1], values[2], true
 	}
-	rgb := regexp.MustCompile(`^rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$`).FindStringSubmatch(color)
+	rgb := exportRGBColorRegex.FindStringSubmatch(color)
 	if rgb != nil {
 		values := make([]int, 3)
 		for i := 0; i < 3; i++ {

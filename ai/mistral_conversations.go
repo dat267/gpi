@@ -491,11 +491,14 @@ func remapMistralProperty(record map[string]any, source, target string) {
 	delete(record, source)
 }
 
+// sseLineBreakRegex splits a raw SSE event block into lines.
+var sseLineBreakRegex = regexp.MustCompile(`\r\n|\r|\n`)
+
 // parseMistralEvent decodes one SSE event block: the joined data lines, or
 // done=true for the [DONE] sentinel (upstream parseMistralEvent).
 func parseMistralEvent(raw string) (*mistralCompletionEvent, bool, error) {
 	var dataLines []string
-	for _, line := range regexp.MustCompile(`\r\n|\r|\n`).Split(raw, -1) {
+	for _, line := range sseLineBreakRegex.Split(raw, -1) {
 		if !strings.HasPrefix(line, "data:") {
 			continue
 		}

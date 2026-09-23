@@ -171,8 +171,12 @@ func baseURLIncludesAPIVersion(baseURL string) bool {
 		}
 		return false
 	}
-	return regexp.MustCompile(`(?:^|/)v\d+(?:beta\d*)?(?:/|$)`).MatchString(baseURL)
+	return baseURLAPIVersionPattern.MatchString(baseURL)
 }
+
+// baseURLAPIVersionPattern matches an API version path segment (v1, v1beta1)
+// anywhere in a base URL.
+var baseURLAPIVersionPattern = regexp.MustCompile(`(?:^|/)v\d+(?:beta\d*)?(?:/|$)`)
 
 var apiVersionPattern = regexp.MustCompile(`^v\d+(?:beta\d*)?$`)
 

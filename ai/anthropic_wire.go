@@ -364,11 +364,14 @@ func mustMarshalJSON(v any) json.RawMessage {
 	return enc
 }
 
+// anthropicToolCallIDRegex matches the characters Anthropic rejects in tool
+// call ids.
+var anthropicToolCallIDRegex = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
+
 // NormalizeAnthropicToolCallID normalizes tool call IDs to Anthropic's
 // required pattern and length.
 func NormalizeAnthropicToolCallID(id string) string {
-	re := regexp.MustCompile(`[^a-zA-Z0-9_-]`)
-	normalized := re.ReplaceAllString(id, "_")
+	normalized := anthropicToolCallIDRegex.ReplaceAllString(id, "_")
 	if len(normalized) > 64 {
 		normalized = normalized[:64]
 	}

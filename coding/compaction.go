@@ -1210,15 +1210,19 @@ const (
 
 // fileListBlockRegex matches the exact block shape formatFileOperations emits
 // (RE2: two alternations instead of a backreference).
-var fileListBlockRegex = regexp.MustCompile(`(?s)<read-files>\n.*?\n</read-files>\n?|<modified-files>\n.*?\n</modified-files>\n?`)
+var (
+	fileListBlockRegex  = regexp.MustCompile(`(?s)<read-files>\n.*?\n</read-files>\n?|<modified-files>\n.*?\n</modified-files>\n?`)
+	blankLineRunRegex   = regexp.MustCompile(`\n{3,}`)
+	trailingSpacesRegex = regexp.MustCompile(`[ \t]+\n`)
+)
 
 // StripFileListSections removes the generated read-files / modified-files
 // blocks from a summary (summary.ts stripFileListSections): the lists are
 // re-derived from fileOps every round, so feeding them back only accumulates.
 func StripFileListSections(text string) string {
 	out := fileListBlockRegex.ReplaceAllString(text, "")
-	out = regexp.MustCompile(`\n{3,}`).ReplaceAllString(out, "\n\n")
-	out = regexp.MustCompile(`[ \t]+\n`).ReplaceAllString(out, "\n")
+	out = blankLineRunRegex.ReplaceAllString(out, "\n\n")
+	out = trailingSpacesRegex.ReplaceAllString(out, "\n")
 	return strings.TrimRight(out, " \t\n")
 }
 

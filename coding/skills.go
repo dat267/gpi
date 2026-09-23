@@ -129,12 +129,16 @@ type LoadSkillsResult struct {
 const maxSkillNameLength = 64
 
 // validateSkillName validates per the Agent Skills spec.
+// skillNameRegex matches a valid skill name: lowercase letters, digits and
+// hyphens.
+var skillNameRegex = regexp.MustCompile(`^[a-z0-9-]+$`)
+
 func validateSkillName(name string) []string {
 	var errors []string
 	if len(name) > maxSkillNameLength {
 		errors = append(errors, fmt.Sprintf("name exceeds %d characters (%d)", maxSkillNameLength, len(name)))
 	}
-	if re := regexp.MustCompile(`^[a-z0-9-]+$`); !re.MatchString(name) {
+	if !skillNameRegex.MatchString(name) {
 		errors = append(errors, "name contains invalid characters (must be lowercase a-z, 0-9, hyphens only)")
 	}
 	if strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-") {
