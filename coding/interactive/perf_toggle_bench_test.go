@@ -224,3 +224,27 @@ func BenchmarkToggleThinkingFirstExpand(b *testing.B) {
 		_ = app.Chat.Render(80)
 	}
 }
+
+// BenchmarkToggleThinkingDrain measures the whole sweep converged: the
+// synchronous window plus every deferred chunk. The freeze is the synchronous
+// part (the rest is spread over loop beats, ~8 messages per frame), so this is
+// the total work rather than what any one frame pays.
+func BenchmarkToggleThinkingDrain(b *testing.B) {
+	app, cleanup := newTestAppB(b)
+	defer cleanup()
+	app.Display.HideThinkingBlock = true
+	buildToggleTranscript(b, app)
+	_ = app.Chat.Render(80)
+
+	// Start on the expansion, which is the direction that has to render the
+	// thinking text for the first time.
+	hide := true
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		hide = !hide
+		app.Queue.UpdateThinkingBlockVisibility(hide)
+		for app.Queue.MaterializeThinkingChunk() {
+		}
+		_ = app.Chat.Render(80)
+	}
+}

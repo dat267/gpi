@@ -906,7 +906,10 @@ type StartupDiagnostic struct {
 // newRunWiring assembles the RunWiring (port of the corresponding InteractiveMode wiring).
 func newRunWiring(app *App) *RunWiring {
 	return &RunWiring{
-		OnBeat:          func() { app.Transcript.MaterializeDeferred() },
+		OnBeat: func() {
+			app.Transcript.MaterializeDeferred()
+			app.Queue.MaterializeThinkingChunk()
+		},
 		RawTerminal:     app.rawTerminal,
 		RawInputs:       app.loopRawInputs,
 		Startup:         app.Startup,

@@ -54,6 +54,12 @@ type QueueController struct {
 	// RequestRender requests a render.
 	RequestRender func()
 
+	// deferredThinking holds the messages a visibility sweep has not rebuilt
+	// yet, oldest-first; MaterializeThinkingChunk drains it.
+	deferredThinking []*AssistantMessageComponent
+	// pendingThinkingHide is the visibility those messages are waiting for.
+	pendingThinkingHide bool
+
 	// compactionQueuedMessages are the messages queued during compaction.
 	compactionQueuedMessages []CompactionQueuedMessage
 
@@ -438,17 +444,64 @@ func (c *QueueController) SetToolsExpanded(expanded bool, current *bool, header 
 }
 
 // UpdateThinkingBlockVisibility re-renders the assistant messages.
+//
+// The sweep is the expensive half of ctrl+t: rebuilding a message drops its
+// rendered cache, and the next paint re-renders it, so a transcript-wide sweep
+// costs about half a millisecond per message with thinking in it — a visible
+// freeze on a long session. Only the tail (what is on screen) is rebuilt here;
+// the rest drains through MaterializeThinkingChunk on the loop beat, the same
+// way a large session replay materialises (see TranscriptRenderer).
 func (c *QueueController) UpdateThinkingBlockVisibility(hideThinkingBlock bool) {
 	if c.Chat == nil {
 		return
 	}
-	for _, child := range c.Chat.Children {
-		if assistant, ok := child.(*AssistantMessageComponent); ok {
-			assistant.SetHideThinkingBlock(hideThinkingBlock)
+	c.deferredThinking = c.deferredThinking[:0]
+	c.pendingThinkingHide = hideThinkingBlock
+
+	children := c.Chat.Children
+	remaining := thinkingSweepWindowComponents
+	for index := len(children) - 1; index >= 0; index-- {
+		assistant, ok := children[index].(*AssistantMessageComponent)
+		if !ok {
+			continue
 		}
+		if remaining > 0 {
+			remaining--
+			assistant.SetHideThinkingBlock(hideThinkingBlock)
+			continue
+		}
+		c.deferredThinking = append(c.deferredThinking, assistant)
 	}
 	c.requestRender()
 }
+
+// MaterializeThinkingChunk applies the pending visibility to one small chunk of
+// deferred messages and reports whether more remains. The chunk is small because
+// the next paint renders every message it touches: a large chunk would only move
+// the freeze into that frame.
+func (c *QueueController) MaterializeThinkingChunk() bool {
+	if len(c.deferredThinking) == 0 {
+		return false
+	}
+	for n := 0; n < thinkingSweepChunkComponents && len(c.deferredThinking) > 0; n++ {
+		last := len(c.deferredThinking) - 1
+		assistant := c.deferredThinking[last]
+		c.deferredThinking[last] = nil
+		c.deferredThinking = c.deferredThinking[:last]
+		assistant.SetHideThinkingBlock(c.pendingThinkingHide)
+	}
+	c.requestRender()
+	return len(c.deferredThinking) > 0
+}
+
+const (
+	// thinkingSweepWindowComponents is how many trailing messages a visibility
+	// sweep rebuilds synchronously: enough to cover the screen.
+	thinkingSweepWindowComponents = 8
+	// thinkingSweepChunkComponents is how many deferred messages are rebuilt per
+	// loop beat.
+	thinkingSweepChunkComponents = 8
+)
 
 // ToggleThinkingBlockVisibility flips the thinking-block visibility.
 func (c *QueueController) ToggleThinkingBlockVisibility(hideThinkingBlock *bool) {
