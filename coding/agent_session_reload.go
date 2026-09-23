@@ -37,15 +37,12 @@ func (s *AgentSession) Reload() {
 // ResourceLoader.reload's non-extension half).
 func (s *AgentSession) reloadResources() {
 	trusted := false
-	skillPaths := []string(nil)
 	if s.control.Settings != nil {
 		trusted = s.control.Settings.IsProjectTrusted()
-		skillPaths = s.control.Settings.GetSkillPaths()
 	}
-	contextFiles := LoadProjectContextFiles(s.Cwd, s.agentDir)
-	skills := LoadSkills(LoadSkillsOptions{
-		Cwd: s.Cwd, AgentDir: s.agentDir, SkillPaths: skillPaths, IncludeDefaults: true,
-	}, trusted)
+	contextFiles := s.resources.contextFiles(s.Cwd, s.agentDir)
+	skills := s.resources.skills(s.Cwd, s.agentDir, s.control.Settings, trusted)
+	promptTemplates := s.resources.promptTemplates(s.Cwd, s.agentDir, s.control.Settings)
 	overrides := LoadPromptOverrides(PromptFileSources{
 		Cwd: s.Cwd, AgentDir: s.agentDir, ProjectTrusted: trusted,
 		SystemPrompt: s.promptSources.SystemPrompt, AppendSystemPrompt: s.promptSources.AppendSystemPrompt,
@@ -61,6 +58,7 @@ func (s *AgentSession) reloadResources() {
 		s.SystemPromptOptions = &options
 	}
 	s.skillDiagnostics = skills.Diagnostics
+	s.control.PromptTemplates = promptTemplates
 }
 
 // ActiveToolNames returns the active tools' names in order (upstream

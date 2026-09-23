@@ -75,6 +75,13 @@ type CreateAgentSessionOptions struct {
 	NoSkills bool
 	// NoContextFiles suppresses AGENTS.md/CLAUDE.md discovery.
 	NoContextFiles bool
+	// PromptTemplatePaths are extra prompt-template files or directories from
+	// the CLI (--prompt-template), resolved by the caller. They load even under
+	// NoPromptTemplates, like skills.
+	PromptTemplatePaths []string
+	// NoPromptTemplates suppresses prompt-template discovery and the settings'
+	// prompt-template paths.
+	NoPromptTemplates bool
 }
 
 // CreateAgentSessionResult is the assembled session.
@@ -362,22 +369,19 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 	// agent-session._buildRuntime reads them from the resource loader):
 	// the global agent-dir context file plus every workspace ancestor's,
 	// and skills from the settings paths plus a trusted project's
-	// .pi/skills.
-	contextFiles := LoadProjectContextFiles(cwd, agentDir)
-	if options.NoContextFiles {
-		contextFiles = nil
-	}
+	// .pi/skills. The switches behind them are kept on the session because
+	// /reload re-reads with the same options.
 	projectTrusted := settingsManager.IsProjectTrusted()
-	// Explicit --skill paths survive --no-skills, so they are collected before
-	// the discovery switch is consulted.
-	skillPaths := append([]string{}, options.SkillPaths...)
-	if !options.NoSkills {
-		skillPaths = append(settingsManager.GetSkillPaths(), skillPaths...)
+	resources := resourceOptions{
+		SkillPaths:          options.SkillPaths,
+		NoSkills:            options.NoSkills,
+		NoContextFiles:      options.NoContextFiles,
+		PromptTemplatePaths: options.PromptTemplatePaths,
+		NoPromptTemplates:   options.NoPromptTemplates,
 	}
-	skillsResult := LoadSkills(LoadSkillsOptions{
-		Cwd: cwd, AgentDir: agentDir, SkillPaths: skillPaths,
-		IncludeDefaults: !options.NoSkills,
-	}, projectTrusted)
+	contextFiles := resources.contextFiles(cwd, agentDir)
+	skillsResult := resources.skills(cwd, agentDir, settingsManager, projectTrusted)
+	promptTemplates := resources.promptTemplates(cwd, agentDir, settingsManager)
 	// The base/append system prompt follows the same rule as upstream's
 	// resource loader: an explicit --system-prompt / --append-system-prompt
 	// source wins, otherwise the project's (trusted) or agent-dir file.
@@ -406,6 +410,7 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 		Control: &AgentSessionControl{
 			ModelRuntime: modelRuntime, Settings: settingsManager,
 			Tools: map[string]AgentToolDefinition{}, autoCompaction: true, autoRetry: true,
+			PromptTemplates: promptTemplates,
 		},
 		ConvertToLlm:    convertToLlmWithBlockImages,
 		SessionID:       sessionID,
@@ -434,6 +439,7 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 	}
 
 	session.streamFn = streamFn
+	session.resources = resources
 	for name, tool := range toolByName {
 		session.control.Tools[name] = AgentToolDefinition{Tool: tool}
 	}

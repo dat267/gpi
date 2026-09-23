@@ -190,6 +190,10 @@ type AgentSession struct {
 	// skillDiagnostics are the skill loader's warnings/collisions.
 	skillDiagnostics []ResourceDiagnostic
 
+	// resources are the CLI-derived resource switches (--skill and friends),
+	// kept so a reload re-reads with the same options instead of resetting them.
+	resources resourceOptions
+
 	// agentDir and promptSources are the inputs Reload re-reads the resource
 	// files from (upstream ResourceLoader's config; its extension side is out
 	// of scope, D41/D140).

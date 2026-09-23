@@ -295,6 +295,9 @@ func run(appName string, args *coding.Args) error {
 		SkillPaths:     coding.ResolveCLIPaths(cwd, args.Skills),
 		NoSkills:       args.NoSkills,
 		NoContextFiles: args.NoContextFiles,
+		// Prompt templates: explicit paths load even when discovery is off.
+		PromptTemplatePaths: coding.ResolveCLIPaths(cwd, args.PromptTemplates),
+		NoPromptTemplates:   args.NoPromptTemplates,
 	})
 	if err != nil {
 		return err

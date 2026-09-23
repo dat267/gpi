@@ -481,41 +481,52 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   theme that has no file on disk can still be exported to HTML. The install must
   follow the truecolor/style capability switch, since a theme bakes its 256-colour
   or truecolor escapes at creation time.
-- D153 — **`--use-theme`, `--name`, `--approve`/`--no-approve`, `--models`,
-  `--api-key`, `--skill`, `--no-skills`, `--no-context-files`, `@file`
-  arguments and the CLI's parse diagnostics are wired**
+- D153 — **the CLI's startup flags are wired** rather than merely parsed
   (`cmd/pier/main.go`, with the pure parts in `coding/clidiagnostics.go`,
-  `coding/cliinitial.go` and `coding/paths.go`). All ten were parsed,
-  documented in `--help`, and read by nothing: an unknown single-dash option, a bad `--thinking` value or a
-  blank `--name` was accepted silently, `pier @notes.txt "explain"` sent no
-  file at all, and `--use-theme` left the configured theme in place. Diagnostics
-  are now reported right after parsing — before `--version`, as upstream does —
-  and an error among them exits 1. `@file` text is folded into the session's
-  first message ahead of the first positional message, and the remaining
-  messages stay queued, matching upstream `buildInitialMessage`. **One
-  deliberate gap**: upstream attaches `@file` **images** to that first message;
-  this build's interactive mode has no image-input path at all, so the images
-  are dropped and a warning is printed rather than letting the model be asked
-  about an image it never received. `--skill` paths are resolved against the
-  working directory (`ResolveCLIPaths`/`IsLocalPath`, a port of upstream
-  `resolveCliPaths`) and **survive `--no-skills`**, which suppresses discovery
-  and the settings' skill paths but not what was asked for explicitly — that
-  asymmetry is upstream's `noSkills` handling in its resource loader.
-  `--no-context-files` suppresses AGENTS.md/CLAUDE.md discovery. **`--theme` and
-  `--no-themes` are wired** through `CustomThemeSources`: the agent's `themes/`
-  directory plus the settings' theme paths and any `--theme` file or directory,
-  with `--no-themes` dropping the discovered set while keeping the named one (the
-  same asymmetry as skills). Discovery is now the only lookup path — a theme
-  resolves by its **declared** name, as upstream's loader does, rather than by
-  its file name — which is what makes `--no-themes` airtight. `--extensions`/
-  `--no-extensions` remain out of scope (extension mechanics, D41); note that an
-  unknown `--flag` is still swallowed into `UnknownFlags` for extensions rather
-  than reported. **Still unwired**: `--prompt-template` and
-  `--no-prompt-templates` — prompt templates are never loaded into the session
-  at all (the loader exists, nothing calls it), so this is a feature to build
-  rather than a flag to connect. (An earlier note here claimed theme paths were a
-  missing subsystem; that was wrong — the loader, validator, watcher and settings
-  accessors all existed, and only the discovery sources were never installed.)
+  `coding/cliinitial.go`, `coding/listmodels.go`, `coding/paths.go` and
+  `coding/sessionresourceload.go`). Fifteen documented flags plus two
+  non-flag inputs were read by nothing: an unknown single-dash option, a bad
+  `--thinking` value or a blank `--name` was accepted silently,
+  `pier @notes.txt "explain"` sent no file at all, and `--use-theme` left the
+  configured theme in place.
+  - **Diagnostics** are reported right after parsing — before `--version`, as
+    upstream does — and an error among them exits 1.
+  - **`@file`** text is folded into the session's first message ahead of the
+    first positional message, with the rest queued behind it, matching upstream
+    `buildInitialMessage`. *One deliberate gap*: upstream attaches `@file`
+    **images** to that message, but this build's interactive mode has no
+    image-input path at all, so the images are dropped with a warning rather than
+    letting the model be asked about an image it never received.
+  - **`--skill`, `--prompt-template`, `--theme`** paths are resolved against the
+    working directory (`ResolveCLIPaths`/`IsLocalPath`, a port of upstream
+    `resolveCliPaths`), and each **survives its own `--no-*`**: refusing
+    discovery is not refusing what was named, which is upstream's asymmetry in
+    its resource loader. `--no-skills`, `--no-prompt-templates` and
+    `--no-context-files` suppress the settings' paths and discovery;
+    `--no-themes` drops the discovered set (the agent's `themes/` directory and
+    the settings' theme paths) likewise. Prompt templates now reach the session
+    for the first time — `LoadPromptTemplates` existed with **no caller**, so
+    `/template` expansion, the prompt commands and the `[Prompts]` startup
+    section were all inert.
+  - **All of those switches survive `/reload`**: they are kept on the session and
+    re-applied by `reloadResources`, which previously rebuilt the resource set
+    from the settings alone — so a reload used to undo `--no-skills`, resurrect
+    the settings' skill paths and drop an explicit `--skill`.
+  - **Theme discovery is now the only lookup path**: a theme resolves by its
+    *declared* name across the sources, as upstream's loader does, rather than by
+    its file name under one directory. The old `<dir>/<name>.json` fallback is
+    gone because it ignored the discovery switch, which made `--no-themes` leak —
+    the theme vanished from the list but still loaded by name.
+  - **`--models`** sets the model cycle scope, overriding the settings' enabled
+    models, and reports a pattern that matched nothing at startup rather than
+    silently scoping nothing. **`--api-key`** pins the credential on the provider
+    of the model the session resolved. **`--name`** records a `session_info`
+    entry (blank is an error). **`--approve`/`--no-approve`** settle project trust
+    for the run. **`--export`** and **`--list-models`** are implemented and exit
+    before the TUI.
+  `--extensions`/`--no-extensions` remain out of scope (extension mechanics,
+  D41); an unknown `--flag` is still swallowed into `UnknownFlags` for
+  extensions rather than reported.
 - D152 — the Unix socket **publish is portable** (`server/unix.go`,
   `server/publish_linux.go`, `server/publish_other.go`). Upstream publishes a
   bound socket with a hard link, which is atomic and refuses to overwrite — so a
