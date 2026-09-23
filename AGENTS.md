@@ -465,16 +465,26 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   `HandleCloneCommand` + the selector's `RuntimeFork` (one runtime fork,
   `coding.ForkSessionAtEntry` + `App.forkAtEntry`), `/import`
   (`ImportFromJSONL`), `OnExternalEditor`, the auth `ScheduleTimer`,
-  `OnLabelChange` and `ApplyFullscreenScrollbarSetting`. **Still off**:
-  `ShowAuthSelect`/`OnPromptShown` (the login dialog's select and prompt steps),
-  `PromptForMissingCwd` (reachable from `/import` and `/switch`, but it needs a
-  confirm dialog the port has not built — the extension-UI seam it would use is
-  unassigned), `ClearStatusContainerIfIdle`, `RebindSession` and
-  `OnPartialEventApplied`. **Deliberately off** (out of scope): the HTTP
-  dispatcher, the package manager, highlight languages (D74, and the user chose
-  to keep the flat fallback), tmux, the process-level seams, extension mechanics
-  (D41) and, with them, `ShowExtensionConfirm`/`ShowExtensionSelector` — which is
-  why `/import` imports without upstream's "Replace current session?" prompt.
+  `OnLabelChange` and `ApplyFullscreenScrollbarSetting`. **The dialog seams are
+  now wired too**: `ShowExtensionConfirm` and `PromptForMissingCwd` are
+  **callback-based** (`onAnswer`/`onCwd`) rather than value-returning, because
+  the selector slot's `Show` mounts a component and returns immediately while the
+  seams returned the answer — upstream's equivalents are awaits, so the
+  synchronous shape was a mis-port. That is what had left `/import`'s
+  "Replace current session?" prompt and the missing-cwd prompt of `/import` and
+  the resume flow unreachable; both flows are now callback chains matching
+  upstream's sequential awaits, and the dialogs themselves are app-level helpers
+  over the selector slot, built on the extension selector component that already
+  existed (title, description, options, timeout). The retry also had to key on
+  the typed `coding.MissingSessionCwdError`: the text check it used before
+  (`strings.Contains(err, "cwd")`) could never match upstream's wording, which
+  says "working directory". **Still off**: `ShowAuthSelect`/`OnPromptShown` (the
+  login dialog's select and prompt steps), `ClearStatusContainerIfIdle`,
+  `RebindSession` and `OnPartialEventApplied`. **Deliberately off** (out of
+  scope): the HTTP dispatcher, the package manager, highlight languages (D74, and
+  the user chose to keep the flat fallback), tmux, the process-level seams and
+  extension mechanics (D41) — with them `ShowExtensionSelector`, the extension
+  resource selector, which has no port counterpart.
   **Not dead, despite looking like the rest** — check whether the nil branch
   skips the work or falls back before treating an unassigned seam as a bug:
   `SessionSelectorOptions.DeleteSession` and `CopyActiveSelection` are overrides
