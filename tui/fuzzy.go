@@ -65,7 +65,7 @@ func MatchFuzzy(query string, text string) FuzzyMatch {
 			}
 
 			// Slight penalty for later matches.
-			score += float64(i) * 0.1
+			score += unfusedProduct(float64(i), 0.1)
 
 			lastMatchIndex = i
 			queryIndex++
@@ -96,6 +96,18 @@ func MatchFuzzy(query string, text string) FuzzyMatch {
 	}
 	return FuzzyMatch{Matches: true, Score: swappedMatch.Score + 5}
 }
+
+// unfusedProduct returns a*b with the multiplication rounded before it is
+// accumulated.
+//
+// Go's arm64 and ppc64 backends contract `acc += a*b` into a fused
+// multiply-add, which rounds once, where V8 rounds the product and the sum
+// separately. The ULP that fusion saves is enough to drift from upstream's
+// golden scores, so the product is forced through a call boundary — //go:noinline
+// keeps the intermediate rounding and the port bit-identical to V8.
+//
+//go:noinline
+func unfusedProduct(a, b float64) float64 { return a * b }
 
 var (
 	alphaNumericQueryRegex = regexp.MustCompile(`^([a-z]+)([0-9]+)$`)
