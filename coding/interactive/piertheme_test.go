@@ -178,3 +178,67 @@ func TestPierThemeExportColorsResolve(t *testing.T) {
 		t.Errorf("theme vars missing the accent:\n%s", vars)
 	}
 }
+
+// --theme paths and the settings' theme paths are discovery sources, and
+// --no-themes drops the discovered set while keeping the named ones.
+func TestCustomThemeSources(t *testing.T) {
+	dir := t.TempDir()
+	explicitDir := t.TempDir()
+	writeThemeFile(t, dir, "discovered.json", "discovered", "#123456")
+	writeThemeFile(t, explicitDir, "named.json", "named", "#654321")
+
+	// Discovery on: both are available and loadable by their declared name.
+	SetCustomThemeSources(CustomThemeSources{Dir: dir, Paths: []string{explicitDir}})
+	for _, name := range []string{"discovered", "named"} {
+		if !containsString(AvailableThemes(), name) {
+			t.Errorf("%s missing from %v", name, AvailableThemes())
+		}
+		if theme, err := loadTheme(name, ColorModeTruecolor); err != nil || theme.Name != name {
+			t.Errorf("load %s = %+v, %v", name, theme, err)
+		}
+	}
+
+	// The dir alone (what a library consumer installs) still discovers.
+	SetCustomThemesDir(dir)
+	if !containsString(AvailableThemes(), "discovered") {
+		t.Errorf("dir discovery broke: %v", AvailableThemes())
+	}
+	if containsString(AvailableThemes(), "named") {
+		t.Errorf("the explicit path should not survive a plain dir install: %v", AvailableThemes())
+	}
+
+	// --no-themes: discovery is off, the explicitly named theme still loads.
+	SetCustomThemeSources(CustomThemeSources{Dir: dir, Paths: []string{explicitDir}, NoDiscovery: true})
+	if containsString(AvailableThemes(), "discovered") {
+		t.Errorf("--no-themes should drop discovered themes: %v", AvailableThemes())
+	}
+	if !containsString(AvailableThemes(), "named") {
+		t.Errorf("--no-themes should keep named themes: %v", AvailableThemes())
+	}
+	if _, err := loadTheme("named", ColorModeTruecolor); err != nil {
+		t.Errorf("named theme should load under --no-themes: %v", err)
+	}
+	if _, err := loadTheme("discovered", ColorModeTruecolor); err == nil {
+		t.Error("a discovered theme should not resolve under --no-themes")
+	}
+	// The built-ins are never part of discovery, so they survive.
+	if _, err := loadTheme("dark", ColorModeTruecolor); err != nil {
+		t.Errorf("the built-in dark theme should still load: %v", err)
+	}
+}
+
+// A theme file whose declared name differs from its file name resolves by the
+// declared name, which is what a setting references.
+func TestCustomThemeResolvesByDeclaredName(t *testing.T) {
+	dir := t.TempDir()
+	writeThemeFile(t, dir, "file-name.json", "declared-name", "#abcdef")
+	SetCustomThemesDir(dir)
+
+	theme, err := loadTheme("declared-name", ColorModeTruecolor)
+	if err != nil {
+		t.Fatalf("load by declared name: %v", err)
+	}
+	if theme.Name != "declared-name" {
+		t.Errorf("name = %q", theme.Name)
+	}
+}

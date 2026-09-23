@@ -501,14 +501,21 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   `resolveCliPaths`) and **survive `--no-skills`**, which suppresses discovery
   and the settings' skill paths but not what was asked for explicitly — that
   asymmetry is upstream's `noSkills` handling in its resource loader.
-  `--no-context-files` suppresses AGENTS.md/CLAUDE.md discovery.
-  `--extensions`/`--no-extensions` remain out of scope (extension mechanics,
-  D41); note that an unknown `--flag` is still swallowed into `UnknownFlags`
-  for extensions rather than reported. **Still unwired**: `--prompt-template`,
-  `--no-prompt-templates`, `--theme` and `--no-themes` — these are not missing
-  wiring but missing *subsystems*: the port never loads prompt templates into
-  the session (the loader exists, nothing calls it) and never discovers themes
-  from paths (only the built-in set is known).
+  `--no-context-files` suppresses AGENTS.md/CLAUDE.md discovery. **`--theme` and
+  `--no-themes` are wired** through `CustomThemeSources`: the agent's `themes/`
+  directory plus the settings' theme paths and any `--theme` file or directory,
+  with `--no-themes` dropping the discovered set while keeping the named one (the
+  same asymmetry as skills). Discovery is now the only lookup path — a theme
+  resolves by its **declared** name, as upstream's loader does, rather than by
+  its file name — which is what makes `--no-themes` airtight. `--extensions`/
+  `--no-extensions` remain out of scope (extension mechanics, D41); note that an
+  unknown `--flag` is still swallowed into `UnknownFlags` for extensions rather
+  than reported. **Still unwired**: `--prompt-template` and
+  `--no-prompt-templates` — prompt templates are never loaded into the session
+  at all (the loader exists, nothing calls it), so this is a feature to build
+  rather than a flag to connect. (An earlier note here claimed theme paths were a
+  missing subsystem; that was wrong — the loader, validator, watcher and settings
+  accessors all existed, and only the discovery sources were never installed.)
 - D152 — the Unix socket **publish is portable** (`server/unix.go`,
   `server/publish_linux.go`, `server/publish_other.go`). Upstream publishes a
   bound socket with a hard link, which is atomic and refuses to overwrite — so a

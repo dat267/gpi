@@ -130,6 +130,14 @@ func run(appName string, args *coding.Args) error {
 	// fallback for library consumers and as what the upstream-parity test corpus
 	// renders with.
 	installThemeCapabilities()
+	// Custom themes come from the agent's themes directory plus any theme paths
+	// the settings or --theme name. --no-themes drops the discovered set and
+	// keeps the named ones (upstream's noThemes).
+	interactive.SetCustomThemeSources(interactive.CustomThemeSources{
+		Dir:         filepath.Join(agentDir, "themes"),
+		Paths:       themePathsFor(args, settings, cwd),
+		NoDiscovery: args.NoThemes,
+	})
 	themeName := "dark"
 	if setting := settings.GetTheme(); setting != nil && *setting != "" {
 		themeName = *setting
@@ -362,6 +370,14 @@ func run(appName string, args *coding.Args) error {
 	})
 	app.Run(ctx)
 	return nil
+}
+
+// themePathsFor resolves the theme files and directories named by the settings
+// and by --theme against the working directory.
+func themePathsFor(args *coding.Args, settings *coding.SettingsManager, cwd string) []string {
+	paths := append([]string{}, settings.GetThemePaths()...)
+	paths = append(paths, args.Themes...)
+	return coding.ResolveCLIPaths(cwd, paths)
 }
 
 // listModels prints the available-model table (upstream main.ts's --list-models
