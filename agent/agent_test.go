@@ -379,3 +379,57 @@ func TestAgentForwardsSessionID(t *testing.T) {
 }
 
 var _ = fmt.Sprintf
+
+// The Agent stores the tool-call hooks in its options; they must reach the loop
+// config, or every call is silently ungated (regression: they were dropped,
+// which left BeforeToolCall inert on Agent).
+func TestAgentBeforeToolCallReachesTheLoop(t *testing.T) {
+	ran := 0
+	tool := makeTool("echo")
+	original := tool.Execute
+	tool.Execute = func(id string, params json.RawMessage, ctx context.Context, onUpdate func(AgentToolResult)) (AgentToolResult, error) {
+		ran++
+		return original(id, params, ctx, onUpdate)
+	}
+
+	assistant := createAssistantMessage(ai.ContentList{
+		ai.ToolCall{ID: "tc1", Name: "echo", Arguments: json.RawMessage(`{"text":"hi"}`)},
+	}, ai.StopToolUse)
+	streamFn, _ := mockStreamFn(assistant)
+
+	a, err := NewAgent(&AgentOptions{
+		InitialState: &AgentInitialState{SystemPrompt: "sys", Tools: []AgentTool{tool}, Model: createModel()},
+		StreamFn:     streamFn,
+		BeforeToolCall: func(call *BeforeToolCallContext, ctx context.Context) (*BeforeToolCallResult, error) {
+			if call.ToolCall.Name == "echo" {
+				return &BeforeToolCallResult{Block: true, Reason: "denied by the test"}, nil
+			}
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.PromptText(context.Background(), "go"); err != nil {
+		t.Fatal(err)
+	}
+	if ran != 0 {
+		t.Fatalf("the tool ran %d times, want the hook to block it", ran)
+	}
+
+	var blocked *ai.ToolResultMessage
+	for _, message := range a.State().Messages {
+		if result, ok := message.(*ai.ToolResultMessage); ok {
+			blocked = result
+		}
+	}
+	if blocked == nil {
+		t.Fatal("no tool result recorded for the blocked call")
+	}
+	if !blocked.IsError {
+		t.Error("a blocked call should record an error result")
+	}
+	if !strings.Contains(blocked.Content[0].(ai.TextContent).Text, "denied by the test") {
+		t.Errorf("result = %+v, want the hook's reason", blocked.Content)
+	}
+}

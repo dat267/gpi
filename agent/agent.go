@@ -557,6 +557,11 @@ func (a *Agent) createLoopConfig(skipInitialSteeringPoll bool) *AgentLoopConfig 
 			return a.PrepareNextTurn(a.runContext())
 		}
 	}
+	// The tool-call hooks take the loop's own context, so they are forwarded
+	// as they are. Without this they are stored on the Agent and silently
+	// dropped, leaving every call ungated.
+	config.BeforeToolCall = a.BeforeToolCall
+	config.AfterToolCall = a.AfterToolCall
 	skipPoll := skipInitialSteeringPoll
 	config.GetSteeringMessages = func(ctx context.Context) ([]ai.Message, error) {
 		// The first poll after a queued-steering continuation is suppressed
