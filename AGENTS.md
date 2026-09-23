@@ -214,6 +214,24 @@ resolution is compared against them by `TestProjectionCacheMatchesTheReference`)
 and `applyCompactionWindow` became a wrapper over `walkCompactionWindow`, which
 lets `ContextSignature` count the window without materializing it.
 
+**Cache-miss notices are O(1).** `SessionManager.CacheMissFor` answers the
+notice for an assistant message from `cacheScanState`, which advances as entries
+append (`appendEntry` consumes) and is seeded over the loaded entries in
+`buildIndex`. Upstream rescans parsed entries per assistant message
+(`detectCacheMiss(getEntries(), …)`); the port stores raw JSON, so the same call
+re-decoded every message entry: **713 ms** on the 45 MB session, on the UI loop,
+on every assistant message end, for anyone with `showCacheMissNotices: true`
+(which the reporting user had). The running state is 52 ns per notice and adds
+167 ms to loading that session, where a full scan of the seeded entries is
+504 ms. `CollectCacheMisses` keeps the full scan for transcript rebuilds (resume,
+compaction, reload), which still costs ~500 ms on that session.
+`TestCacheMissForMatchesTheFullScan` is the differential guard: the incremental
+notice must equal `DetectCacheMiss` on the session's entries for every assistant
+message, including after a compaction and a branch summary (which reset the
+scan). `scanAssistantRequest` reads only the role, usage, model and timestamp
+for the state; decoding the whole message (thinking, tool arguments) was what
+made seeding cost 500 ms.
+
 **Large-session rendering.** `RenderSessionItems` (`transcript.go`) renders a
 session eagerly below 400 items; above the threshold it collects the items into
 a collector container and attaches only the trailing window (120 components),

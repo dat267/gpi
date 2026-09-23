@@ -48,6 +48,9 @@ type SessionManager struct {
 	// after an append only decodes the appended entries; see
 	// session_messagecache.go.
 	messages messageCache
+	// cacheScan is the running cache-miss scan state, so the cache-miss notice
+	// for an assistant message does not rescan the session; see cachestats.go.
+	cacheScan cacheScanState
 
 	// branchCache holds the current leaf's path twice: pointers for the
 	// internal readers (Projection, ContextSignature), which never copy the
@@ -138,6 +141,7 @@ func (m *SessionManager) NewSession(options *NewSessionOptions) string {
 	m.labelTimestamps = map[string]string{}
 	m.leafID = nil
 	m.messages.reset()
+	m.cacheScan.reset()
 	m.flushed = false
 
 	if m.persist {
@@ -259,11 +263,14 @@ func (m *SessionManager) buildIndex() {
 	m.labelTimestamps = map[string]string{}
 	m.leafID = nil
 	m.branchCacheValid = false
+	// Re-seed the cache-miss scan state over the loaded entries, in file order.
+	m.cacheScan.reset()
 	for i := range m.fileEntries {
 		entry := m.fileEntries[i].Entry
 		if entry == nil {
 			continue
 		}
+		m.cacheScan.consume(entry)
 		m.byID[entry.ID] = entry
 		leafID := entry.ID
 		m.leafID = &leafID
@@ -365,6 +372,7 @@ func (m *SessionManager) appendEntry(entry *SessionEntry) string {
 	m.byID[entry.ID] = entry
 	leafID := entry.ID
 	m.leafID = &leafID
+	m.cacheScan.consume(entry)
 	m.persistEntry(entry)
 	return entry.ID
 }

@@ -645,7 +645,7 @@ func (r *TranscriptRenderer) MaybeShowCacheMissNotice(message *ai.AssistantMessa
 	if r.Settings == nil || !r.Settings.GetShowCacheMissNotices() || r.SessionInfo == nil || r.Session == nil {
 		return
 	}
-	miss, ok := coding.DetectCacheMiss(r.SessionInfo.GetEntries(), message, r.Session.GetModelPriceSource())
+	miss, ok := r.SessionInfo.CacheMissFor(message, r.Session.GetModelPriceSource())
 	if ok {
 		r.AddCacheMissNotice(miss)
 	}
