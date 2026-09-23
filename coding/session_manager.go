@@ -402,11 +402,15 @@ func (m *SessionManager) AppendModelChange(provider, modelID string) string {
 // AppendCompaction appends a compaction summary with the prompt/tool state
 // captured at the boundary.
 func (m *SessionManager) AppendCompaction(summary string, firstKeptEntryID string, tokensBefore int64, details json.RawMessage, fromHook bool, usage *ai.Usage) string {
+	// Resolve the carried system message from a projection taken outside the
+	// lock: projecting a large session costs hundreds of milliseconds, and
+	// holding m.mu across it parks every other reader (the footer's per-frame
+	// session reads) for that long. Upstream is single-threaded and pays the
+	// same projection, which its parsed-object entries make cheap.
+	systemMessage := ai.GetCurrentSystemMessage(m.BuildSessionContext().Messages)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
-	context := m.buildSessionContextLocked()
-	systemMessage := ai.GetCurrentSystemMessage(context.Messages)
 	entry := m.nextEntry("compaction")
 	entry.Timestamp = timestamp
 	entry.Summary = summary

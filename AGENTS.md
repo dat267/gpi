@@ -208,7 +208,17 @@ frame after a rebuild stacked that into a 100+ ms frame (caught by a SIGQUIT
 dump inside `bashPreviewComponent.Render` → `visualLineCount`). Plain ASCII
 lines now count in one allocation-free pass (`plainWrappedLineCount`), pinned to
 the generic wrapper by `TestPlainWrappedLineCountMatchesTheGenericWrapper` and
-capped by `TestBashPreviewCountIsAllocationFree`.
+capped by `TestBashPreviewCountIsAllocationFree`. `AppendCompaction` had the
+same shape: its entry records the projected system message, and the port
+resolved that from `buildSessionContextLocked` **while holding the session
+mutex** — 247 ms on a 45 MB session, so every UI read waited. It now projects
+before taking the lock (upstream is single-threaded and its parsed-object
+entries make the same projection cheap), and `getSessionContextSettings`
+resolves the model/thinking level by scanning the path backwards instead of
+decoding every message entry to find the last assistant, which cut a
+post-compaction projection from 210 ms to 56 ms. Pinned by
+`TestAppendCompactionDoesNotHoldTheSessionLock` and
+`TestProjectedSettingsResolveLastWriteWins`.
 
 ## Conventions and gotchas
 

@@ -330,23 +330,36 @@ func buildSessionPath(entries []SessionEntry, leafID *string, byID map[string]*S
 
 // getSessionContextSettings resolves thinking level and model from the path.
 func getSessionContextSettings(path []SessionEntry) (thinkingLevel string, model *SessionModelRef) {
+	// Later entries win, so resolve both by scanning from the end and stopping
+	// at the first hit for each. Decoding every message entry to look for the
+	// last assistant (as the forward scan did) made a projection of a large
+	// session O(messages) in JSON parsing for settings alone — it is what
+	// AppendCompaction paid under the session lock.
 	thinkingLevel = "off"
-	for i := range path {
+	foundThinking := false
+	for i := len(path) - 1; i >= 0; i-- {
 		entry := &path[i]
-		switch entry.Type {
-		case "thinking_level_change":
+		if !foundThinking && entry.Type == "thinking_level_change" {
 			thinkingLevel = entry.ThinkingLevel
-		case "model_change":
-			model = &SessionModelRef{Provider: entry.Provider, ModelID: entry.ModelID}
-		case "message":
-			var msg struct {
-				Role     string `json:"role"`
-				Provider string `json:"provider"`
-				Model    string `json:"model"`
+			foundThinking = true
+		}
+		if model == nil {
+			switch entry.Type {
+			case "model_change":
+				model = &SessionModelRef{Provider: entry.Provider, ModelID: entry.ModelID}
+			case "message":
+				var msg struct {
+					Role     string `json:"role"`
+					Provider string `json:"provider"`
+					Model    string `json:"model"`
+				}
+				if json.Unmarshal(entry.Message, &msg) == nil && msg.Role == "assistant" {
+					model = &SessionModelRef{Provider: msg.Provider, ModelID: msg.Model}
+				}
 			}
-			if json.Unmarshal(entry.Message, &msg) == nil && msg.Role == "assistant" {
-				model = &SessionModelRef{Provider: msg.Provider, ModelID: msg.Model}
-			}
+		}
+		if foundThinking && model != nil {
+			break
 		}
 	}
 	return thinkingLevel, model
