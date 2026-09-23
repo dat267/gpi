@@ -152,6 +152,7 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 
 	model := options.Model
 	var modelFallbackMessage string
+	var scopedThinkingLevel ai.ThinkingLevel
 	if model == nil && hasExistingSession && existingSession.Model != nil {
 		ref := existingSession.Model
 		restored := modelRuntime.GetModel(ref.Provider, ref.ModelID)
@@ -160,6 +161,30 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 		}
 		if model == nil {
 			modelFallbackMessage = fmt.Sprintf("Could not restore model %s/%s", ref.Provider, ref.ModelID)
+		}
+	}
+
+	// A model cycle scope also seeds the model: with nothing named and a new
+	// session, the settings' default model is used when it is inside the scope and
+	// the first scoped model otherwise (upstream buildSessionOptions). This runs
+	// before the settings-default resolution because a scope is the more specific
+	// choice — with no scope at all, nothing here applies and the default wins as
+	// it always did.
+	if model == nil && len(options.ScopedModels) > 0 && !hasExistingSession {
+		chosen := options.ScopedModels[0]
+		if savedProvider, savedModel := settingsManager.GetDefaultProvider(), settingsManager.GetDefaultModel(); savedProvider != nil && savedModel != nil {
+			if saved := modelRuntime.GetModel(*savedProvider, *savedModel); saved != nil {
+				for _, scoped := range options.ScopedModels {
+					if scoped.Model.Provider == saved.Provider && scoped.Model.ID == saved.ID {
+						chosen = scoped
+						break
+					}
+				}
+			}
+		}
+		model = chosen.Model
+		if chosen.HasThinking {
+			scopedThinkingLevel = chosen.ThinkingLevel
 		}
 	}
 
@@ -183,9 +208,12 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 		}
 	}
 
-	// Thinking level: the pinned level, then the session entry, then per-model,
-	// then the global default.
+	// Thinking level: the pinned level, then a level carried by the model scope,
+	// then the session entry, then per-model, then the global default.
 	thinkingLevel := options.ThinkingLevel
+	if thinkingLevel == "" {
+		thinkingLevel = scopedThinkingLevel
+	}
 	if thinkingLevel == "" && hasExistingSession {
 		if hasThinkingEntry && existingSession.ThinkingLevel != "" {
 			thinkingLevel = existingSession.ThinkingLevel

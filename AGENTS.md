@@ -519,7 +519,11 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
     the theme vanished from the list but still loaded by name.
   - **`--models`** sets the model cycle scope, overriding the settings' enabled
     models, and reports a pattern that matched nothing at startup rather than
-    silently scoping nothing. **`--api-key`** pins the credential on the provider
+    silently scoping nothing. A scope also **seeds the model**, which it did not
+    before: with nothing named and a new session, the settings' default is used
+    when the scope contains it and the first scoped model otherwise (upstream
+    `buildSessionOptions`), including the thinking level a
+    `model:thinking-level` pattern carries unless one is pinned. **`--api-key`** pins the credential on the provider
     of the model the session resolved. **`--name`** records a `session_info`
     entry (blank is an error). **`--approve`/`--no-approve`** settle project trust
     for the run. **`--export`** and **`--list-models`** are implemented and exit
