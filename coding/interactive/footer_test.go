@@ -17,8 +17,6 @@ import (
 // removed with D141: the builtin footer renders the user's extension format.
 // The extension's own format.test.ts cases are ported below.
 
-const footerProbeSessionPath = "/tmp/pier-footer/session.jsonl"
-
 type footerCorpus struct {
 	Tokens map[string]struct {
 		Count int64 `json:"count"`
@@ -219,9 +217,7 @@ func TestFooterComponentRendersSingleDimLine(t *testing.T) {
 	SetStyleColorsEnabled(true)
 	InitTheme("dark", false)
 
-	if err := os.MkdirAll("/tmp/pier-footer", 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
+	footerProbeSessionPath := filepath.Join(t.TempDir(), "session.jsonl")
 	manager, err := coding.OpenSession(footerProbeSessionPath, "", "")
 	if err != nil {
 		// The probe session is written by the golden test; recreate it minimally.

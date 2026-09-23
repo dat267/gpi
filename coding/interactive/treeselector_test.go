@@ -3,6 +3,7 @@ package interactive
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,8 +15,6 @@ import (
 // (coding/interactive/testdata/tree_golden.txt). Both sides write the same
 // session JSONL fixture and load it with their session manager, so the tree
 // projection also verifies GetTree().
-
-const treeProbeSessionPath = "/tmp/pier-tree/session.jsonl"
 
 type treeCaseJSON struct {
 	Width             int      `json:"width"`
@@ -78,9 +77,7 @@ func TestTreeSelectorAgainstUpstreamGolden(t *testing.T) {
 		t.Fatalf("parse corpus: %v", err)
 	}
 
-	if err := os.MkdirAll("/tmp/pier-tree", 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
+	treeProbeSessionPath := filepath.Join(t.TempDir(), "session.jsonl")
 	if err := os.WriteFile(treeProbeSessionPath, []byte(corpus.SessionJSONL), 0o644); err != nil {
 		t.Fatalf("write session: %v", err)
 	}

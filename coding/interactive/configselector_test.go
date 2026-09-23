@@ -13,11 +13,6 @@ import (
 // Node (coding/interactive/testdata/config_golden.txt). Both sides use the same
 // fixed working directories so the rendered paths stay deterministic.
 
-const (
-	configProbeCwd   = "/tmp/pier-cfg/cwd"
-	configProbeAgent = "/tmp/pier-cfg/agent"
-)
-
 type configMetadataJSON struct {
 	Source  string `json:"source"`
 	Scope   string `json:"scope"`
@@ -124,11 +119,15 @@ func TestConfigSelectorAgainstUpstreamGolden(t *testing.T) {
 		Project: corpus.Resolved.Project.toResolvedPaths(),
 	}
 
-	for _, label := range sortedKeys(corpus.Cases) {
+	// The probe dirs live under a per-test temp dir so the render stays
+	// deterministic without assuming a writable /tmp. Each case gets its own
+	// pair, keeping the cwd/agent relationship the golden was built with.
+	probeRoot := t.TempDir()
+	for index, label := range sortedKeys(corpus.Cases) {
 		spec := corpus.Cases[label]
-		if err := os.RemoveAll("/tmp/pier-cfg"); err != nil {
-			t.Fatalf("clean probe dirs: %v", err)
-		}
+		caseRoot := filepath.Join(probeRoot, itoa(index))
+		configProbeCwd := filepath.Join(caseRoot, "cwd")
+		configProbeAgent := filepath.Join(caseRoot, "agent")
 		if err := os.MkdirAll(filepath.Join(configProbeCwd, ".pi"), 0o755); err != nil {
 			t.Fatalf("mkdir cwd: %v", err)
 		}
