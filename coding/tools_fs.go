@@ -16,23 +16,6 @@ import (
 // renderers, which are host surface). Schemas match the TypeBox-generated
 // JSON.
 
-func requiredObjectSchema(properties map[string]string, required []string) json.RawMessage {
-	props := map[string]any{}
-	for name, desc := range properties {
-		props[name] = map[string]any{"type": "string", "description": desc}
-	}
-	if required == nil {
-		required = []string{}
-	}
-	schema, err := ai.MarshalJSON(map[string]any{
-		"type": "object", "properties": props, "required": required,
-	})
-	if err != nil {
-		panic(err)
-	}
-	return schema
-}
-
 func numSchema(description string) map[string]any {
 	return map[string]any{"type": "number", "description": description}
 }

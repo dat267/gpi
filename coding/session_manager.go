@@ -625,17 +625,6 @@ func (m *SessionManager) buildContextEntriesForLeafLocked() []SessionEntry {
 	return compactionWindowFromPointers(m.branchPointersLocked(""), &m.messages)
 }
 
-// BuildSessionContext builds the LLM context from the current leaf. The
-// projection is the cached entry point (session_projection.go); this remains
-// for callers that already hold the entries.
-func (m *SessionManager) buildSessionContextLocked() SessionContext {
-	leafID := ""
-	if m.leafID != nil {
-		leafID = *m.leafID
-	}
-	return buildSessionContext(m.getEntriesLocked(), &leafID, m.byID, &m.messages)
-}
-
 // GetHeader returns the session header.
 func (m *SessionManager) GetHeader() *SessionHeader {
 	m.mu.Lock()

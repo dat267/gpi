@@ -79,24 +79,6 @@ func argNumber(args map[string]any, key string) (float64, bool) {
 	return 0, false
 }
 
-func argStringList(args map[string]any, key string) []string {
-	value, ok := args[key]
-	if !ok {
-		return nil
-	}
-	list, ok := value.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]string, 0, len(list))
-	for _, entry := range list {
-		if text, ok := entry.(string); ok {
-			out = append(out, text)
-		}
-	}
-	return out
-}
-
 func invalidArgText(theme *Theme) string { return theme.Fg("error", "[invalid arg]") }
 
 func normalizeDisplayText(text string) string { return strings.ReplaceAll(text, "\r", "") }

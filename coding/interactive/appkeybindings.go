@@ -27,10 +27,6 @@ func UseWindowsKeybindings(goos string, env func(string) string) bool {
 	return false
 }
 
-func currentUseWindowsKeybindings() bool {
-	return UseWindowsKeybindings(runtime.GOOS, os.Getenv)
-}
-
 // AppKeybindingNames are the app-level keybinding identifiers.
 var AppKeybindingNames = []string{
 	"app.interrupt", "app.clear", "app.exit", "app.suspend", "app.thinking.cycle",

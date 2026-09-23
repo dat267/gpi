@@ -17,25 +17,6 @@ import (
 
 const validJSONEscapes = `"\/bfnrt"`
 
-func isControlCharacter(c byte) bool { return c <= 0x1f }
-
-func escapeControlCharacter(c byte) string {
-	switch c {
-	case '\b':
-		return `\b`
-	case '\f':
-		return `\f`
-	case '\n':
-		return `\n`
-	case '\r':
-		return `\r`
-	case '\t':
-		return `\t`
-	default:
-		return fmt.Sprintf(`\u%04x`, c)
-	}
-}
-
 // RepairJSON repairs malformed JSON string literals by escaping raw control
 // characters inside strings and doubling backslashes before invalid escape
 // characters (port of repairJson, operating on UTF-16 code units like the
