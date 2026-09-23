@@ -478,9 +478,13 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   existed (title, description, options, timeout). The retry also had to key on
   the typed `coding.MissingSessionCwdError`: the text check it used before
   (`strings.Contains(err, "cwd")`) could never match upstream's wording, which
-  says "working directory". **Still off**: `ShowAuthSelect`/`OnPromptShown` (the
-  login dialog's select and prompt steps), `ClearStatusContainerIfIdle`,
-  `RebindSession` and `OnPartialEventApplied`. **Deliberately off** (out of
+  says "working directory". **Still off**: `ClearStatusContainerIfIdle`,
+  `RebindSession` and `OnPartialEventApplied`. The login dialog's select step
+  (`ShowAuthSelect`) is implemented — the Amazon Bedrock flow asks one, so the
+  login could not get past its first prompt — as a list inside the login dialog,
+  which already owns its input routing, so no focus switch was needed; and
+  `OnPromptShown` is not dead but an explicitly-labelled test seam (nil simply
+  means no hook), like the `Now`/`ScheduleTimer`/`DeleteSession` overrides. **Deliberately off** (out of
   scope): the HTTP dispatcher, the package manager, highlight languages (D74, and
   the user chose to keep the flat fallback), tmux, the process-level seams and
   extension mechanics (D41) — with them `ShowExtensionSelector`, the extension
