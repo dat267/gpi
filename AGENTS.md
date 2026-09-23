@@ -456,6 +456,20 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   refresh outcome, waiter count and canceled flag). Two races were fixed on the
   way: publishing must not overwrite an entry that appeared after the load, and
   a waiter slot is only claimed once the entry is confirmed published.
+- D152 — the Unix socket **publish is portable** (`server/unix.go`,
+  `server/publish_linux.go`, `server/publish_other.go`). Upstream publishes a
+  bound socket with a hard link, which is atomic and refuses to overwrite — so a
+  socket another process created at the path in the meantime is never clobbered,
+  and the surviving inode is the one whose device/inode the cleanup path
+  recorded. **Android denies `link(2)` to the app domain outright**, so every
+  bind failed there and the whole `server/unix` test suite failed with it.
+  `publishSocket` now tries the link, then `renameat2(RENAME_NOREPLACE)` —
+  atomic, and still refusing to overwrite — and only then a plain rename, which
+  keeps atomicity but may replace a path that appeared in the window. An
+  occupied destination is never replaced on any path: a link that fails
+  `EEXIST` returns immediately rather than falling through. `renameNoReplace`
+  is `//go:build linux` (Android satisfies the `linux` tag); elsewhere it
+  reports `errors.ErrUnsupported` and the plain rename is the fallback.
 - D151 — **modeldefault builtin** (`coding/modeldefault.go`, wired in
   `coding/sdk.go` and `coding/agent_session_reload.go`). A port of the user's
   modeldefault extension: pi scopes the model to the session, so a session that

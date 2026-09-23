@@ -218,7 +218,7 @@ func (l *UnixListener) finishBind(listener net.Listener, ownedPath string) error
 	l.mu.Lock()
 	l.socketID = identity
 	l.mu.Unlock()
-	if err := os.Link(ownedPath, l.options.path); err != nil {
+	if err := publishSocket(ownedPath, l.options.path); err != nil {
 		return err
 	}
 	if err := setSocketMode(l.options.path, l.options.mode); err != nil {
@@ -592,6 +592,39 @@ func removePath(path string) error {
 		return err
 	}
 	return nil
+}
+
+// publishSocket puts the freshly bound socket at its configured path, moving it
+// off the temporary bind name.
+//
+// Upstream publishes with a hard link: link(2) is atomic and refuses to
+// overwrite, so a socket that another process created at the path in the
+// meantime is never clobbered and the surviving inode is the one whose
+// identity the cleanup path recorded. Android denies link(2) to the app domain
+// outright, which left every bind failing there.
+//
+// So where the link is refused for any reason other than "the path is
+// occupied", the port falls back to renameat2(RENAME_NOREPLACE) — atomic, and
+// still refusing to overwrite — and then, only where that too is unavailable,
+// to a plain rename, which keeps atomicity but may replace a path that appeared
+// in the window (D152).
+func publishSocket(ownedPath, finalPath string) error {
+	linkErr := os.Link(ownedPath, finalPath)
+	if linkErr == nil {
+		return nil
+	}
+	if errors.Is(linkErr, fs.ErrExist) {
+		// Unambiguously occupied: never clobber, whatever the platform.
+		return linkErr
+	}
+	if err := renameNoReplace(ownedPath, finalPath); err == nil {
+		return nil
+	} else if !errors.Is(err, errors.ErrUnsupported) {
+		// Occupied, or a real failure (a directory that cannot be written):
+		// either way, do not clobber.
+		return err
+	}
+	return os.Rename(ownedPath, finalPath)
 }
 
 // isSocketLive probes the socket path; a live listener accepts the connection.

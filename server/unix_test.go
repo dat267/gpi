@@ -15,6 +15,23 @@ import (
 	servertesting "github.com/dat267/pier/server/testing"
 )
 
+// socketDir returns a directory short enough to hold a unix socket path.
+//
+// sockaddr_un.sun_path caps a socket path at 107 bytes. t.TempDir() embeds the
+// full test name under TMPDIR, which is deep enough on some platforms (Termux
+// uses /data/data/<pkg>/files/usr/tmp) that the longer test names overrun the
+// cap and connect(2) fails with EINVAL. A short suffixed dir keeps every path
+// here well inside the limit, whatever the host's TMPDIR looks like.
+func socketDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp(os.TempDir(), "sock")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 // Unix transport tests keyed to upstream
 // packages/server/src/transports/unix/*.ts and the testing helpers.
 
@@ -52,7 +69,7 @@ func TestUnixListenerOptionValidation(t *testing.T) {
 }
 
 func TestUnixEndToEndHandshakeAndSessionRouting(t *testing.T) {
-	directory := t.TempDir()
+	directory := socketDir(t)
 	socketPath := filepath.Join(directory, "pi.sock")
 	host := servertesting.NewTestServerHost()
 	host.Seed("session-1", "")
@@ -143,7 +160,7 @@ func TestUnixEndToEndHandshakeAndSessionRouting(t *testing.T) {
 }
 
 func TestUnixListenerStaleSocketAndLiveRefusal(t *testing.T) {
-	directory := t.TempDir()
+	directory := socketDir(t)
 	socketPath := filepath.Join(directory, "stale.sock")
 	host := servertesting.NewTestServerHost()
 
@@ -198,7 +215,7 @@ func TestUnixListenerStaleSocketAndLiveRefusal(t *testing.T) {
 }
 
 func TestUnixListenerRefusesNonSocketPath(t *testing.T) {
-	directory := t.TempDir()
+	directory := socketDir(t)
 	path := filepath.Join(directory, "not-a-socket")
 	if err := os.WriteFile(path, []byte("regular file"), 0o600); err != nil {
 		t.Fatal(err)
@@ -223,7 +240,7 @@ func TestUnixListenerRefusesNonSocketPath(t *testing.T) {
 }
 
 func TestUnixListenerAlreadyStartedAndClosed(t *testing.T) {
-	directory := t.TempDir()
+	directory := socketDir(t)
 	socketPath := filepath.Join(directory, "once.sock")
 	listener, err := server.CreateUnixListener(server.UnixListenerOptions{Path: socketPath})
 	if err != nil {
@@ -247,7 +264,7 @@ func TestUnixListenerAlreadyStartedAndClosed(t *testing.T) {
 }
 
 func TestUnixFragmentedFramesAndHandshakeFailure(t *testing.T) {
-	directory := t.TempDir()
+	directory := socketDir(t)
 	socketPath := filepath.Join(directory, "frag.sock")
 	host := servertesting.NewTestServerHost()
 	listener, err := server.CreateUnixListener(server.UnixListenerOptions{Path: socketPath})
@@ -352,7 +369,7 @@ func (c *rawChannel) SendFragmented(chunk []byte, splitAt int) error {
 func (c *rawChannel) Close() error { return c.conn.Close() }
 
 func TestUnixServerPresetAndConnectionLimit(t *testing.T) {
-	directory := t.TempDir()
+	directory := socketDir(t)
 	socketPath := filepath.Join(directory, "preset.sock")
 	host := servertesting.NewTestServerHost()
 
@@ -382,7 +399,7 @@ func TestUnixServerPresetAndConnectionLimit(t *testing.T) {
 
 func TestUnixPendingByteLimitRejectsOversizedSend(t *testing.T) {
 	// A connection whose limit is below one frame must refuse the send.
-	directory := t.TempDir()
+	directory := socketDir(t)
 	socketPath := filepath.Join(directory, "limit.sock")
 	listener, err := server.CreateUnixListener(server.UnixListenerOptions{Path: socketPath})
 	if err != nil {
@@ -407,7 +424,7 @@ func TestUnixPendingByteLimitRejectsOversizedSend(t *testing.T) {
 func TestUnixListenerServesConcurrentConnections(t *testing.T) {
 	// Regression: the accept loop must serve each socket independently. A
 	// serial loop stops accepting while any connection stays open.
-	directory := t.TempDir()
+	directory := socketDir(t)
 	socketPath := filepath.Join(directory, "concurrent.sock")
 	host := servertesting.NewTestServerHost()
 	host.Seed("session-1", "")
