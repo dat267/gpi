@@ -16,12 +16,14 @@ type eventTestSession struct {
 	retryAttempt      int
 	abortRetryCalls   int
 	abortCompactCalls int
+	thinking          ai.ThinkingLevel
 }
 
-func (s *eventTestSession) RetryAttempt() int { return s.retryAttempt }
-func (s *eventTestSession) AbortRetry()       { s.abortRetryCalls++ }
-func (s *eventTestSession) AbortCompaction()  { s.abortCompactCalls++ }
-func (s *eventTestSession) IsStreaming() bool { return false }
+func (s *eventTestSession) ThinkingLevel() ai.ThinkingLevel { return s.thinking }
+func (s *eventTestSession) RetryAttempt() int               { return s.retryAttempt }
+func (s *eventTestSession) AbortRetry()                     { s.abortRetryCalls++ }
+func (s *eventTestSession) AbortCompaction()                { s.abortCompactCalls++ }
+func (s *eventTestSession) IsStreaming() bool               { return false }
 
 func newEventTestDispatcher(t *testing.T) (*EventDispatcher, *eventTestSession, *TranscriptRenderer, *InteractiveUIState) {
 	t.Helper()
@@ -406,5 +408,25 @@ func TestQueueUpdateRefreshesPendingBanner(t *testing.T) {
 	dispatcher.HandleEvent(&coding.SessionEvent{Type: coding.SessionQueueUpdate})
 	if refreshes != 1 {
 		t.Fatalf("queue_update must refresh the pending banner, got %d refreshes", refreshes)
+	}
+}
+
+// TestThinkingLevelReadsTheSessionState pins where the working indicator's
+// border color comes from. Upstream reads session.thinkingLevel (defaulting to
+// "off"); the port copied the whole session entry tree via SessionInfo
+// GetEntries, discarded it, and always returned the empty level. SessionInfo is
+// deliberately nil here: the answer must not depend on the entry tree.
+func TestThinkingLevelReadsTheSessionState(t *testing.T) {
+	dispatcher := &EventDispatcher{Session: &eventTestSession{thinking: "high"}}
+	if got := dispatcher.thinkingLevel(); got != "high" {
+		t.Fatalf("thinking level = %q; want high", got)
+	}
+	dispatcher.Session = &eventTestSession{}
+	if got := dispatcher.thinkingLevel(); got != "off" {
+		t.Fatalf("unset thinking level = %q; want off", got)
+	}
+	dispatcher.Session = nil
+	if got := dispatcher.thinkingLevel(); got != "off" {
+		t.Fatalf("missing session thinking level = %q; want off", got)
 	}
 }

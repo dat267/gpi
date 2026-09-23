@@ -22,6 +22,7 @@ type EventSession interface {
 	AbortRetry()
 	AbortCompaction()
 	IsStreaming() bool
+	ThinkingLevel() ai.ThinkingLevel
 }
 
 // EventDispatcher handles the session events for the interactive mode.
@@ -274,13 +275,20 @@ func (d *EventDispatcher) HandleEvent(event *coding.SessionEvent) {
 	}
 }
 
+// thinkingLevel is the level the working status indicator colors its border
+// with (upstream showWorkingStatusIndicator reads session.thinkingLevel,
+// defaulting to "off"). It reads the live session state: it used to copy the
+// whole session entry tree through SessionInfo and discard it, which cost 11 ms
+// on the 19k-entry session at every turn start and always handed the border the
+// empty level.
 func (d *EventDispatcher) thinkingLevel() string {
-	if d.SessionInfo != nil {
-		if model := d.SessionInfo.GetEntries(); len(model) > 0 {
-			_ = model
-		}
+	if d.Session == nil {
+		return "off"
 	}
-	return ""
+	if level := d.Session.ThinkingLevel(); level != "" {
+		return level
+	}
+	return "off"
 }
 
 func (d *EventDispatcher) handleMessageStart(event *coding.SessionEvent) {
