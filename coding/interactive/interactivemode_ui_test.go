@@ -292,3 +292,59 @@ func TestUIStateReset(t *testing.T) {
 		t.Fatalf("thinking label = %q", state.hiddenThinkingLabel)
 	}
 }
+
+// ansiBefore returns the escape sequence immediately preceding the first
+// occurrence of needle (the colour a renderer applied to it).
+func ansiBefore(t *testing.T, text string, needle string) string {
+	t.Helper()
+	index := strings.Index(text, needle)
+	if index < 0 {
+		t.Fatalf("no %q in %q", needle, text)
+	}
+	start := strings.LastIndex(text[:index], "\x1b[")
+	if start < 0 {
+		t.Fatalf("no escape before %q in %q", needle, text)
+	}
+	end := strings.Index(text[start:], "m")
+	if end < 0 {
+		t.Fatalf("unterminated escape before %q in %q", needle, text)
+	}
+	return text[start : start+end+1]
+}
+
+// firstSpinnerFrame returns the loader's braille glyph in a rendered line.
+func firstSpinnerFrame(t *testing.T, text string) string {
+	t.Helper()
+	for _, r := range text {
+		if r >= 0x2800 && r <= 0x28FF {
+			return string(r)
+		}
+	}
+	t.Fatalf("no spinner frame in %q", text)
+	return ""
+}
+
+// The working spinner has to resolve its colour per render, like upstream
+// (text => (this.editor.borderColor ?? ...)(text)). Capturing the border-colour
+// function instead left the spinner and its message in the previous colour when
+// the border was recoloured afterwards — the spinner in a different colour from
+// the horizontal lines it sits between.
+func TestWorkingSpinnerFollowsTheBorderColour(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+
+	// Spinner first, then the border colour is re-applied: the order that
+	// exposed the stale capture (thinking level, model or bash mode changes
+	// recolour the border mid-session).
+	app.UIState.ShowWorkingStatusIndicator("medium")
+	app.Queue.UpdateEditorBorderColor()
+
+	border := app.DefaultEditor.renderTopBorder(40, 0)
+	lineColor := ansiBefore(t, border, "─")
+	if got := ansiBefore(t, border, "Working"); got != lineColor {
+		t.Errorf("the working message is %s but the border lines are %s", got, lineColor)
+	}
+	if got := ansiBefore(t, border, firstSpinnerFrame(t, border)); got != lineColor {
+		t.Errorf("the spinner is %s but the border lines are %s", got, lineColor)
+	}
+}

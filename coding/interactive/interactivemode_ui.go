@@ -156,10 +156,16 @@ func (s *InteractiveUIState) ClearStatusIndicator(kind StatusIndicatorKind, hasK
 func (s *InteractiveUIState) ShowWorkingStatusIndicator(thinkingLevel string) {
 	var colorFn func(string) string
 	if editor, ok := IsWorkingStatusEditor(s.Editor); ok {
-		if borderColor := editor.WorkingBorderColor(); borderColor != nil {
-			colorFn = borderColor
-		} else {
-			colorFn = ActiveTheme().GetThinkingBorderColor(thinkingLevel)
+		// Resolve the editor's border colour per render, the way upstream does
+		// (text => (this.editor.borderColor ?? …)(text)). UpdateEditorBorderColor
+		// swaps that colour whenever the thinking level, the model or bash mode
+		// changes, so a captured function leaves the spinner and its message in
+		// the previous colour while the border lines they sit between move on.
+		colorFn = func(text string) string {
+			if borderColor := editor.WorkingBorderColor(); borderColor != nil {
+				return borderColor(text)
+			}
+			return ActiveTheme().GetThinkingBorderColor(thinkingLevel)(text)
 		}
 	}
 	message := s.WorkingMessage
