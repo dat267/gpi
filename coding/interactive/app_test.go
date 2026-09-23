@@ -254,6 +254,8 @@ func TestAppWiringCompleteness(t *testing.T) {
 		{"Runner.SetupKeyHandlers", app.Runner.SetupKeyHandlers != nil},
 		{"Runner.SetupSubmitHandler", app.Runner.SetupSubmitHandler != nil},
 		{"Key.OnToolsExpand", app.Key.OnToolsExpand != nil},
+		{"Key.OnFollowUp", app.Key.OnFollowUp != nil},
+		{"Key.OnDequeue", app.Key.OnDequeue != nil},
 		{"Key.OnPasteImage", app.Key.OnPasteImage != nil},
 		{"Key.OnModelSelect", app.Key.OnModelSelect != nil},
 		{"Key.OnSessionTree", app.Key.OnSessionTree != nil},

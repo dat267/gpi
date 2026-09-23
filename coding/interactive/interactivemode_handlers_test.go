@@ -192,6 +192,20 @@ func TestKeyWiringActions(t *testing.T) {
 	if actions["thinkingToggle"] != 1 {
 		t.Fatalf("actions = %v", actions)
 	}
+	// alt+enter queues a follow-up (app.message.followUp) and alt+up restores
+	// the queued messages (app.message.dequeue); both reached the editor before
+	// they were wired, so the key never did anything.
+	keys.OnFollowUp = func() { actions["followUp"]++ }
+	keys.OnDequeue = func() { actions["dequeue"]++ }
+	keys.SetupKeyHandlers(nil)
+	editor.HandleInput("\x1b\r")
+	if actions["followUp"] != 1 {
+		t.Fatalf("alt+enter did not reach OnFollowUp: %v", actions)
+	}
+	editor.HandleInput("\x1bp")
+	if actions["dequeue"] != 1 {
+		t.Fatalf("alt+up did not reach OnDequeue: %v", actions)
+	}
 	// The onChange handler toggles bash mode.
 	editor.SetText("!ls")
 	editor.HandleInput("x")

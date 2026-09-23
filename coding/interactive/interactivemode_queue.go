@@ -20,6 +20,8 @@ import (
 
 // QueueSession is the session surface the queue controller needs.
 type QueueSession interface {
+	IsStreaming() bool
+	IsCompacting() bool
 	GetSteeringMessages() []string
 	GetFollowUpMessages() []string
 	ClearQueue() (steering []string, followUp []string)
@@ -136,6 +138,49 @@ func (c *QueueController) ClearAllQueues() (steering []string, followUp []string
 	}
 	c.compactionQueuedMessages = nil
 	return steering, followUp
+}
+
+// HandleFollowUp is the app.message.followUp action (alt+enter): queue the
+// editor's text as a follow-up message while the agent streams, act like Enter
+// when it is idle, and queue the message for after the compaction while one
+// runs (port of handleFollowUp).
+func (c *QueueController) HandleFollowUp(ctx context.Context) {
+	text := strings.TrimSpace(c.Editor.GetExpandedText())
+	if text == "" {
+		return
+	}
+
+	if c.Session.IsCompacting() {
+		// Extension commands execute immediately upstream; extension mechanics
+		// are out of scope (D41/D114), so IsExtensionCommand is always false.
+		if c.IsExtensionCommand(text) {
+			c.Editor.AddToHistory(text)
+			c.Editor.SetText("")
+			_ = c.Session.Prompt(ctx, text, nil)
+		} else {
+			c.QueueCompactionMessage(text, "followUp")
+		}
+		return
+	}
+
+	if c.Session.IsStreaming() {
+		c.Editor.AddToHistory(text)
+		c.Editor.SetText("")
+		if err := c.Session.Prompt(ctx, text, &coding.PromptOptions{StreamingBehavior: "followUp"}); err != nil {
+			// Upstream awaits the prompt without a handler, which surfaces as an
+			// unhandled rejection; the port reports it.
+			c.showError(err.Error())
+		}
+		c.UpdatePendingMessagesDisplay()
+		c.requestRender()
+		return
+	}
+
+	// Nothing is running: alt+enter behaves like Enter.
+	if c.Editor.OnSubmit != nil {
+		c.Editor.SetText("")
+		c.Editor.OnSubmit(text)
+	}
 }
 
 // UpdatePendingMessagesDisplay re-renders the pending-message container.

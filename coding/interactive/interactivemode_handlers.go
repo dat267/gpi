@@ -503,6 +503,8 @@ func newKeyWiring(app *App) *KeyWiring {
 			hidden := app.Display.HideThinkingBlock
 			app.Queue.ToggleThinkingBlockVisibility(&hidden)
 		},
+		OnFollowUp:      func() { app.Queue.HandleFollowUp(context.Background()) },
+		OnDequeue:       app.Queue.HandleDequeue,
 		OnSessionTree:   func() { app.Selectors.ShowTreeSelector(context.Background(), "", false) },
 		OnSessionFork:   func() { app.Selectors.ShowUserMessageSelector(context.Background()) },
 		OnSessionResume: app.Sessions.ShowSessionSelector,

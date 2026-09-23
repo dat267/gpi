@@ -16,14 +16,20 @@ type queueTestSession struct {
 	steering []string
 	followUp []string
 
-	prompted   []string
-	steered    []string
-	followed   []string
-	abortCalls int
-	cleared    int
-	thinking   ai.ThinkingLevel
-	promptErr  error
+	prompted      []string
+	steered       []string
+	followed      []string
+	abortCalls    int
+	cleared       int
+	thinking      ai.ThinkingLevel
+	promptErr     error
+	streaming     bool
+	compacting    bool
+	promptOptions []*coding.PromptOptions
 }
+
+func (s *queueTestSession) IsStreaming() bool  { return s.streaming }
+func (s *queueTestSession) IsCompacting() bool { return s.compacting }
 
 func (s *queueTestSession) GetSteeringMessages() []string { return append([]string{}, s.steering...) }
 func (s *queueTestSession) GetFollowUpMessages() []string { return append([]string{}, s.followUp...) }
@@ -33,8 +39,9 @@ func (s *queueTestSession) ClearQueue() ([]string, []string) {
 	s.steering, s.followUp = nil, nil
 	return steering, followUp
 }
-func (s *queueTestSession) Prompt(_ context.Context, text string, _ *coding.PromptOptions) error {
+func (s *queueTestSession) Prompt(_ context.Context, text string, options *coding.PromptOptions) error {
 	s.prompted = append(s.prompted, text)
+	s.promptOptions = append(s.promptOptions, options)
 	return s.promptErr
 }
 func (s *queueTestSession) Steer(message ai.Message) {
@@ -274,5 +281,125 @@ func TestQueuePendingBashComponents(t *testing.T) {
 	}
 	if len(controller.PendingBash) != 0 {
 		t.Fatal("pending list not cleared")
+	}
+}
+
+// TestHandleFollowUpQueuesWhileStreaming covers alt+enter during a run: the
+// editor text becomes a queued follow-up (streamingBehavior followUp), the
+// editor is cleared, and the pending display is refreshed.
+func TestHandleFollowUpQueuesWhileStreaming(t *testing.T) {
+	controller, session, pending := newQueueTestController(t)
+	session.streaming = true
+	controller.Editor.SetText("  a queued follow-up  ")
+
+	controller.HandleFollowUp(context.Background())
+
+	if len(session.prompted) != 1 || session.prompted[0] != "a queued follow-up" {
+		t.Fatalf("prompted = %v", session.prompted)
+	}
+	if len(session.promptOptions) != 1 || session.promptOptions[0] == nil ||
+		session.promptOptions[0].StreamingBehavior != "followUp" {
+		t.Fatalf("prompt options = %#v", session.promptOptions)
+	}
+	if controller.Editor.GetText() != "" {
+		t.Fatalf("editor = %q; want cleared", controller.Editor.GetText())
+	}
+	if session.cleared != 0 {
+		t.Fatal("queueing a follow-up must not clear the session queues")
+	}
+	_ = pending
+}
+
+// TestHandleFollowUpSubmitsWhenIdle: with nothing running, alt+enter acts like
+// Enter instead of queueing.
+func TestHandleFollowUpSubmitsWhenIdle(t *testing.T) {
+	controller, session, _ := newQueueTestController(t)
+	submitted := ""
+	controller.Editor.OnSubmit = func(text string) { submitted = text }
+	controller.Editor.SetText("just submit me")
+
+	controller.HandleFollowUp(context.Background())
+
+	if submitted != "just submit me" {
+		t.Fatalf("submitted = %q", submitted)
+	}
+	if len(session.prompted) != 0 {
+		t.Fatalf("prompted = %v; want no queueing when idle", session.prompted)
+	}
+	if controller.Editor.GetText() != "" {
+		t.Fatalf("editor = %q; want cleared", controller.Editor.GetText())
+	}
+}
+
+// TestHandleFollowUpQueuesDuringCompaction: a compaction queues the follow-up
+// for after it finishes (upstream queueCompactionMessage).
+func TestHandleFollowUpQueuesDuringCompaction(t *testing.T) {
+	controller, session, _ := newQueueTestController(t)
+	session.compacting = true
+	statuses := []string{}
+	controller.ShowStatus = func(message string) { statuses = append(statuses, message) }
+	controller.Editor.SetText("for after the compaction")
+
+	controller.HandleFollowUp(context.Background())
+
+	queued := controller.CompactionQueuedMessages()
+	if len(queued) != 1 || queued[0].Text != "for after the compaction" || queued[0].Mode != "followUp" {
+		t.Fatalf("queued = %#v", queued)
+	}
+	if len(session.prompted) != 0 {
+		t.Fatalf("prompted = %v; want the compaction queue", session.prompted)
+	}
+	if len(statuses) != 1 || !strings.Contains(statuses[0], "after compaction") {
+		t.Fatalf("statuses = %v", statuses)
+	}
+	if controller.Editor.GetText() != "" {
+		t.Fatalf("editor = %q; want cleared", controller.Editor.GetText())
+	}
+}
+
+// TestHandleFollowUpIgnoresEmptyText: whitespace-only input does nothing.
+func TestHandleFollowUpIgnoresEmptyText(t *testing.T) {
+	controller, session, _ := newQueueTestController(t)
+	session.streaming = true
+	controller.Editor.SetText("   \n  ")
+
+	controller.HandleFollowUp(context.Background())
+
+	if len(session.prompted) != 0 {
+		t.Fatalf("prompted = %v", session.prompted)
+	}
+}
+
+// TestHandleDequeueRestoresQueuedMessages covers alt+up: the queued messages go
+// back into the editor with a status line (upstream handleDequeue).
+func TestHandleDequeueRestoresQueuedMessages(t *testing.T) {
+	controller, session, _ := newQueueTestController(t)
+	statuses := []string{}
+	controller.ShowStatus = func(message string) { statuses = append(statuses, message) }
+	session.steering = []string{"steer me"}
+	session.followUp = []string{"follow me"}
+
+	controller.HandleDequeue()
+
+	text := controller.Editor.GetText()
+	if !strings.Contains(text, "steer me") || !strings.Contains(text, "follow me") {
+		t.Fatalf("editor = %q", text)
+	}
+	if len(statuses) != 1 || statuses[0] != "Restored 2 queued messages to editor" {
+		t.Fatalf("statuses = %v", statuses)
+	}
+}
+
+// TestHandleDequeueWithoutQueuedMessages reports that there is nothing to
+// restore.
+func TestHandleDequeueWithoutQueuedMessages(t *testing.T) {
+	controller, _, _ := newQueueTestController(t)
+	statuses := []string{}
+	controller.ShowStatus = func(message string) { statuses = append(statuses, message) }
+
+	controller.HandleDequeue()
+
+	if len(statuses) != 1 || statuses[0] != "No queued messages to restore" {
+		t.Fatalf("statuses = %v", statuses)
 	}
 }
