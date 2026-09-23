@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/dat267/pier/ai"
 	"github.com/dat267/pier/coding"
@@ -18,12 +21,85 @@ func (a *App) SwitchSession(ctx context.Context, sessionPath string, cwdOverride
 	if err != nil {
 		return nil, err
 	}
-	// Upstream assertSessionCwdExists: the error names the cwd so the resume
-	// flow can prompt for a replacement directory.
-	if _, statErr := os.Stat(sessionManager.GetCwd()); statErr != nil {
-		return nil, fmt.Errorf("session cwd %s does not exist", sessionManager.GetCwd())
+	if err := assertSessionCwdExists(sessionManager); err != nil {
+		return nil, err
 	}
 	return a.applySessionReplacement(sessionManager)
+}
+
+// assertSessionCwdExists is upstream assertSessionCwdExists: the error names the
+// cwd so the resume and import flows can offer a replacement directory.
+func assertSessionCwdExists(sessionManager *coding.SessionManager) error {
+	if _, err := os.Stat(sessionManager.GetCwd()); err != nil {
+		return fmt.Errorf("session cwd %s does not exist", sessionManager.GetCwd())
+	}
+	return nil
+}
+
+// importFromJSONL imports a session file into the current session directory and
+// switches to it (upstream AgentSessionRuntime.importFromJsonl). The file is
+// copied rather than opened in place so the imported session becomes part of
+// this project's session list; an existing session with the same name is never
+// clobbered — the copy takes a numbered name instead.
+func (a *App) importFromJSONL(_ context.Context, inputPath string, cwdOverride string) (*SessionSwitchResult, error) {
+	resolved := coding.ResolvePath(inputPath, "", coding.PathInputOptions{})
+	if _, err := os.Stat(resolved); err != nil {
+		return nil, fmt.Errorf("File not found: %s", resolved)
+	}
+
+	sessionDir := a.SessionMgr.GetSessionDir()
+	if sessionDir == "" {
+		// An in-memory session (--no-session) has no directory of its own yet;
+		// an import has to land in the default one, the same place a persisted
+		// manager would have resolved at creation.
+		sessionDir = coding.DefaultSessionDir(a.SessionMgr.GetCwd(), "")
+	}
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		return nil, err
+	}
+	destination := filepath.Join(sessionDir, filepath.Base(resolved))
+	alreadyStored := filepath.Clean(destination) == filepath.Clean(resolved)
+	if !alreadyStored {
+		extension := filepath.Ext(destination)
+		stem := strings.TrimSuffix(destination, extension)
+		for suffix := 1; ; suffix++ {
+			if _, err := os.Stat(destination); err != nil {
+				break
+			}
+			destination = fmt.Sprintf("%s-%d%s", stem, suffix, extension)
+		}
+		if err := copyFileExclusive(resolved, destination); err != nil {
+			return nil, err
+		}
+	}
+
+	sessionManager, err := coding.OpenSession(destination, sessionDir, cwdOverride)
+	if err != nil {
+		return nil, err
+	}
+	if err := assertSessionCwdExists(sessionManager); err != nil {
+		return nil, err
+	}
+	return a.applySessionReplacement(sessionManager)
+}
+
+// copyFileExclusive copies src to dst, refusing to overwrite (upstream's
+// COPYFILE_EXCL).
+func copyFileExclusive(src string, dst string) error {
+	source, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+	destination, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(destination, source); err != nil {
+		destination.Close()
+		return err
+	}
+	return destination.Close()
 }
 
 // SessionNew starts a fresh session in the current session directory (upstream

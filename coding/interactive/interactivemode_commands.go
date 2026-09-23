@@ -732,6 +732,15 @@ func newCommandWiring(app *App) *CommandWiring {
 		// `/new` starts a fresh session. The seam was never assigned, so the
 		// command cleared the editor and returned without a word; the keybinding
 		// (app.session.new) already used this implementation.
+		// `/import` copies a session file into this project's session directory and
+		// switches to it.
+		ImportFromJSONL: func(ctx context.Context, inputPath string, cwdOverride string) (bool, error) {
+			result, err := app.importFromJSONL(ctx, inputPath, cwdOverride)
+			if err != nil {
+				return false, err
+			}
+			return result.Cancelled, nil
+		},
 		NewSession: func(ctx context.Context) (bool, error) {
 			result, err := app.SessionNew(ctx)
 			if err != nil {
