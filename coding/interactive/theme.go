@@ -50,6 +50,13 @@ type Theme struct {
 	SourcePath string
 	SourceInfo any
 
+	// json is the document the theme was built from. A theme that is registered
+	// in memory rather than read from a file keeps its document here, so the
+	// export path can still resolve its tokens (D154); a file-backed theme is
+	// re-read from SourcePath instead, which is what lets theme edits be picked
+	// up without re-registering.
+	json *ThemeJSON
+
 	mode     ColorMode
 	fgColors map[string]string
 	bgColors map[string]string
@@ -592,13 +599,16 @@ func CreateTheme(themeJSON *ThemeJSON, mode ColorMode, sourcePath string) *Theme
 			fgColors[key] = value
 		}
 	}
-	return NewTheme(fgColors, bgColors, colorMode, themeJSON.Name, sourcePath)
+	theme := NewTheme(fgColors, bgColors, colorMode, themeJSON.Name, sourcePath)
+	theme.json = themeJSON
+	return theme
 }
 
 func loadThemeJSON(name string) (*ThemeJSON, error) {
-	if theme, ok := getBuiltinThemes()[name]; ok {
-		return theme, nil
-	}
+	// Registered themes win over the built-ins, the same order loadTheme uses:
+	// a theme that shadows "dark" has to be the one the export path resolves
+	// its tokens from, or the rendered theme and the exported document would
+	// disagree.
 	if registered, ok := registeredThemesGet(name); ok {
 		if registered.SourcePath != "" {
 			data, err := os.ReadFile(registered.SourcePath)
@@ -607,7 +617,13 @@ func loadThemeJSON(name string) (*ThemeJSON, error) {
 			}
 			return ParseThemeJSON(registered.SourcePath, stripBOM(data), true)
 		}
+		if registered.json != nil {
+			return registered.json, nil
+		}
 		return nil, fmt.Errorf("Theme %q does not have a source path for export", name)
+	}
+	if theme, ok := getBuiltinThemes()[name]; ok {
+		return theme, nil
 	}
 	themePath := filepath.Join(CustomThemesDir(), name+".json")
 	if _, err := os.Stat(themePath); err != nil {

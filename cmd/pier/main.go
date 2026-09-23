@@ -97,12 +97,22 @@ func run(appName string, args *coding.Args) error {
 	if args.UseTheme != nil {
 		settings.ApplyOverrides(&coding.Settings{Theme: args.UseTheme})
 	}
+	// The port ships its own palette under the upstream theme names (D154):
+	// terminal-default backgrounds and an amber accent, so it is obvious at a
+	// glance which build is running. The embedded upstream palettes stay as the
+	// fallback for library consumers and as what the upstream-parity test corpus
+	// renders with.
+	//
+	// Order matters: a theme resolves its colours to 256-colour or truecolor
+	// escapes when it is created, so the install has to follow the capability
+	// switch or the palette is baked in the fallback mode.
+	interactive.SetTrueColorSupport(true)
+	interactive.SetStyleColorsEnabled(true)
+	interactive.InstallPierTheme()
 	themeName := "dark"
 	if setting := settings.GetTheme(); setting != nil && *setting != "" {
 		themeName = *setting
 	}
-	interactive.SetTrueColorSupport(true)
-	interactive.SetStyleColorsEnabled(true)
 	interactive.InitTheme(themeName, false)
 
 	// Session manager: resume the newest session or start a fresh one.

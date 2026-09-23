@@ -456,6 +456,31 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   refresh outcome, waiter count and canceled flag). Two races were fixed on the
   way: publishing must not overwrite an entry that appeared after the load, and
   a waiter slot is only claimed once the entry is confirmed published.
+- D154 — **the port ships its own theme palette**. `coding/interactive/piertheme.go`
+  defines two themes — one for a dark terminal background, one for a light one —
+  and `cmd/pier` installs them at startup under the upstream names (`dark`,
+  `light`), so the whole settings/terminal-detection path (`ResolveThemeSetting`,
+  `ParseAutoThemeSetting`, `GetDefaultTheme`) is unchanged and still picks the
+  variant from the terminal. Two deliberate departures from upstream's
+  `dark.json`/`light.json`: **every background token is left unset**, which
+  renders as the terminal's default background (`\x1b[49m`) so the theme never
+  paints over a transparent or blurred terminal (primary text is the terminal's
+  own foreground for the same reason), and **the accent is amber rather than
+  upstream's teal** — it carries the wordmark, borders, selection and list
+  bullets, so which build is running is obvious at a glance. Selection stays
+  legible without a fill because every list marks the current row with an
+  accent-coloured `→ ` prefix. The embedded upstream palettes are kept: they are
+  upstream's reference palette, they are what the **upstream-parity test corpus
+  renders with** (those tests clear the theme registry first, so they are
+  unaffected by the install), and they remain the fallback for library consumers
+  that never call the installer. Two fixes fell out of this: `loadThemeJSON`
+  checked the built-ins *before* the registry while `loadTheme` checked the
+  registry first, so a theme shadowing `dark` rendered as the override but
+  resolved its export and resolved-colour tokens from the built-in — both now
+  prefer the registry — and `Theme` carries its source document, so a registered
+  theme that has no file on disk can still be exported to HTML. The install must
+  follow the truecolor/style capability switch, since a theme bakes its 256-colour
+  or truecolor escapes at creation time.
 - D153 — **`--use-theme`, `--name`, `--approve`/`--no-approve`, `--models`,
   `--api-key`, `--skill`, `--no-skills`, `--no-context-files`, `@file`
   arguments and the CLI's parse diagnostics are wired**
