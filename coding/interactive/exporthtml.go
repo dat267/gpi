@@ -417,6 +417,56 @@ func GenerateSessionHTML(data *exportSessionData, themeName string) string {
 	return html
 }
 
+// ExportFromFile exports a session file to HTML (upstream exportFromFile). An
+// empty outputPath defaults to "<app>-session-<basename>.html" in the working
+// directory, and an empty themeName uses the current/default theme.
+//
+// Unlike ExportSessionToHTML this reads a session that this process never
+// opened, so the exported document carries no system prompt or tool set —
+// upstream reads the same fields from the file's header and entries.
+func ExportFromFile(inputPath string, outputPath string, themeName string) (string, error) {
+	resolvedInput := coding.ResolvePath(inputPath, "", coding.PathInputOptions{})
+	if _, err := os.Stat(resolvedInput); err != nil {
+		return "", fmt.Errorf("File not found: %s", resolvedInput)
+	}
+	sessionManager, err := coding.OpenSession(resolvedInput, "", "")
+	if err != nil {
+		return "", err
+	}
+
+	data := &exportSessionData{
+		Entries: sessionManager.GetEntries(),
+		LeafID:  sessionManager.GetLeafID(),
+	}
+	if header := sessionManager.GetHeader(); header != nil {
+		data.Header = exportHeaderJSON(header)
+	}
+
+	html := GenerateSessionHTML(data, themeName)
+
+	if outputPath == "" {
+		base := strings.TrimSuffix(filepath.Base(resolvedInput), ".jsonl")
+		outputPath = coding.AppName + "-session-" + base + ".html"
+	}
+	if err := os.WriteFile(outputPath, []byte(html), 0o644); err != nil {
+		return "", err
+	}
+	return outputPath, nil
+}
+
+// exportHeaderJSON wraps the session header in an entry carrying the "session"
+// discriminator, the shape the export document's header field expects.
+func exportHeaderJSON(header *coding.SessionHeader) json.RawMessage {
+	headerJSON, err := ai.MarshalJSON(struct {
+		Type string `json:"type"`
+		*coding.SessionHeader
+	}{Type: "session", SessionHeader: header})
+	if err != nil {
+		return json.RawMessage("null")
+	}
+	return headerJSON
+}
+
 // ExportSessionToHTML exports the current session branch to an HTML file
 // (upstream exportSessionToHtml, via agent-session.exportToHtml). An empty
 // themeName uses the currently applied theme.
@@ -446,14 +496,7 @@ func (s *AppSession) ExportSessionToHTML(outputPath string, themeName string) (s
 		Tools:        tools,
 	}
 	if header := sessionManager.GetHeader(); header != nil {
-		headerJSON, marshalErr := ai.MarshalJSON(struct {
-			Type string `json:"type"`
-			*coding.SessionHeader
-		}{Type: "session", SessionHeader: header})
-		if marshalErr != nil {
-			headerJSON = []byte("null")
-		}
-		data.Header = headerJSON
+		data.Header = exportHeaderJSON(header)
 	}
 	if themeName == "" {
 		themeName = CurrentThemeName()

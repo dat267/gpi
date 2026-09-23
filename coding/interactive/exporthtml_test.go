@@ -144,3 +144,122 @@ func TestExportSessionToHTMLErrors(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// TestExportFromFile drives a session file that this process never opened,
+// which is what `pier --export <file>` does (upstream exportFromFile).
+func TestExportFromFile(t *testing.T) {
+	SetCustomThemesDir(t.TempDir())
+	SetRegisteredThemes(nil)
+	SetTrueColorSupport(true)
+	SetStyleColorsEnabled(true)
+	InitTheme("dark", false)
+
+	dir := t.TempDir()
+	manager := coding.NewSessionManager(dir, &coding.SessionManagerOptions{Persist: boolPtr(true)})
+	manager.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "export me"}})
+	manager.AppendMessage(&ai.AssistantMessage{
+		Content: ai.ContentList{ai.TextContent{Text: "here you go"}}, StopReason: ai.StopStop,
+	})
+	sessionFile := manager.GetSessionFile()
+	if sessionFile == "" {
+		t.Fatal("no session file was written")
+	}
+	if _, err := os.Stat(sessionFile); err != nil {
+		t.Fatalf("session file: %v", err)
+	}
+
+	output := filepath.Join(dir, "from-file.html")
+	got, err := ExportFromFile(sessionFile, output, "dark")
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if got != output {
+		t.Errorf("output = %q, want %q", got, output)
+	}
+	html, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	// The payload is embedded base64-encoded; decode it and check the entries
+	// travelled, rather than matching the whole document.
+	if !strings.Contains(string(html), "<!DOCTYPE html>") {
+		t.Error("not an HTML document")
+	}
+	payload := decodeExportPayload(t, string(html))
+	if !strings.Contains(payload, "export me") || !strings.Contains(payload, "here you go") {
+		t.Errorf("the session messages are missing from the export payload: %s", payload)
+	}
+	// A file-based export carries no system prompt or tool set (the process
+	// never had them), which upstream expresses as undefined.
+	var data struct {
+		SystemPrompt string            `json:"systemPrompt"`
+		Tools        []json.RawMessage `json:"tools"`
+	}
+	if err := json.Unmarshal([]byte(payload), &data); err != nil {
+		t.Fatalf("payload json: %v", err)
+	}
+	if data.SystemPrompt != "" || len(data.Tools) != 0 {
+		t.Errorf("a file export should carry no prompt or tools: %s", payload)
+	}
+}
+
+// decodeExportPayload pulls the base64 session payload out of an export
+// document.
+func decodeExportPayload(t *testing.T, document string) string {
+	t.Helper()
+	const tag = `<script id="session-data" type="application/json">`
+	start := strings.Index(document, tag)
+	if start < 0 {
+		t.Fatalf("no session payload in the document")
+	}
+	start += len(tag)
+	end := strings.Index(document[start:], "</script>")
+	if end < 0 {
+		t.Fatalf("unterminated session payload")
+	}
+	payload, err := base64.StdEncoding.DecodeString(document[start : start+end])
+	if err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	return string(payload)
+}
+
+// A file that does not exist is an error naming the resolved path, not a panic
+// or an empty document (upstream throws "File not found: <path>").
+func TestExportFromFileMissing(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope.jsonl")
+	_, err := ExportFromFile(missing, "", "dark")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "File not found: ") || !strings.Contains(err.Error(), missing) {
+		t.Errorf("err = %q, want it to name the resolved path", err)
+	}
+}
+
+// An empty output path defaults to <app>-session-<basename>.html.
+func TestExportFromFileDefaultOutputName(t *testing.T) {
+	SetCustomThemesDir(t.TempDir())
+	SetRegisteredThemes(nil)
+	SetTrueColorSupport(true)
+	SetStyleColorsEnabled(true)
+	InitTheme("dark", false)
+
+	dir := t.TempDir()
+	manager := coding.NewSessionManager(dir, &coding.SessionManagerOptions{Persist: boolPtr(true)})
+	manager.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "hi"}})
+	manager.AppendMessage(&ai.AssistantMessage{
+		Content: ai.ContentList{ai.TextContent{Text: "hello"}}, StopReason: ai.StopStop,
+	})
+	sessionFile := manager.GetSessionFile()
+
+	got, err := ExportFromFile(sessionFile, "", "dark")
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	defer os.Remove(got)
+	want := coding.AppName + "-session-" + strings.TrimSuffix(filepath.Base(sessionFile), ".jsonl") + ".html"
+	if got != want {
+		t.Errorf("output = %q, want %q", got, want)
+	}
+}

@@ -32,6 +32,16 @@ func executableName() string {
 	return name
 }
 
+// installThemeCapabilities enables the port's colour depth and installs its
+// palette. Both --export and the interactive run need it, and the install has to
+// follow the capability switch: a theme bakes its 256-colour or truecolor
+// escapes when it is created (D154).
+func installThemeCapabilities() {
+	interactive.SetTrueColorSupport(true)
+	interactive.SetStyleColorsEnabled(true)
+	interactive.InstallPierTheme()
+}
+
 // errAlreadyReported marks a failure that has already been written to stderr as
 // a diagnostic, so main only has to set the exit status.
 var errAlreadyReported = errors.New("already reported")
@@ -57,6 +67,23 @@ func main() {
 	}
 	if args.Version {
 		fmt.Println(coding.Version)
+		return
+	}
+	// --export renders a session file and exits before any runtime or TUI is
+	// built (upstream handles it right after --version). The output path is the
+	// first positional message, which is upstream's convention.
+	if args.Export != nil {
+		outputPath := ""
+		if len(args.Messages) > 0 {
+			outputPath = args.Messages[0]
+		}
+		installThemeCapabilities()
+		result, err := interactive.ExportFromFile(*args.Export, outputPath, "")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, coding.FormatCLIDiagnostic(coding.CLIDiagnostic{Type: "error", Message: err.Error()}))
+			os.Exit(1)
+		}
+		fmt.Println("Exported to: " + result)
 		return
 	}
 	if args.Print || args.Mode == coding.CLIModeJSON || args.Mode == coding.CLIModeRPC {
@@ -102,22 +129,20 @@ func run(appName string, args *coding.Args) error {
 	// glance which build is running. The embedded upstream palettes stay as the
 	// fallback for library consumers and as what the upstream-parity test corpus
 	// renders with.
-	//
-	// Order matters: a theme resolves its colours to 256-colour or truecolor
-	// escapes when it is created, so the install has to follow the capability
-	// switch or the palette is baked in the fallback mode.
-	interactive.SetTrueColorSupport(true)
-	interactive.SetStyleColorsEnabled(true)
-	interactive.InstallPierTheme()
+	installThemeCapabilities()
 	themeName := "dark"
 	if setting := settings.GetTheme(); setting != nil && *setting != "" {
 		themeName = *setting
 	}
 	interactive.InitTheme(themeName, false)
 
-	// Session manager: resume the newest session or start a fresh one.
+	// Session manager: resume the newest session or start a fresh one. A metadata
+	// command (--list-models) resolves no session and writes nothing, which is
+	// also why it never resumes (upstream createSessionManager returns an
+	// in-memory manager for it).
+	listingModels := args.ListModels != nil || args.ListModelsAll
 	var sessions *coding.SessionManager
-	if args.Resume || args.Continue || args.Fork != nil || args.Session != nil || args.SessionID != nil {
+	if !listingModels && (args.Resume || args.Continue || args.Fork != nil || args.Session != nil || args.SessionID != nil) {
 		sessions, err = resumeSession(args, cwd, agentDir, settings)
 		if err != nil {
 			if errors.Is(err, errNoSessionSelected) {
@@ -136,7 +161,7 @@ func run(appName string, args *coding.Args) error {
 		if args.SessionDir != nil {
 			options.SessionDir = *args.SessionDir
 		}
-		if args.NoSession {
+		if args.NoSession || listingModels {
 			persist := false
 			options.Persist = &persist
 		}
@@ -166,6 +191,13 @@ func run(appName string, args *coding.Args) error {
 	})
 	if err != nil {
 		return err
+	}
+
+	// --list-models is a metadata command: it prints the catalog and exits
+	// without starting the TUI or creating a session (upstream lists once the
+	// runtime exists, before the interactive mode).
+	if listingModels {
+		return listModels(runtime, settings, args, ctx)
 	}
 
 	// Resolve the CLI model/thinking overrides.
@@ -329,6 +361,32 @@ func run(appName string, args *coding.Args) error {
 		},
 	})
 	app.Run(ctx)
+	return nil
+}
+
+// listModels prints the available-model table (upstream main.ts's --list-models
+// block): the settings diagnostics and the models.json load error go to stderr
+// first, then the table to stdout. An empty pattern lists everything.
+func listModels(runtime *coding.ModelRuntime, settings *coding.SettingsManager, args *coding.Args, ctx context.Context) error {
+	for _, diagnostic := range coding.CollectSettingsDiagnostics(settings) {
+		fmt.Fprintln(os.Stderr, coding.FormatCLIDiagnostic(coding.CLIDiagnostic{
+			Type: diagnostic.Type, Message: diagnostic.Message,
+		}))
+	}
+	if loadError := runtime.GetError(); loadError != "" {
+		fmt.Fprintln(os.Stderr, coding.FormatCLIDiagnostic(coding.CLIDiagnostic{
+			Type: "warning", Message: "errors loading models.json:\n" + loadError,
+		}))
+	}
+	models, err := runtime.GetAvailable("", ctx)
+	if err != nil {
+		return err
+	}
+	pattern := ""
+	if args.ListModels != nil {
+		pattern = *args.ListModels
+	}
+	fmt.Print(coding.ListModelsText(models, pattern))
 	return nil
 }
 
