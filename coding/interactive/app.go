@@ -325,6 +325,13 @@ func NewApp(options AppOptions) *App {
 	app.Transcript.MarkdownTheme = app.markdownTheme()
 
 	app.Queue = NewQueueController(app.UI, app.Session, app.Settings, app.DefaultEditor, app.Chat, app.PendingMessages)
+	// The queue reports through these functions, and an unassigned one is a silent
+	// no-op — every status it raised (thinking blocks, tool output, thinking
+	// level, queued messages) disappeared, which made ctrl+t and ctrl+o look like
+	// dead keys. Upstream's queue controller calls the mode's reporters directly.
+	app.Queue.ShowStatus = func(message string) { app.Transcript.ShowStatus(message) }
+	app.Queue.ShowError = func(message string) { app.showError(message) }
+	app.Queue.ShowWarning = func(message string) { app.showWarning(message) }
 
 	app.Events = NewEventDispatcher(app.Transcript, app.UIState, app.Footer, app.Settings, app.Session, app.SessionMgr, app.DefaultEditor)
 	app.Events.ShowError = func(message string) { app.showError(message) }
