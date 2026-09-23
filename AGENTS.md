@@ -478,8 +478,15 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   existed (title, description, options, timeout). The retry also had to key on
   the typed `coding.MissingSessionCwdError`: the text check it used before
   (`strings.Contains(err, "cwd")`) could never match upstream's wording, which
-  says "working directory". **Still off**: `ClearStatusContainerIfIdle`,
-  `RebindSession` and `OnPartialEventApplied`. The login dialog's select step
+  says "working directory". **Closed**: `ClearStatusContainerIfIdle`
+  is implemented (upstream's `!enabled && !activeStatusIndicator &&
+  statusContainer.clear()`, shared with the reload path instead of copied), and
+  the last two are not work — `RebindSession` is **redundant**: upstream's
+  runtime calls a mode-provided rebind after replacing a session, and the port
+  does that inline in `applySessionReplacement` (swapping the session and every
+  wiring's `SessionInfo`) with the initial binding done at composition, so an
+  init-time hook has nothing left to do; `OnPartialEventApplied` is a **test
+  seam**, labelled as one where it is declared. The login dialog's select step
   (`ShowAuthSelect`) is implemented — the Amazon Bedrock flow asks one, so the
   login could not get past its first prompt — as a list inside the login dialog,
   which already owns its input routing, so no focus switch was needed; and
