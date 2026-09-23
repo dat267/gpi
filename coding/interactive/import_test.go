@@ -155,7 +155,9 @@ func TestImportCommandMissingCwd(t *testing.T) {
 
 	newCommandWiring(app).HandleImportCommand(context.Background(), "/import "+source)
 
-	if !transcriptContains(app, "cwd") {
+	// Upstream's wording (the retry path keys on the typed error, not on this
+	// text), and it names the fallback the prompt would offer.
+	if !transcriptContains(app, "Stored session working directory does not exist: ") {
 		t.Errorf("no cwd report: %q", transcriptTexts(app))
 	}
 }

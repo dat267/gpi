@@ -21,19 +21,10 @@ func (a *App) SwitchSession(ctx context.Context, sessionPath string, cwdOverride
 	if err != nil {
 		return nil, err
 	}
-	if err := assertSessionCwdExists(sessionManager); err != nil {
+	if err := coding.AssertSessionCwdExists(sessionManager, a.options.Cwd); err != nil {
 		return nil, err
 	}
 	return a.applySessionReplacement(sessionManager)
-}
-
-// assertSessionCwdExists is upstream assertSessionCwdExists: the error names the
-// cwd so the resume and import flows can offer a replacement directory.
-func assertSessionCwdExists(sessionManager *coding.SessionManager) error {
-	if _, err := os.Stat(sessionManager.GetCwd()); err != nil {
-		return fmt.Errorf("session cwd %s does not exist", sessionManager.GetCwd())
-	}
-	return nil
 }
 
 // importFromJSONL imports a session file into the current session directory and
@@ -77,7 +68,7 @@ func (a *App) importFromJSONL(_ context.Context, inputPath string, cwdOverride s
 	if err != nil {
 		return nil, err
 	}
-	if err := assertSessionCwdExists(sessionManager); err != nil {
+	if err := coding.AssertSessionCwdExists(sessionManager, a.options.Cwd); err != nil {
 		return nil, err
 	}
 	return a.applySessionReplacement(sessionManager)

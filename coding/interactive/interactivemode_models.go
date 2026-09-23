@@ -2,6 +2,7 @@ package interactive
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/dat267/pier/ai"
@@ -449,7 +450,10 @@ func (w *SessionWiring) HandleResumeSession(ctx context.Context, sessionPath str
 	}
 
 	// A missing cwd can be resolved by prompting for one.
-	if w.PromptForMissingCwd != nil && strings.Contains(err.Error(), "cwd") {
+	// Upstream keys the retry on MissingSessionCwdError; the message itself says
+	// "working directory", so a substring check would never match.
+	var cwdErr *coding.MissingSessionCwdError
+	if w.PromptForMissingCwd != nil && errors.As(err, &cwdErr) {
 		selectedCwd, ok := w.PromptForMissingCwd(ctx, err.Error())
 		if !ok {
 			w.showStatus("Resume cancelled")

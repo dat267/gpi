@@ -2,8 +2,8 @@ package interactive
 
 import (
 	"context"
+	"errors"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/dat267/pier/ai"
@@ -84,8 +84,21 @@ func TestSwitchSessionMissingCwdIsPromptable(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for a missing session cwd")
 	}
-	if !strings.Contains(err.Error(), "cwd") {
-		t.Fatalf("error %q should mention the cwd so the resume flow can prompt", err)
+	// The retry path keys on the typed error (upstream MissingSessionCwdError),
+	// and it has to carry the issue the prompt offers: the missing cwd and the
+	// fallback to continue in.
+	var cwdErr *coding.MissingSessionCwdError
+	if !errors.As(err, &cwdErr) {
+		t.Fatalf("error %q is not a MissingSessionCwdError", err)
+	}
+	if cwdErr.Issue.SessionCwd != targetCwd {
+		t.Errorf("issue cwd = %q, want %q", cwdErr.Issue.SessionCwd, targetCwd)
+	}
+	if cwdErr.Issue.FallbackCwd == "" {
+		t.Error("the issue carries no fallback cwd for the prompt")
+	}
+	if err.Error() != coding.FormatMissingSessionCwdError(cwdErr.Issue) {
+		t.Errorf("error %q does not match the upstream format", err)
 	}
 }
 

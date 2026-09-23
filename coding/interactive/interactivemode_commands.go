@@ -206,7 +206,10 @@ func (w *CommandWiring) HandleImportCommand(ctx context.Context, text string) {
 		return
 	}
 	// A missing cwd can be resolved by prompting for one.
-	if w.PromptForMissingCwd != nil && strings.Contains(err.Error(), "cwd") {
+	// Upstream keys the retry on MissingSessionCwdError; the message itself says
+	// "working directory", so a substring check would never match.
+	var cwdErr *coding.MissingSessionCwdError
+	if w.PromptForMissingCwd != nil && errors.As(err, &cwdErr) {
 		selectedCwd, ok := w.PromptForMissingCwd(ctx, err.Error())
 		if !ok {
 			w.showStatus("Import cancelled")
