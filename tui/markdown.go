@@ -190,6 +190,19 @@ func (m *Markdown) SetText(text string) {
 	m.hasCachedWidth = false
 }
 
+// SetTextIfChanged is SetText that keeps everything when the text has not moved.
+// Dropping the line cache costs a full re-lex on the next render, which
+// dominates when a component is rebuilt for reasons other than its text (a
+// visibility toggle rebuilding every message in a long transcript, for
+// instance). Callers that also change the transform or the styles must use
+// Invalidate instead: the same text can render differently.
+func (m *Markdown) SetTextIfChanged(text string) {
+	if m.Text == text {
+		return
+	}
+	m.SetText(text)
+}
+
 // Invalidate drops the render cache.
 func (m *Markdown) Invalidate() {
 	m.cachedLines = nil

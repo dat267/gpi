@@ -33,6 +33,17 @@ type AssistantMessageComponent struct {
 	// reused tui.Markdown keeps its incremental render cache (upstream mutates
 	// `content` in place on every delta).
 	blockComponents map[assistantBlockKey]tui.Component
+
+	// thinkingMarkdowns caches the rendered thinking markdown per block run,
+	// keyed *without* the visibility flag. Collapsing and re-expanding has to
+	// reuse the same instance: a markdown that is rebuilt from scratch re-lexes
+	// its whole text on the next paint, so without this every ctrl+t re-rendered
+	// the thinking of the entire transcript and stalled the frame.
+	thinkingMarkdowns map[assistantBlockKey]*tui.Markdown
+	// streamingState is the isStreaming the current content was built for. The
+	// streaming transform renders differently, so a transition has to drop the
+	// reused render caches, which the text/token equality checks cannot see.
+	streamingState bool
 }
 
 // assistantBlockKey identifies one block component across updates.
@@ -68,13 +79,36 @@ func NewAssistantMessageComponent(message *ai.AssistantMessage, hideThinkingBloc
 // Invalidate rebuilds the content.
 func (c *AssistantMessageComponent) Invalidate() {
 	c.Container.Invalidate()
+	// The rendered lines carry the active theme's colours, so a theme switch has
+	// to drop them even though the markdown text itself has not moved.
+	c.invalidateMarkdownCaches()
 	if c.lastMessage != nil {
 		c.UpdateContent(c.lastMessage, c.isStreaming)
 	}
 }
 
+// invalidateMarkdownCaches drops the reuse caches that only a rebuilt component
+// fills. It is for changes the text-equality checks cannot see: the theme, the
+// output padding and the streaming transform.
+func (c *AssistantMessageComponent) invalidateMarkdownCaches() {
+	for _, markdown := range c.thinkingMarkdowns {
+		markdown.Invalidate()
+	}
+	for _, component := range c.blockComponents {
+		if markdown, ok := component.(*tui.Markdown); ok {
+			markdown.Invalidate()
+		}
+	}
+}
+
 // SetHideThinkingBlock toggles the hidden thinking blocks.
 func (c *AssistantMessageComponent) SetHideThinkingBlock(hide bool) {
+	// A visibility sweep walks every message in the transcript, and a message
+	// that is already in the wanted state has nothing to rebuild — as long as it
+	// carries no per-message override, which the sweep is what clears.
+	if c.hideThinkingBlock == hide && len(c.thinkingVisibilityOverrides) == 0 {
+		return
+	}
 	c.hideThinkingBlock = hide
 	c.thinkingVisibilityOverrides = map[int]bool{}
 	if c.lastMessage != nil {
@@ -92,7 +126,12 @@ func (c *AssistantMessageComponent) SetHiddenThinkingLabel(label string) {
 
 // SetOutputPad updates the horizontal padding.
 func (c *AssistantMessageComponent) SetOutputPad(padding int) {
+	if c.outputPad == padding {
+		return
+	}
 	c.outputPad = padding
+	// The padding is baked into the rendered lines, which no cache key includes.
+	c.invalidateMarkdownCaches()
 	if c.lastMessage != nil {
 		c.UpdateContent(c.lastMessage, c.isStreaming)
 	}
@@ -110,6 +149,16 @@ func (c *AssistantMessageComponent) Render(width int) []string {
 // UpdateContent rebuilds the content for a message.
 func (c *AssistantMessageComponent) UpdateContent(message *ai.AssistantMessage, isStreaming bool) {
 	c.lastMessage = message
+	// The streaming transform renders a partial fence differently, so a
+	// transition invalidates the caches we are otherwise careful to keep.
+	streamingChanged := c.streamingState != isStreaming
+	c.streamingState = isStreaming
+	if streamingChanged {
+		c.invalidateMarkdownCaches()
+	}
+	if c.thinkingMarkdowns == nil {
+		c.thinkingMarkdowns = map[assistantBlockKey]*tui.Markdown{}
+	}
 	c.isStreaming = isStreaming
 	c.contentContainer.Clear()
 
@@ -150,7 +199,7 @@ func (c *AssistantMessageComponent) UpdateContent(message *ai.AssistantMessage, 
 			markdown.Options = tui.MarkdownOptions{
 				Transform: CreateMarkdownTransform("assistant", c.isStreaming, c.transformers),
 			}
-			markdown.SetText(strings.TrimSpace(content.Text))
+			markdown.SetTextIfChanged(strings.TrimSpace(content.Text))
 			c.blockComponents[key] = markdown
 			c.contentContainer.AddChild(markdown)
 		case ai.ThinkingContent:
@@ -199,9 +248,11 @@ func (c *AssistantMessageComponent) UpdateContent(message *ai.AssistantMessage, 
 			if hidden {
 				thinkingComponent = tui.NewText(theme.Italic(theme.Fg("thinkingText", c.hiddenThinkingLabel)), c.outputPad, 0, nil)
 			} else {
-				markdown, _ := previous[key].(*tui.Markdown)
+				markdownKey := assistantBlockKey{index: i, kind: "thinking"}
+				markdown := c.thinkingMarkdowns[markdownKey]
 				if markdown == nil {
 					markdown = tui.NewMarkdown("", c.outputPad, 0, c.markdownTheme, nil, tui.MarkdownOptions{})
+					c.thinkingMarkdowns[markdownKey] = markdown
 				}
 				markdown.PaddingX = c.outputPad
 				markdown.DefaultTextStyle = &tui.DefaultTextStyle{
@@ -210,7 +261,7 @@ func (c *AssistantMessageComponent) UpdateContent(message *ai.AssistantMessage, 
 				markdown.Options = tui.MarkdownOptions{
 					Transform: CreateMarkdownTransform("assistant-thinking", c.isStreaming, c.transformers),
 				}
-				markdown.SetText(joinThinkingBlocks(thinkingBlocks))
+				markdown.SetTextIfChanged(joinThinkingBlocks(thinkingBlocks))
 				thinkingComponent = markdown
 			}
 			c.blockComponents[key] = thinkingComponent
