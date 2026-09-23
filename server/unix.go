@@ -218,7 +218,7 @@ func (l *UnixListener) finishBind(listener net.Listener, ownedPath string) error
 	l.mu.Lock()
 	l.socketID = identity
 	l.mu.Unlock()
-	if err := publishSocket(ownedPath, l.options.path); err != nil {
+	if err := publishSocket(ownedPath, l.options.path, os.Link); err != nil {
 		return err
 	}
 	if err := setSocketMode(l.options.path, l.options.mode); err != nil {
@@ -608,8 +608,17 @@ func removePath(path string) error {
 // still refusing to overwrite — and then, only where that too is unavailable,
 // to a plain rename, which keeps atomicity but may replace a path that appeared
 // in the window (D152).
-func publishSocket(ownedPath, finalPath string) error {
-	linkErr := os.Link(ownedPath, finalPath)
+//
+// The postcondition differs with the mechanism and is deliberately not part of
+// the contract: a link leaves the temporary name in place (both names share the
+// inode), a rename consumes it. Callers remove the temporary name afterwards
+// either way — removePath tolerates its absence.
+//
+// link is a parameter rather than os.Link directly so both mechanisms are
+// exercisable on any host; the fallback is otherwise invisible on a platform
+// that can link, which is how the Android breakage went unnoticed.
+func publishSocket(ownedPath, finalPath string, link func(oldname, newname string) error) error {
+	linkErr := link(ownedPath, finalPath)
 	if linkErr == nil {
 		return nil
 	}
