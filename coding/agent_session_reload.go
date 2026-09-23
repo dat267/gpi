@@ -1,6 +1,8 @@
 package coding
 
 import (
+	"context"
+
 	"github.com/dat267/pier/agent"
 	"github.com/dat267/pier/ai"
 )
@@ -23,6 +25,11 @@ func (s *AgentSession) Reload() {
 	ai.ResetAPIProviders()
 	s.reloadResources()
 	s.RebuildSystemPrompt(s.ActiveToolNames())
+	// modeldefault (D151): a reload is a session start too, so the settings
+	// default reasserts itself over any model the session picked earlier.
+	if !s.modelDefaultSuspended() {
+		s.recordModelDefaultSync(s.SyncSessionModelToDefault(context.Background(), "reload"))
+	}
 }
 
 // reloadResources re-reads the context files, skills, and system/append prompt

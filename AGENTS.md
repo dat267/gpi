@@ -456,6 +456,28 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   refresh outcome, waiter count and canceled flag). Two races were fixed on the
   way: publishing must not overwrite an entry that appeared after the load, and
   a waiter slot is only claimed once the entry is confirmed published.
+- D151 — **modeldefault builtin** (`coding/modeldefault.go`, wired in
+  `coding/sdk.go` and `coding/agent_session_reload.go`). A port of the user's
+  modeldefault extension: pi scopes the model to the session, so a session that
+  once picked a model keeps it across resumes and the settings default
+  (`defaultProvider`/`defaultModel`) never reaches it again. Every session
+  start — creation and `/reload` — now moves the session onto the settings
+  default, which is what the extension did on `session_start`. A manual switch
+  therefore lasts for the current session only; there is no persisted
+  per-session claim, no command, and no opt-out short of clearing the default.
+  The full catalog model object is applied, never a bare ref (a ref without its
+  limits reaches the footer as `?/0`). **Two deliberate differences from the
+  extension**: (1) it polls (150 ms over a 4 s budget) because pi's
+  provider-auth snapshot lands asynchronously, whereas this port's
+  `queueAvailabilityRefresh` runs inline, so one attempt is equivalent and the
+  same two outcomes — `no configured auth`, or `no configured auth, or not in
+  the catalog` — are reported verbatim; (2) an explicit `--model`/`--provider`
+  choice (a non-nil `CreateAgentSessionOptions.Model`) suspends the sync for
+  that session, including across reloads, because overruling an explicit
+  command-line choice would be a surprise the extension never had to consider.
+  This diverges from upstream's session-scoped model restoration by design;
+  the notice is surfaced with the startup diagnostics (informational on a
+  switch, a warning when the default cannot be applied).
 - D150 — the startup "loaded resources" area ports the **Skills**, **Context**
   and **Prompts** sections of upstream `showLoadedResources` (collapsed name
   list plus the expanded project/user/path scope groups), the skill

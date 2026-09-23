@@ -61,6 +61,12 @@ type CreateAgentSessionResult struct {
 	Session *AgentSession
 	// ModelFallbackMessage explains a model restore or resolution fallback.
 	ModelFallbackMessage string
+	// ModelDefaultMessage is the modeldefault sync notice (D151); empty when
+	// the session was already on the default or settings name no default.
+	ModelDefaultMessage string
+	// ModelDefaultWarning marks ModelDefaultMessage as a warning rather than
+	// information (the default could not be applied).
+	ModelDefaultWarning bool
 }
 
 // CreateAgentSession assembles a configured coding-agent session.
@@ -399,6 +405,17 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 		session.control.Tools[name] = AgentToolDefinition{Tool: tool}
 	}
 	session.SetScopedModels(options.ScopedModels)
+	// modeldefault (D151): a restored session would otherwise keep the model it
+	// chose in an earlier run, leaving the settings default unreachable for it.
+	// An explicit --model/--provider choice is the caller saying "this session,
+	// this model", so the sync defers to it.
+	var modelDefault ModelDefaultSyncResult
+	if options.Model == nil {
+		modelDefault = session.SyncSessionModelToDefault(ctx, "session start")
+		session.recordModelDefaultSync(modelDefault)
+	} else {
+		session.suspendModelDefaultSync()
+	}
 	session.CacheWarmer = cacheWarmer
 	if cacheWarmer != nil {
 		// Upstream wires the warmed usage entry into an entry_appended event.
@@ -407,7 +424,12 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 		}
 	}
 
-	return &CreateAgentSessionResult{Session: session, ModelFallbackMessage: modelFallbackMessage}, nil
+	return &CreateAgentSessionResult{
+		Session:              session,
+		ModelFallbackMessage: modelFallbackMessage,
+		ModelDefaultMessage:  modelDefault.Message,
+		ModelDefaultWarning:  modelDefault.Warning,
+	}, nil
 }
 
 // cacheContextIsCurrent reports whether the session's context still extends the

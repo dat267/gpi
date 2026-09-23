@@ -78,6 +78,10 @@ type CommandWiring struct {
 	Editor          tui.Component
 	// RunDetached runs the blocking reload work off the UI loop.
 	RunDetached func(fn func())
+	// ModelDefaultNotice reports the modeldefault sync outcome of the last
+	// reload (D151): the notice text, and whether it is a warning. A reload
+	// that moved the model must say so rather than change it silently.
+	ModelDefaultNotice func() (string, bool)
 	// ReloadNow re-reads settings-dependent state off the UI loop (settings
 	// file, session queue modes, keybindings, implicit project trust). It
 	// returns the models.json error ("" = none) and whether implicit project
@@ -281,6 +285,15 @@ func (w *CommandWiring) HandleReloadCommand() {
 			w.showStatus("Reloaded keybindings, extensions, skills, prompts, themes, and context files; saved project trust")
 		} else {
 			w.showStatus("Reloaded keybindings, extensions, skills, prompts, themes, and context files")
+		}
+		if w.ModelDefaultNotice != nil {
+			if message, warning := w.ModelDefaultNotice(); message != "" {
+				if warning {
+					w.showWarning(message)
+				} else {
+					w.showStatus(message)
+				}
+			}
 		}
 		restore()
 	}
@@ -694,6 +707,10 @@ func newCommandWiring(app *App) *CommandWiring {
 		RequestRender:        func() { app.UI.RequestRender(false) },
 		ClearStatusIndicator: func() { app.UIState.ClearStatusIndicator("", false) },
 		MarkdownTheme:        func() tui.MarkdownTheme { return *app.markdownTheme() },
+		ModelDefaultNotice: func() (string, bool) {
+			result := app.Session.LastModelDefaultSync()
+			return result.Message, result.Warning
+		},
 		ExportToHTML: func(outputPath string) (string, error) {
 			themeSetting := app.Settings.GetThemeSetting()
 			themeName := ""

@@ -80,6 +80,12 @@ type AgentSessionControl struct {
 	bashAborted         bool
 	lastAssistant       *ai.AssistantMessage
 	disposed            bool
+
+	// modelDefaultSync is the last modeldefault sync outcome (D151), and
+	// modelDefaultSuspended records an explicit model override that the sync
+	// must not overrule.
+	modelDefaultSync      ModelDefaultSyncResult
+	modelDefaultSuspended bool
 }
 
 // AgentToolDefinition is a registered tool plus its source metadata.

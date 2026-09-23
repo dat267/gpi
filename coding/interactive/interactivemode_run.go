@@ -467,6 +467,16 @@ func (w *RunWiring) Run(ctx context.Context, options InitOptions, runOptions Run
 	if runOptions.ModelFallbackMessage != "" {
 		w.ShowChatWarning(runOptions.ModelFallbackMessage)
 	}
+	// modeldefault (D151): report the sync the way the extension notified on
+	// session_start — informational when it switched, a warning when the
+	// configured default could not be applied.
+	if runOptions.ModelDefaultMessage != "" {
+		if runOptions.ModelDefaultWarning {
+			w.ShowChatWarning(runOptions.ModelDefaultMessage)
+		} else {
+			w.ShowStatus(runOptions.ModelDefaultMessage)
+		}
+	}
 	if w.TakeCrash != nil {
 		if crash := w.TakeCrash(); crash != nil {
 			w.ShowChatWarning(w.AppName + " crashed on " + crash.Timestamp + " (" + crash.Message +
@@ -880,8 +890,11 @@ type RunOptions struct {
 	MigratedProviders    []string
 	ModelsJSONError      string
 	ModelFallbackMessage string
-	InitialMessage       string
-	InitialMessages      []string
+	// ModelDefaultMessage is the modeldefault sync notice (D151).
+	ModelDefaultMessage string
+	ModelDefaultWarning bool
+	InitialMessage      string
+	InitialMessages     []string
 }
 
 // StartupDiagnostic is a pre-init diagnostic.
