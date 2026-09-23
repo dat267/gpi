@@ -148,6 +148,10 @@ func run(appName string, args *coding.Args) error {
 		thinking = *args.Thinking
 	}
 
+	// Tool flags reach the session through the same projection the tests
+	// exercise: --tools/--exclude-tools pass through and --no-tools /
+	// --no-builtin-tools map onto the noTools option.
+	tools := args.ToolSelection()
 	created, err := coding.CreateAgentSession(ctx, &coding.CreateAgentSessionOptions{
 		Cwd:             cwd,
 		AgentDir:        agentDir,
@@ -160,6 +164,10 @@ func run(appName string, args *coding.Args) error {
 		// when the flags are absent).
 		SystemPrompt:       args.SystemPrompt,
 		AppendSystemPrompt: args.AppendSystemPrompt,
+		// Tool selection (allowlist, denylist, and the disable flags).
+		Tools:        tools.Tools,
+		ExcludeTools: tools.ExcludeTools,
+		NoTools:      tools.NoTools,
 	})
 	if err != nil {
 		return err

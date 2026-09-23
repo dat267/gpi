@@ -534,3 +534,54 @@ func TestToJSONEventPassesThroughOtherEvents(t *testing.T) {
 		t.Fatal("nil event must be rejected")
 	}
 }
+
+// ToolSelection projects the CLI tool flags onto the session's tool options.
+// The binary passed none of them, so every tool flag in --help was silently
+// ignored; upstream main.ts sets noTools from --no-tools/--no-builtin-tools
+// and passes the allow and deny lists straight through.
+func TestArgsToolSelection(t *testing.T) {
+	cases := []struct {
+		name string
+		argv []string
+		want ToolSelection
+	}{
+		{"no flags", []string{}, ToolSelection{}},
+		{
+			"allowlist",
+			[]string{"--tools", "read,grep"},
+			ToolSelection{Tools: []ToolName{"read", "grep"}},
+		},
+		{
+			"denylist",
+			[]string{"--exclude-tools", "bash,write"},
+			ToolSelection{ExcludeTools: []ToolName{"bash", "write"}},
+		},
+		{"no-tools", []string{"--no-tools"}, ToolSelection{NoTools: NoToolsAll}},
+		{"no-builtin-tools", []string{"--no-builtin-tools"}, ToolSelection{NoTools: NoToolsBuiltin}},
+		{
+			// Upstream checks --no-tools first, so it wins.
+			"both disable flags",
+			[]string{"--no-tools", "--no-builtin-tools"},
+			ToolSelection{NoTools: NoToolsAll},
+		},
+		{
+			"allowlist with a disable flag",
+			[]string{"--no-tools", "--tools", "read"},
+			ToolSelection{Tools: []ToolName{"read"}, NoTools: NoToolsAll},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := ParseArgs(c.argv).ToolSelection()
+			if strings.Join(got.Tools, ",") != strings.Join(c.want.Tools, ",") {
+				t.Errorf("Tools = %v, want %v", got.Tools, c.want.Tools)
+			}
+			if strings.Join(got.ExcludeTools, ",") != strings.Join(c.want.ExcludeTools, ",") {
+				t.Errorf("ExcludeTools = %v, want %v", got.ExcludeTools, c.want.ExcludeTools)
+			}
+			if got.NoTools != c.want.NoTools {
+				t.Errorf("NoTools = %q, want %q", got.NoTools, c.want.NoTools)
+			}
+		})
+	}
+}

@@ -430,3 +430,36 @@ func helpToolLines() []string {
 		"  ls         - List directory contents (read-only, off by default)",
 	}
 }
+
+// ToolSelection is the session tool configuration a CLI invocation implies.
+type ToolSelection struct {
+	// Tools is the allowlist (nil when the flag was absent).
+	Tools []ToolName
+	// ExcludeTools is the denylist (nil when the flag was absent).
+	ExcludeTools []ToolName
+	// NoTools is NoToolsAll, NoToolsBuiltin, or "" when neither flag was given.
+	NoTools string
+}
+
+// ToolSelection projects the tool flags onto the session's options. Upstream's
+// main.ts checks --no-tools before --no-builtin-tools, so the former wins when
+// both are passed, and the allow and deny lists pass through unchanged.
+func (a *Args) ToolSelection() ToolSelection {
+	var selection ToolSelection
+	if a == nil {
+		return selection
+	}
+	switch {
+	case a.NoTools:
+		selection.NoTools = NoToolsAll
+	case a.NoBuiltinTools:
+		selection.NoTools = NoToolsBuiltin
+	}
+	if a.Tools != nil {
+		selection.Tools = append([]ToolName{}, a.Tools...)
+	}
+	if a.ExcludeTools != nil {
+		selection.ExcludeTools = append([]ToolName{}, a.ExcludeTools...)
+	}
+	return selection
+}
