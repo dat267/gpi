@@ -218,7 +218,13 @@ resolves the model/thinking level by scanning the path backwards instead of
 decoding every message entry to find the last assistant, which cut a
 post-compaction projection from 210 ms to 56 ms. Pinned by
 `TestAppendCompactionDoesNotHoldTheSessionLock` and
-`TestProjectedSettingsResolveLastWriteWins`.
+`TestProjectedSettingsResolveLastWriteWins`. Measured end-to-end (real binary in
+a pty, scripted model, the 45 MB / 19.4k-entry session resumed, bash tool call,
+both TUI modes, silent and output-streaming commands, with and without
+auto-compaction in the turn): the worst frame gap during the run is 82–83 ms,
+which is the spinner's own ~80 ms animation interval, with keystroke echo at
+5–6 ms; before these fixes the same run showed 200–300 ms lock-blocked stalls
+and a 121 ms frame after a transcript rebuild.
 
 ## Conventions and gotchas
 
