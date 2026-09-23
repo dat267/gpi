@@ -472,5 +472,8 @@ func newSelectorWiring(app *App) *SelectorWiring {
 			app.Queue.RestoreQueuedMessagesToEditor(true, text, text != "")
 		},
 		OnEditorText: func(text string) { app.DefaultEditor.SetText(text) },
+		// Forking from a message (the tree/user-message selector) goes through the
+		// runtime fork, which /clone shares.
+		RuntimeFork: app.forkAtEntry,
 	}
 }

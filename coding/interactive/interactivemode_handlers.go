@@ -606,6 +606,26 @@ func newSubmitWiring(app *App) *SubmitWiring {
 			},
 			ShowOAuthSelector:  func(mode string) { app.Auth.ShowOAuthSelector(context.Background(), mode) },
 			HandleClearCommand: func() error { app.Commands.HandleClearCommand(context.Background()); return nil },
+			// `/clone` duplicates the session at the current position, through the
+			// runtime fork (upstream handleCloneCommand).
+			HandleCloneCommand: func() error {
+				leafID := app.SessionMgr.GetLeafID()
+				if leafID == nil || *leafID == "" {
+					app.Transcript.ShowStatus("Nothing to clone yet")
+					return nil
+				}
+				result, err := app.forkAtEntry(context.Background(), *leafID, true)
+				if err != nil {
+					app.showError(err.Error())
+					return err
+				}
+				if result != nil && result.Cancelled {
+					app.UI.RequestRender(false)
+					return nil
+				}
+				app.Transcript.ShowStatus("Cloned to new session")
+				return nil
+			},
 			HandleCompactCommand: func(instructions string) error {
 				// The indicator is UI state (loop side); the compaction itself
 				// only emits session events. It runs detached, not through

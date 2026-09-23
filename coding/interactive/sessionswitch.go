@@ -2,9 +2,11 @@ package interactive
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
+	"github.com/dat267/pier/ai"
 	"github.com/dat267/pier/coding"
 )
 
@@ -83,4 +85,60 @@ func (a *App) applySessionReplacement(sessionManager *coding.SessionManager) (*S
 	a.Startup.RebuildChatFromMessages()
 	a.UI.RequestRender(false)
 	return &SessionSwitchResult{}, nil
+}
+
+// forkAtEntry is the runtime's fork (upstream AgentSessionRuntime.fork), shared
+// by /clone and by forking from a user message: it branches a new session at the
+// given entry and switches the app to it.
+//
+// The two positions are upstream's: "at" keeps the entry (clone at the current
+// position, so the new leaf is that entry), while "before" requires a user
+// message, keeps its parent as the leaf and hands the message text back so the
+// editor can send it again.
+func (a *App) forkAtEntry(_ context.Context, entryID string, atPosition bool) (*SelectorForkResult, error) {
+	entry := a.SessionMgr.GetEntry(entryID)
+	if entry == nil {
+		return nil, errors.New("Invalid entry ID for forking")
+	}
+
+	targetLeafID := entryID
+	var selectedText *string
+	if !atPosition {
+		text, ok := userMessageEntryText(entry)
+		if !ok {
+			return nil, errors.New("Invalid entry ID for forking")
+		}
+		selectedText = &text
+		targetLeafID = ""
+		if entry.ParentID != nil {
+			targetLeafID = *entry.ParentID
+		}
+	}
+
+	forked, err := coding.ForkSessionAtEntry(a.SessionMgr, targetLeafID, a.SessionMgr.GetCwd(), a.SessionMgr.GetSessionDir(), nil)
+	if err != nil {
+		return nil, err
+	}
+	result, err := a.applySessionReplacement(forked)
+	if err != nil {
+		return nil, err
+	}
+	return &SelectorForkResult{Cancelled: result.Cancelled, SelectedText: selectedText}, nil
+}
+
+// userMessageEntryText returns a message entry's user text, and whether the
+// entry is a user message at all.
+func userMessageEntryText(entry *coding.SessionEntry) (string, bool) {
+	if entry.Type != "message" {
+		return "", false
+	}
+	message, err := ai.UnmarshalMessage(entry.Message)
+	if err != nil {
+		return "", false
+	}
+	user, ok := message.(*ai.UserMessage)
+	if !ok {
+		return "", false
+	}
+	return user.Content.Text, true
 }
