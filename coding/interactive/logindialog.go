@@ -44,7 +44,10 @@ type LoginDialogComponent struct {
 
 	aborted chan struct{}
 	pending chan LoginInputResult
-	focused bool
+	// selectList is the active select prompt's list; the dialog owns input
+	// routing, so a select needs no focus switch.
+	selectList *tui.SelectList
+	focused    bool
 }
 
 // NewLoginDialogComponent creates the dialog.
@@ -194,6 +197,56 @@ func (c *LoginDialogComponent) ShowPrompt(message string, placeholder string) <-
 	return results
 }
 
+// ShowSelect shows the prompt's options as a list and returns the chosen
+// option's id (upstream's ui.select step: the Bedrock auth-method and profile
+// prompts go through this), or an error when the login is cancelled.
+func (c *LoginDialogComponent) ShowSelect(message string, options []ai.AuthSelectOption) <-chan LoginInputResult {
+	theme := ActiveTheme()
+	c.contentContainer.AddChild(tui.NewSpacer(1))
+	c.contentContainer.AddChild(tui.NewText(theme.Fg("text", message), 1, 0, nil))
+
+	items := make([]tui.SelectItem, 0, len(options))
+	for _, option := range options {
+		items = append(items, tui.SelectItem{
+			Value: option.ID, Label: option.Label, Description: option.Description,
+		})
+	}
+	visible := len(items)
+	if visible > loginSelectVisibleRows {
+		visible = loginSelectVisibleRows
+	}
+	if visible < 1 {
+		visible = 1
+	}
+	results := make(chan LoginInputResult, 1)
+	list := tui.NewSelectList(items, visible, GetSelectListTheme(), loginSelectLayout)
+	list.OnSelect = func(item tui.SelectItem) {
+		c.selectList = nil
+		select {
+		case results <- LoginInputResult{Value: item.Value}:
+		default:
+		}
+	}
+	c.selectList = list
+	c.contentContainer.AddChild(list)
+	c.contentContainer.AddChild(tui.NewText(
+		"("+KeyHint("tui.select.cancel", "to cancel,")+" "+KeyHint("tui.select.confirm", "to select")+")", 1, 0, nil))
+	c.requestRender()
+	return results
+}
+
+// loginSelectLayout bounds the option column so a long description cannot push
+// the labels off screen.
+var loginSelectLayout = tui.SelectListLayoutOptions{
+	MinPrimaryColumnWidth: 20,
+	HasMin:                true,
+	MaxPrimaryColumnWidth: 48,
+	HasMax:                true,
+}
+
+// loginSelectVisibleRows is how many options the login list shows at once.
+const loginSelectVisibleRows = 8
+
 // ShowDetails replaces the content with informational lines.
 func (c *LoginDialogComponent) ShowDetails(lines []string) {
 	c.contentContainer.Clear()
@@ -244,6 +297,11 @@ func (c *LoginDialogComponent) HandleInput(data string) {
 	kb := tui.GetKeybindings()
 	if kb.Matches(data, "tui.select.cancel") {
 		c.cancel()
+		return
+	}
+	if c.selectList != nil {
+		c.selectList.HandleInput(data)
+		c.requestRender()
 		return
 	}
 	c.input.HandleInput(data)

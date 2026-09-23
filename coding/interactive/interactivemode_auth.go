@@ -652,6 +652,19 @@ func modelsForProvider(models []*ai.Model, providerID string) []*ai.Model {
 // newAuthWiring assembles the AuthWiring (port of the corresponding InteractiveMode wiring).
 func newAuthWiring(app *App) *AuthWiring {
 	return &AuthWiring{
+		// The login flow's select step (upstream's extension-UI select): the
+		// Bedrock auth-method prompt and its profile picker go through here.
+		ShowAuthSelect: func(dialog *LoginDialogComponent, prompt ai.AuthPrompt) (string, error) {
+			select {
+			case result := <-dialog.ShowSelect(prompt.Message, prompt.SelectOptions):
+				if result.Err != nil {
+					return "", errors.New("Login cancelled")
+				}
+				return result.Value, nil
+			case <-dialog.Aborted():
+				return "", errors.New("Login cancelled")
+			}
+		},
 		// The model-catalog refresh after a login is given a ceiling so a stalled
 		// provider cannot hang the flow (upstream scheduleTimer).
 		ScheduleTimer: func(ms int, fn func()) func() {
