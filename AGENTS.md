@@ -465,12 +465,21 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   (`!command` in the editor did nothing). `/new` was the same shape and is wired
   too. **Still off**, each a feature to build rather than a line to connect:
   `/import` (`ImportFromJSONL` — it does report "Import cancelled"), `/clone`
-  (`HandleCloneCommand`), deleting from the session picker (`DeleteSession`),
-  copying a selection (`CopyActiveSelection`), the login select
-  (`ShowAuthSelect`/`OnPromptShown`), the missing-cwd prompt, the settings side
-  effects (`ClearStatusContainerIfIdle`, `ApplyFullscreenScrollbarSetting`), the
-  session rebind (`RebindSession`), the partial-event hook, the tree label edit,
-  the external-editor action and the implicit trust save. **Deliberately off**
+  (`HandleCloneCommand`) and the selector fork (`RuntimeFork`) — both of the
+  latter need the **runtime fork operation**, which is unported: `ForkSession`
+  copies a session file's entries but writes no leaf marker, so "fork at the
+  current position" depends on how the leaf is derived, and guessing there
+  misplaces session history; copying a selection (`CopyActiveSelection`), the
+  login select (`ShowAuthSelect`/`OnPromptShown`), the missing-cwd prompt, the
+  settings side effects (`ClearStatusContainerIfIdle`,
+  `ApplyFullscreenScrollbarSetting`), the session rebind (`RebindSession`), the
+  partial-event hook, the tree label edit, the external-editor action and the
+  implicit trust save. **Not** on this list, despite looking like the rest:
+  `SessionSelectorOptions.DeleteSession` is an *override* with a working default
+  (`sessionFileDeleter`, D102) — the picker's delete works and is covered by
+  `TestSessionSelectorDeleteFlow`. That is the trap in reading this inventory as
+  "every unassigned seam is dead": check whether the nil branch skips the work or
+  falls back to a default first. **Deliberately off**
   (out of scope): `ConfigureHTTPIdleTimeout` (no dispatcher counterpart, D41),
   `CheckVersion`/`CheckPackageUpdates`/`ReportInstall` (package manager),
   `LoadHighlightLanguages` (D74), `TmuxShow`, `DisposeRuntime`/
