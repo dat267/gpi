@@ -51,7 +51,7 @@ func seedBranch(t *testing.T, session *AgentSession) {
 	// Ending on a user message keeps the cut point on a turn start, so the
 	// summary is a single LLM call.
 	session.Sessions.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "third question"}})
-	session.Agent.SetMessages(session.Sessions.BuildSessionContext().Messages)
+	session.Agent.SetMessages(session.Sessions.Projection().Messages)
 }
 
 func TestCheckCompactionDisabled(t *testing.T) {

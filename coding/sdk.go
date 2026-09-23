@@ -106,7 +106,7 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 	}
 
 	// Restore the model and thinking level from an existing session.
-	existingSession := sessionManager.BuildSessionContext()
+	existingSession := sessionManager.Projection()
 	hasExistingSession := len(existingSession.Messages) > 0
 	hasThinkingEntry := false
 	for _, entry := range sessionManager.GetBranch("") {

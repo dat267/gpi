@@ -590,7 +590,7 @@ func (s *AgentSession) runManualCompaction(ctx context.Context, customInstructio
 	}
 
 	s.Sessions.AppendCompaction(result.Summary, result.FirstKeptEntryID, result.TokensBefore, result.Details, false, result.Usage)
-	sessionContext := s.Sessions.BuildSessionContext()
+	sessionContext := s.Sessions.Projection()
 	s.Agent.SetMessages(sessionContext.Messages)
 	return result, nil
 }
@@ -707,7 +707,7 @@ func (s *AgentSession) GetSessionStats() *SessionStats {
 	// Context usage from the current context.
 	model := s.Agent.State().Model
 	if model != nil && model.ContextWindow > 0 {
-		tokens := EstimateContextTokens(s.Sessions.BuildSessionContext().Messages).Tokens
+		tokens := EstimateContextTokens(s.Sessions.Projection().Messages).Tokens
 		stats.ContextUsage = &ContextUsage{
 			Tokens:        int64(tokens),
 			ContextWindow: model.ContextWindow,

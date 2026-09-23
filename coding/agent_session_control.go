@@ -771,9 +771,9 @@ func (s *AgentSession) GetContextUsage() *ContextUsageReport {
 	// After compaction the last assistant usage reflects the pre-compaction
 	// context, so usage is only trusted from an assistant that responded after
 	// the latest compaction. Without one the count is unknown.
-	branch := s.Sessions.GetBranch("")
-	latestCompaction := GetLatestCompactionEntry(branch)
+	latestCompaction := s.Sessions.LatestCompaction()
 	if latestCompaction != nil {
+		branch := s.Sessions.GetBranch("")
 		compactionIndex := -1
 		for index, entry := range branch {
 			if entry.ID == latestCompaction.ID {

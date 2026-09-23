@@ -58,7 +58,7 @@ func TestContextSignatureMatchesTheProjectedContext(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			m, _ := newTestSession(t)
 			shape(m)
-			projected := m.BuildSessionContext()
+			projected := m.Projection()
 			signature := m.ContextSignature()
 			if signature.MessageCount != len(projected.Messages) {
 				t.Fatalf("signature count = %d; projected = %d", signature.MessageCount, len(projected.Messages))
@@ -112,10 +112,10 @@ func TestCacheContextIsCurrentDoesNotProjectTheSession(t *testing.T) {
 	}
 }
 
-// TestBuildSessionContextDoesNotHoldTheSessionLock keeps the UI responsive: the
-// footer reads the session every frame, so a projection must not park other
+// TestProjectionDoesNotHoldTheSessionLock keeps the UI responsive: the footer
+// reads the session every frame, so resolving a projection must not park other
 // readers behind the session mutex.
-func TestBuildSessionContextDoesNotHoldTheSessionLock(t *testing.T) {
+func TestProjectionDoesNotHoldTheSessionLock(t *testing.T) {
 	persist := false
 	m := NewSessionManager(t.TempDir(), &SessionManagerOptions{SessionDir: t.TempDir(), Persist: &persist})
 	for i := 0; i < 60000; i++ {
@@ -126,7 +126,7 @@ func TestBuildSessionContextDoesNotHoldTheSessionLock(t *testing.T) {
 	start := time.Now()
 	go func() {
 		defer close(done)
-		_ = m.BuildSessionContext()
+		_ = m.Projection()
 	}()
 	var projection, longestHold, holdStart time.Duration
 	for {
@@ -175,7 +175,7 @@ func TestProjectedSettingsResolveLastWriteWins(t *testing.T) {
 	m.AppendModelChange("google", "gemini-3-pro")
 	m.AppendThinkingLevelChange("high")
 
-	context := m.BuildSessionContext()
+	context := m.Projection()
 	if context.Model == nil || context.Model.Provider != "google" || context.Model.ModelID != "gemini-3-pro" {
 		t.Fatalf("model = %+v", context.Model)
 	}
@@ -189,14 +189,14 @@ func TestProjectedSettingsResolveLastWriteWins(t *testing.T) {
 	second := createAssistantMessageT("reply")
 	second.Provider, second.Model = "openai", "gpt-5"
 	m2.AppendMessage(second)
-	if context := m2.BuildSessionContext(); context.Model == nil ||
+	if context := m2.Projection(); context.Model == nil ||
 		context.Model.Provider != "openai" || context.Model.ModelID != "gpt-5" {
 		t.Fatalf("model = %+v", context.Model)
 	}
 
 	// A session with no settings at all keeps upstream's default.
 	m3, _ := newTestSession(t)
-	if context := m3.BuildSessionContext(); context.ThinkingLevel != "off" || context.Model != nil {
+	if context := m3.Projection(); context.ThinkingLevel != "off" || context.Model != nil {
 		t.Fatalf("context = %+v (model %+v)", context.ThinkingLevel, context.Model)
 	}
 }
@@ -230,7 +230,7 @@ func TestAppendCompactionCarriesTheCurrentSystemMessage(t *testing.T) {
 		t.Fatalf("system message = %s", compaction.SystemMessageJSON)
 	}
 	// The projection still carries the system message to the request.
-	context := m.BuildSessionContext()
+	context := m.Projection()
 	if len(context.Messages) == 0 {
 		t.Fatal("no projected messages")
 	}

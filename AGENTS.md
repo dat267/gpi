@@ -180,6 +180,20 @@ into narrow, injectable wirings (all in `coding/interactive`):
 `stdinbuffer.go`) is the differential renderer core. Its lock discipline is
 load-bearing (see below).
 
+**The session projection lives in one module.** `coding/session_projection.go`
+owns what the next request carries: `SessionManager.Projection()` resolves the
+branch path, the compaction window, the context settings and the messages in one
+walk, caches the result by branch version (leaf + entry count), and hands its
+slices out with no spare capacity so a caller's append cannot write into the
+cache. `CurrentSystemMessage`, `LatestCompaction` and `ContextSignature` resolve
+from the same place. Before this, ten call sites assembled the projection by hand
+from `buildSessionPath` / `applyCompactionWindow` / `getSessionContextSettings` /
+`getEntriesLocked`, which is how the cache-warmer currency check ended up
+re-projecting the whole session per request: nothing owned the answer and the
+cost was invisible at the call site. Measured on the 45 MB / 19.4k-entry session:
+cold `Projection` 37 ms, cached 0, `AppendCompaction` 0 ms with a warm
+projection (247 ms originally, 56 ms before the cache).
+
 **Large-session rendering.** `RenderSessionItems` (`transcript.go`) renders a
 session eagerly below 400 items; above the threshold it collects the items into
 a collector container and attaches only the trailing window (120 components),

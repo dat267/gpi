@@ -45,8 +45,7 @@ func (s *AgentSession) CheckCompaction(ctx context.Context, assistant *ai.Assist
 
 	// Stale pre-compaction usage or errors must not retrigger compaction right
 	// after one finished.
-	branch := s.Sessions.GetBranch("")
-	compactionEntry := GetLatestCompactionEntry(branch)
+	compactionEntry := s.Sessions.LatestCompaction()
 	if compactionEntry != nil && assistant.Timestamp > 0 {
 		if assistant.Timestamp <= entryTimestampMS(compactionEntry) {
 			return false, nil
@@ -213,7 +212,7 @@ func (s *AgentSession) RunAutoCompaction(ctx context.Context, reason CompactionR
 	}
 
 	s.Sessions.AppendCompaction(result.Summary, result.FirstKeptEntryID, result.TokensBefore, result.Details, false, result.Usage)
-	sessionContext := s.Sessions.BuildSessionContext()
+	sessionContext := s.Sessions.Projection()
 	s.Agent.SetMessages(sessionContext.Messages)
 
 	s.emit(&SessionEvent{Type: SessionCompactionEnd, Reason: reason, Result: result})

@@ -376,6 +376,9 @@ type SessionContext struct {
 	Messages      []ai.Message
 	ThinkingLevel string
 	Model         *SessionModelRef
+	// Entries are the context entries the messages were resolved from
+	// (upstream buildSessionProjection returns them alongside the messages).
+	Entries []SessionEntry
 }
 
 // Custom message shapes (core/messages.ts).
@@ -496,14 +499,16 @@ func applyCompactionWindow(path []SessionEntry) []SessionEntry {
 // BuildSessionContext resolves the LLM context from the entry tree
 // (port of buildSessionContext).
 func BuildSessionContext(entries []SessionEntry, leafID *string, byID map[string]*SessionEntry) SessionContext {
+	// One path walk: the settings scan and the compaction window both work on
+	// the resolved path instead of walking the tree again.
 	path := buildSessionPath(entries, leafID, byID)
 	thinkingLevel, model := getSessionContextSettings(path)
-	contextEntries := BuildContextEntries(entries, leafID, byID)
-	var messages []ai.Message
+	contextEntries := applyCompactionWindow(path)
+	messages := make([]ai.Message, 0, len(contextEntries))
 	for i := range contextEntries {
 		messages = append(messages, SessionEntryToContextMessages(&contextEntries[i])...)
 	}
-	return SessionContext{Messages: messages, ThinkingLevel: thinkingLevel, Model: model}
+	return SessionContext{Messages: messages, ThinkingLevel: thinkingLevel, Model: model, Entries: contextEntries}
 }
 
 // DefaultAgentDir is the agent config directory (upstream getDefaultAgentDir

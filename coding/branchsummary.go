@@ -515,7 +515,7 @@ func (s *AgentSession) NavigateTree(ctx context.Context, targetID string, option
 	}
 
 	// Refresh agent state from the new branch.
-	sessionContext := s.Sessions.BuildSessionContext()
+	sessionContext := s.Sessions.Projection()
 	s.Agent.SetMessages(sessionContext.Messages)
 	s.RestoreToolsFromTranscript()
 
@@ -550,7 +550,7 @@ func (s *AgentSession) RestoreToolsFromTranscript() {
 	if s.control == nil {
 		return
 	}
-	current := ai.GetCurrentSystemMessage(s.Sessions.BuildSessionContext().Messages)
+	current := s.Sessions.CurrentSystemMessage()
 	if current == nil {
 		return
 	}

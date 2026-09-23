@@ -90,7 +90,7 @@ func TestSessionManagerTreeAndBranching(t *testing.T) {
 	}
 
 	// The context follows the CURRENT leaf path only.
-	context := m.BuildSessionContext()
+	context := m.Projection()
 	if len(context.Messages) != 2 {
 		t.Fatalf("context messages = %d; want 2", len(context.Messages))
 	}
@@ -106,7 +106,7 @@ func TestSessionManagerBuildContextWithCompaction(t *testing.T) {
 	m.AppendCompaction("summary of old", entries[2].ID, 1000, nil, false, nil)
 	m.AppendMessage(createUserMessage("after compaction"))
 
-	context := m.BuildSessionContext()
+	context := m.Projection()
 	// compaction entry (as summary message) + kept user + after-compaction user.
 	roles := messageRoles(context.Messages)
 	if len(roles) != 3 {
@@ -127,7 +127,7 @@ func TestSessionManagerModelAndThinkingLevelChanges(t *testing.T) {
 	m.AppendModelChange("anthropic", "claude-opus-4-5")
 	m.AppendThinkingLevelChange("high")
 
-	context := m.BuildSessionContext()
+	context := m.Projection()
 	if context.Model == nil || context.Model.Provider != "anthropic" || context.Model.ModelID != "claude-opus-4-5" {
 		t.Fatalf("model = %+v", context.Model)
 	}
@@ -158,8 +158,8 @@ func TestSessionManagerPersistAndReload(t *testing.T) {
 		t.Fatalf("name = %q", reloaded.GetSessionName())
 	}
 	// Context equivalence after reload.
-	original := m.BuildSessionContext()
-	reloadedContext := reloaded.BuildSessionContext()
+	original := m.Projection()
+	reloadedContext := reloaded.Projection()
 	if len(original.Messages) != len(reloadedContext.Messages) {
 		t.Fatalf("context sizes = %d vs %d", len(original.Messages), len(reloadedContext.Messages))
 	}
