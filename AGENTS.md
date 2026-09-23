@@ -459,37 +459,31 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
 - D155 — **the plumbing-to-nothing inventory** (the port's wiring structs
   inject their collaborators as func fields, and several call sites nil-check a
   seam and skip — so a seam nothing assigns is a feature that silently does
-  nothing). Two of these were reported and fixed: the queue controller's
-  `ShowStatus`/`ShowError`/`ShowWarning` (every status it raised was dropped, so
-  ctrl+t toggled with no feedback) and `HandlerWiring.HandleBashCommand`
-  (`!command` in the editor did nothing). `/new` was the same shape and is wired
-  too. `/clone` (`HandleCloneCommand`) and the selector fork (`RuntimeFork`) were
-  the same unported operation and are **now implemented**
-  (`coding.ForkSessionAtEntry` + `App.forkAtEntry`, upstream's "at"/"before"
-  positions): the session format stores no leaf marker, so a session's leaf is
-  its last entry, which is why the fork copies the branch path to the chosen
-  entry instead of every entry the way `ForkSession` does. **Still off**, each a
-  feature to build rather than a line to connect:
-  `/import` (`ImportFromJSONL` — it does report "Import cancelled"), copying a
-  selection (`CopyActiveSelection`), the
-  login select (`ShowAuthSelect`/`OnPromptShown`), the missing-cwd prompt, the
-  settings side effects (`ClearStatusContainerIfIdle`,
-  `ApplyFullscreenScrollbarSetting`), the session rebind (`RebindSession`), the
-  partial-event hook, the tree label edit, the external-editor action and the
-  implicit trust save. **Not** on this list, despite looking like the rest:
-  `SessionSelectorOptions.DeleteSession` is an *override* with a working default
-  (`sessionFileDeleter`, D102) — the picker's delete works and is covered by
-  `TestSessionSelectorDeleteFlow`. That is the trap in reading this inventory as
-  "every unassigned seam is dead": check whether the nil branch skips the work or
-  falls back to a default first. **Deliberately off**
-  (out of scope): `ConfigureHTTPIdleTimeout` (no dispatcher counterpart, D41),
-  `CheckVersion`/`CheckPackageUpdates`/`ReportInstall` (package manager),
-  `LoadHighlightLanguages` (D74), `TmuxShow`, `DisposeRuntime`/
-  `KillDetachedChildren` (process-level), and the extension seams (D41). A
-  source-scanning test that flags these mechanically was written and then
-  dropped as not worth its keep: it needs AST heuristics (aliases, seams passed
-  as arguments, public seams an embedder assigns) plus a maintained allowlist,
-  and that machinery drifts — this row is the record instead.
+  nothing). **Fixed**: the queue controller's `ShowStatus`/`ShowError`/
+  `ShowWarning` (every status it raised was dropped, so ctrl+t toggled with no
+  feedback), `HandlerWiring.HandleBashCommand` (`!command`), `/new`,
+  `HandleCloneCommand` + the selector's `RuntimeFork` (one runtime fork,
+  `coding.ForkSessionAtEntry` + `App.forkAtEntry`), `/import`
+  (`ImportFromJSONL`), `OnExternalEditor`, the auth `ScheduleTimer`,
+  `OnLabelChange` and `ApplyFullscreenScrollbarSetting`. **Still off**:
+  `ShowAuthSelect`/`OnPromptShown` (the login dialog's select and prompt steps),
+  `PromptForMissingCwd` (reachable from `/import` and `/switch`, but it needs a
+  confirm dialog the port has not built — the extension-UI seam it would use is
+  unassigned), `ClearStatusContainerIfIdle`, `RebindSession` and
+  `OnPartialEventApplied`. **Deliberately off** (out of scope): the HTTP
+  dispatcher, the package manager, highlight languages (D74, and the user chose
+  to keep the flat fallback), tmux, the process-level seams, extension mechanics
+  (D41) and, with them, `ShowExtensionConfirm`/`ShowExtensionSelector` — which is
+  why `/import` imports without upstream's "Replace current session?" prompt.
+  **Not dead, despite looking like the rest** — check whether the nil branch
+  skips the work or falls back before treating an unassigned seam as a bug:
+  `SessionSelectorOptions.DeleteSession` and `CopyActiveSelection` are overrides
+  with working defaults (the deleter and the AltScreen's own selection copy), and
+  `MaybeSaveTrust` is a field nothing references at all while the feature it
+  names is implemented and called from the reload path. A source-scanning test
+  that flags these mechanically was written and dropped as not worth its keep
+  (AST heuristics plus a maintained allowlist, which drifts); this row is the
+  record instead.
 - D154 — **the port ships its own theme palette**. `coding/interactive/piertheme.go`
   defines two themes — one for a dark terminal background, one for a light one —
   and `cmd/pier` installs them at startup under the upstream names (`dark`,
