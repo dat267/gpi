@@ -24,6 +24,15 @@ import (
 // defaultActiveToolNames is the default tool selection.
 var defaultActiveToolNames = []ToolName{ToolNameRead, ToolNameBash, ToolNameEdit, ToolNameWrite}
 
+// NoTools values, matching upstream's main.ts.
+const (
+	// NoToolsAll disables every tool, built-in or otherwise.
+	NoToolsAll = "all"
+	// NoToolsBuiltin disables the built-in tools while leaving the registry
+	// populated, so caller-supplied tools stay available.
+	NoToolsBuiltin = "builtin"
+)
+
 // CreateAgentSessionOptions are the session assembly inputs.
 type CreateAgentSessionOptions struct {
 	Cwd      string
@@ -36,7 +45,10 @@ type CreateAgentSessionOptions struct {
 	Tools []ToolName
 	// ExcludeTools removes tools from the selection.
 	ExcludeTools []ToolName
-	// NoTools disables every tool ("all") or the default set (any other value).
+	// NoTools disables the default set. NoToolsAll disables every tool;
+	// NoToolsBuiltin disables the built-ins while leaving the registry in
+	// place for caller-supplied tools. Any other non-empty value behaves like
+	// NoToolsAll (upstream tests the option for truthiness).
 	NoTools string
 	// ScopedModels seeds the model cycle scope.
 	ScopedModels    []ScopedModel
@@ -192,7 +204,10 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 		initialActiveToolNames = append([]ToolName{}, options.Tools...)
 	} else if options.NoTools != "" {
 		initialActiveToolNames = []ToolName{}
-	} else if configured := settingsManager.GetDefaultTools(); len(configured) > 0 {
+	} else if configured := settingsManager.GetDefaultTools(); configured != nil {
+		// An explicitly empty defaultTools is a value, not an absent one:
+		// upstream reads it with nullish coalescing, so `[]` selects no tools
+		// and only a missing key falls through to the built-in default.
 		initialActiveToolNames = append([]ToolName{}, configured...)
 	} else {
 		initialActiveToolNames = append([]ToolName{}, defaultActiveToolNames...)

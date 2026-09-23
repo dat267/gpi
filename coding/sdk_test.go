@@ -222,6 +222,45 @@ func TestCreateAgentSessionToolSelection(t *testing.T) {
 	if names := strings.Join(session.Session.GetActiveToolNames(), ","); names != "read,grep" {
 		t.Fatalf("tools = %q", names)
 	}
+
+	// An explicitly empty defaultTools means no tools, not the built-in
+	// default: upstream reads it with nullish coalescing
+	// (`configured ?? defaultActiveToolNames`), so an empty array is a value
+	// and only an absent one falls through. The port checked for a non-empty
+	// list, which made defaultTools: [] inexpressible.
+	emptyDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(emptyDir, ConfigDirName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(emptyDir, ConfigDirName, "settings.json"),
+		[]byte(`{"defaultTools":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	empty := NewSettingsManagerFromFiles(emptyDir, agentDirForSettings(), SettingsManagerCreateOptions{})
+	session, err = CreateAgentSession(ctxpkg.Background(), &CreateAgentSessionOptions{
+		Cwd: emptyDir, ModelRuntime: runtime, SettingsManager: empty,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := session.Session.GetActiveToolNames(); len(names) != 0 {
+		t.Fatalf("tools = %v, want none for an explicitly empty defaultTools", names)
+	}
+
+	// The CLI projection feeds these options the way the binary does: a
+	// --tools allowlist reaches the session through ToolSelection.
+	cli := ParseArgs([]string{"--tools", "read,grep"})
+	selection := cli.ToolSelection()
+	session, err = CreateAgentSession(ctxpkg.Background(), &CreateAgentSessionOptions{
+		Cwd: cwd, ModelRuntime: runtime, SettingsManager: settings,
+		Tools: selection.Tools, ExcludeTools: selection.ExcludeTools, NoTools: selection.NoTools,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := strings.Join(session.Session.GetActiveToolNames(), ","); names != "read,grep" {
+		t.Fatalf("tools = %q, want the CLI allowlist applied", names)
+	}
 }
 
 func TestCreateAgentSessionBlockImages(t *testing.T) {
