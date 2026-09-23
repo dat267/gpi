@@ -774,9 +774,7 @@ func (a *App) applyReloadedSettings() {
 	}
 	// Reloaded resources (upstream showLoadedResources after /reload).
 	a.ShowLoadedResources(false)
-	if a.TranscriptScrollView != nil {
-		a.TranscriptScrollView.SetScrollbar(tui.ScrollViewScrollbar(a.Settings.GetFullscreenScrollbar()))
-	}
+	a.applyFullscreenScrollbarSetting()
 	if altscreen, ok := tuiConcrete(a.UI).(*tui.AltScreen); ok {
 		altscreen.SetCopyOnSelect(a.Settings.GetFullscreenCopyOnSelect())
 	}
@@ -807,6 +805,14 @@ func (a *App) markdownTheme() *tui.MarkdownTheme {
 		theme = a.Startup.GetMarkdownThemeWithSettings(theme)
 	}
 	return &theme
+}
+
+// applyFullscreenScrollbarSetting applies the fullscreen scrollbar setting to the
+// transcript's scroll view.
+func (a *App) applyFullscreenScrollbarSetting() {
+	if a.TranscriptScrollView != nil {
+		a.TranscriptScrollView.SetScrollbar(tui.ScrollViewScrollbar(a.Settings.GetFullscreenScrollbar()))
+	}
 }
 
 // modelSession returns the ModelSession adapter (its ModelRuntime returns the

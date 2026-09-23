@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/dat267/pier/ai"
 	"github.com/dat267/pier/coding"
@@ -651,6 +652,12 @@ func modelsForProvider(models []*ai.Model, providerID string) []*ai.Model {
 // newAuthWiring assembles the AuthWiring (port of the corresponding InteractiveMode wiring).
 func newAuthWiring(app *App) *AuthWiring {
 	return &AuthWiring{
+		// The model-catalog refresh after a login is given a ceiling so a stalled
+		// provider cannot hang the flow (upstream scheduleTimer).
+		ScheduleTimer: func(ms int, fn func()) func() {
+			timer := time.AfterFunc(time.Duration(ms)*time.Millisecond, fn)
+			return func() { timer.Stop() }
+		},
 		Slot:                         app.Slot,
 		EditorContainer:              app.EditorContainer,
 		Editor:                       app.DefaultEditor,

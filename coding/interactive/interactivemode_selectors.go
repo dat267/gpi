@@ -349,9 +349,26 @@ func (w *SelectorWiring) ShowTreeSelector(ctx context.Context, initialSelectedID
 					w.Slot.UI.RequestRender(false)
 				}
 			},
-			TreeSelectorOptions{})
+			TreeSelectorOptions{
+				OnLabelChange: func(entryID string, label *string) {
+					if _, err := w.SessionInfo.AppendLabelChange(entryID, label); err != nil {
+						w.showError(err.Error())
+					}
+				},
+			})
 		return CreatedSelector{Component: selector, Focus: selector}
 	})
+}
+
+// handleTreeLabelChange records a label edit on the session (upstream
+// onLabelChange).
+func (w *SelectorWiring) handleTreeLabelChange(entryID string, label *string) {
+	if w.SessionInfo == nil {
+		return
+	}
+	if _, err := w.SessionInfo.AppendLabelChange(entryID, label); err != nil {
+		w.showError(err.Error())
+	}
 }
 
 func (w *SelectorWiring) handleTreeSelection(ctx context.Context, done func(), entryID string) {

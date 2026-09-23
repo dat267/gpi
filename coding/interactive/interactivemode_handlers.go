@@ -499,6 +499,22 @@ func newKeyWiring(app *App) *KeyWiring {
 				app.Queue.SetToolsExpanded(value, &app.Display.ToolOutputExpanded, app.UIState.BuiltInHeader, app.LoadedResourcesContainer)
 			})
 		},
+		// ctrl+shift+e: hand the prompt to $EDITOR. The editor owns the terminal
+		// while it runs, so the TUI is stopped and restarted around it
+		// (upstream handleOpenExternalEditor).
+		OnExternalEditor: func() {
+			content := app.DefaultEditor.GetText()
+			app.UI.Stop(tui.TuiStopOptions{})
+			result := EditInExternalEditor(ExternalEditorOptions{
+				Command: app.Settings.GetExternalEditorCommand(),
+				Content: content,
+			})
+			app.UI.Start()
+			if result.Status == "complete" {
+				app.DefaultEditor.SetText(result.Content)
+			}
+			app.UI.RequestRender(true)
+		},
 		OnThinkingToggle: func() {
 			// Pass the live display flag, not a copy: it is what the next toggle
 			// reads, so a copy left it stale and the second press re-derived the

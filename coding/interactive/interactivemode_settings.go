@@ -435,21 +435,24 @@ func chatChildren(chat *tui.Container) []tui.Component {
 // newSettingsWiring assembles the SettingsWiring (port of the corresponding InteractiveMode wiring).
 func newSettingsWiring(app *App) *SettingsWiring {
 	return &SettingsWiring{
-		Slot:                          app.Slot,
-		Settings:                      app.Settings,
-		Session:                       app.Session,
-		ThemeController:               themeSettingsControllerAdapter{app.Theme},
-		UI:                            app.UI,
-		Chat:                          app.Chat,
-		DefaultEditor:                 app.DefaultEditor,
-		Editor:                        app.DefaultEditor,
-		Renderer:                      app.UI,
-		UpdateThinkingBlockVisibility: func(hidden bool) { app.updateThinkingBlockVisibility(hidden) },
-		RebuildChatFromMessages:       func() { app.Startup.RebuildChatFromMessages() },
-		UpdateEditorBorderColor:       func() { app.updateEditorBorderColor() },
-		SetupAutocompleteProvider:     func() { app.Autocomplete.SetupAutocompleteProvider() },
-		SwitchTuiMode:                 func(mode string) bool { return app.Lifecycle.SwitchTuiMode(mode, true, true) },
-		ShowStatus:                    func(message string) { app.Transcript.ShowStatus(message) },
-		RequestRender:                 func() { app.UI.RequestRender(false) },
+		// The scrollbar row's side effect: the transcript's scroll view follows the
+		// setting, the same way a reload applies it.
+		ApplyFullscreenScrollbarSetting: func() { app.applyFullscreenScrollbarSetting() },
+		Slot:                            app.Slot,
+		Settings:                        app.Settings,
+		Session:                         app.Session,
+		ThemeController:                 themeSettingsControllerAdapter{app.Theme},
+		UI:                              app.UI,
+		Chat:                            app.Chat,
+		DefaultEditor:                   app.DefaultEditor,
+		Editor:                          app.DefaultEditor,
+		Renderer:                        app.UI,
+		UpdateThinkingBlockVisibility:   func(hidden bool) { app.updateThinkingBlockVisibility(hidden) },
+		RebuildChatFromMessages:         func() { app.Startup.RebuildChatFromMessages() },
+		UpdateEditorBorderColor:         func() { app.updateEditorBorderColor() },
+		SetupAutocompleteProvider:       func() { app.Autocomplete.SetupAutocompleteProvider() },
+		SwitchTuiMode:                   func(mode string) bool { return app.Lifecycle.SwitchTuiMode(mode, true, true) },
+		ShowStatus:                      func(message string) { app.Transcript.ShowStatus(message) },
+		RequestRender:                   func() { app.UI.RequestRender(false) },
 	}
 }
