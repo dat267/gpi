@@ -729,6 +729,16 @@ func newCommandWiring(app *App) *CommandWiring {
 		WriteDebugLog:   WriteDebugLogFile,
 		EditorContainer: app.EditorContainer,
 		Editor:          app.DefaultEditor,
+		// `/new` starts a fresh session. The seam was never assigned, so the
+		// command cleared the editor and returned without a word; the keybinding
+		// (app.session.new) already used this implementation.
+		NewSession: func(ctx context.Context) (bool, error) {
+			result, err := app.SessionNew(ctx)
+			if err != nil {
+				return false, err
+			}
+			return result.Cancelled, nil
+		},
 		RunDetached: func(fn func()) {
 			app.runDetached(func(ctx context.Context) error { fn(); return nil })
 		},

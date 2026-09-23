@@ -184,3 +184,26 @@ func TestBashCommandExcludedThroughSubmit(t *testing.T) {
 		t.Error("the !! form did not reach the handler as excluded")
 	}
 }
+
+// `/new` starts a fresh session and says so. The command's NewSession seam was
+// never assigned, so it cleared the editor and returned silently.
+func TestNewCommandStartsASession(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+
+	before := app.SessionMgr.GetSessionID()
+	app.Commands.HandleClearCommand(context.Background())
+
+	if after := app.SessionMgr.GetSessionID(); after == before {
+		t.Errorf("session id unchanged (%q)", after)
+	}
+	found := false
+	for _, text := range transcriptTexts(app) {
+		if strings.Contains(text, "New session started") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no confirmation in the transcript: %q", transcriptTexts(app))
+	}
+}
