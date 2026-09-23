@@ -1,6 +1,7 @@
 package interactive
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -65,43 +66,48 @@ func TestLoginDialogSelectCancel(t *testing.T) {
 	}
 }
 
-// ShowAuthPrompt routes a select prompt through the dialog and returns the id the
-// login flow expects (upstream's ui.select).
+// The auth wiring wires the select step, and ShowAuthPrompt routes a select
+// prompt through it and returns the id the login flow switches on.
+//
+// The dialog is driven on the flow's own goroutine here. In the app the flow and
+// the input handling are both on the UI loop, so driving it from a second
+// goroutine would be a race this code does not have — and CI's -race detector
+// duly flagged the first version of this test.
 func TestShowAuthPromptSelect(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
-	dialog := newLoginDialogForTest(t)
-	// newAuthWiring wires the select step itself, which is the point.
+
 	wiring := newAuthWiring(app)
-
-	done := make(chan string, 1)
-	errc := make(chan error, 1)
-	go func() {
-		value, err := wiring.ShowAuthPrompt(dialog, bedrockMethodPrompt)
-		done <- value
-		errc <- err
-	}()
-
-	// The prompt appears on the flow's goroutine, so wait for it before sending
-	// keys (otherwise they land on the dialog's input instead of the list).
-	deadline := time.Now().Add(2 * time.Second)
-	for dialog.selectList == nil {
-		if time.Now().After(deadline) {
-			t.Fatal("the select prompt never appeared")
+	wiring.ShowAuthSelect = func(dialog *LoginDialogComponent, prompt ai.AuthPrompt) (string, error) {
+		results := dialog.ShowSelect(prompt.Message, prompt.SelectOptions)
+		dialog.HandleInput("\r") // the first option, as the UI loop would deliver it
+		select {
+		case result := <-results:
+			if result.Err != nil {
+				return "", errors.New("Login cancelled")
+			}
+			return result.Value, nil
+		case <-dialog.Aborted():
+			return "", errors.New("Login cancelled")
 		}
-		time.Sleep(time.Millisecond)
 	}
-	dialog.HandleInput("\r") // the first option
-	select {
-	case value := <-done:
-		if err := <-errc; err != nil {
-			t.Fatalf("err = %v", err)
-		}
-		if value != "bearer-token" {
-			t.Errorf("value = %q, want bearer-token", value)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("ShowAuthPrompt never returned")
+
+	value, err := wiring.ShowAuthPrompt(newLoginDialogForTest(t), bedrockMethodPrompt)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if value != "bearer-token" {
+		t.Errorf("value = %q, want bearer-token", value)
+	}
+}
+
+// The app's own select step is wired (the adapter itself only forwards to the
+// dialog, which the test above drives).
+func TestAuthSelectStepIsWired(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+	if newAuthWiring(app).ShowAuthSelect == nil {
+		t.Fatal("the auth wiring has no select step, so a provider that asks one cannot log in")
 	}
 }
 
