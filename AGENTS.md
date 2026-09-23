@@ -463,13 +463,15 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   `ShowStatus`/`ShowError`/`ShowWarning` (every status it raised was dropped, so
   ctrl+t toggled with no feedback) and `HandlerWiring.HandleBashCommand`
   (`!command` in the editor did nothing). `/new` was the same shape and is wired
-  too. **Still off**, each a feature to build rather than a line to connect:
-  `/import` (`ImportFromJSONL` — it does report "Import cancelled"), `/clone`
-  (`HandleCloneCommand`) and the selector fork (`RuntimeFork`) — both of the
-  latter need the **runtime fork operation**, which is unported: `ForkSession`
-  copies a session file's entries but writes no leaf marker, so "fork at the
-  current position" depends on how the leaf is derived, and guessing there
-  misplaces session history; copying a selection (`CopyActiveSelection`), the
+  too. `/clone` (`HandleCloneCommand`) and the selector fork (`RuntimeFork`) were
+  the same unported operation and are **now implemented**
+  (`coding.ForkSessionAtEntry` + `App.forkAtEntry`, upstream's "at"/"before"
+  positions): the session format stores no leaf marker, so a session's leaf is
+  its last entry, which is why the fork copies the branch path to the chosen
+  entry instead of every entry the way `ForkSession` does. **Still off**, each a
+  feature to build rather than a line to connect:
+  `/import` (`ImportFromJSONL` — it does report "Import cancelled"), copying a
+  selection (`CopyActiveSelection`), the
   login select (`ShowAuthSelect`/`OnPromptShown`), the missing-cwd prompt, the
   settings side effects (`ClearStatusContainerIfIdle`,
   `ApplyFullscreenScrollbarSetting`), the session rebind (`RebindSession`), the
