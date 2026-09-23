@@ -16,6 +16,13 @@ var toggleBenchMessages = 200
 
 func buildToggleTranscript(b *testing.B, app *App) {
 	b.Helper()
+	buildToggleTranscriptTo(b, app)
+}
+
+// buildToggleTranscriptTo is buildToggleTranscript with a testing.TB, so tests
+// can reuse it too.
+func buildToggleTranscriptTo(b testing.TB, app *App) {
+	b.Helper()
 	thinking := strings.Repeat(
 		"Let me work through this carefully, weighing the alternatives and checking the edge cases as I go.\n", 40)
 	reply := strings.Repeat(
@@ -43,20 +50,21 @@ func buildToggleTranscript(b *testing.B, app *App) {
 }
 
 // BenchmarkToggleThinkingFull measures ctrl+t end to end: flip the setting,
-// rebuild every assistant message and repaint.
+// rebuild every assistant message and lay the transcript out.
+//
+// The layout is asked for through app.Chat.Render rather than UI.RenderNow: the
+// benchmark harness never starts the screen, so a frame is a no-op there and
+// timing it measures only the rebuild (which is not where the cost is).
 func BenchmarkToggleThinkingFull(b *testing.B) {
 	app, cleanup := newTestAppB(b)
 	defer cleanup()
-	screen, _ := app.initialUI.(*tui.AltScreen)
-	screen.Start()
-	screen.DisableAutoRender()
 	buildToggleTranscript(b, app)
-	app.UI.RenderNow(true)
+	_ = app.Chat.Render(80)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		app.Queue.ToggleThinkingBlockVisibility(&app.Display.HideThinkingBlock)
-		app.UI.RenderNow(true)
+		_ = app.Chat.Render(80)
 	}
 }
 
@@ -199,21 +207,20 @@ func TestStreamingTransitionRerenders(t *testing.T) {
 
 // BenchmarkToggleThinkingFirstExpand measures expanding a transcript that was
 // built with thinking hidden: the collapsed render never lexed the thinking
-// text, so the first expansion has to. Everything after that is the reuse path.
+// text, so the first expansion has to, and it is the layout that pays.
+// Everything after that is the reuse path, so with -benchtime=Nx the first
+// iteration is the cold expansion and the rest are warm.
 func BenchmarkToggleThinkingFirstExpand(b *testing.B) {
 	app, cleanup := newTestAppB(b)
 	defer cleanup()
-	screen, _ := app.initialUI.(*tui.AltScreen)
-	screen.Start()
-	screen.DisableAutoRender()
 	app.Display.HideThinkingBlock = true
 	buildToggleTranscript(b, app)
-	app.UI.RenderNow(true)
+	_ = app.Chat.Render(80)
 	app.Display.HideThinkingBlock = false
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		app.Queue.UpdateThinkingBlockVisibility(false)
-		app.UI.RenderNow(true)
+		_ = app.Chat.Render(80)
 	}
 }

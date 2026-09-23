@@ -66,12 +66,11 @@ func splitIntoTokensWithAnsi(text string) []string {
 			continue
 		}
 
-		end := index
-		for end < len(text) {
-			if code, _ := ExtractANSICode(text, end); code != "" {
-				break
-			}
-			end++
+		// Jump to the next escape rather than testing every byte: an ANSI code
+		// can only start at ESC (ExtractANSICode returns "" otherwise).
+		end := len(text)
+		if escape := strings.IndexByte(text[index:], '\x1b'); escape >= 0 {
+			end = index + escape
 		}
 
 		for _, segment := range segmentGraphemes(text[index:end]) {
@@ -130,12 +129,9 @@ func breakLongWord(word string, maxWidth int, tracker *ansiCodeTracker) []string
 			index += length
 			continue
 		}
-		end := index
-		for end < len(word) {
-			if code, _ := ExtractANSICode(word, end); code != "" {
-				break
-			}
-			end++
+		end := len(word)
+		if escape := strings.IndexByte(word[index:], '\x1b'); escape >= 0 {
+			end = index + escape
 		}
 		for _, segment := range segmentGraphemes(word[index:end]) {
 			w := graphemeWidth(segment)

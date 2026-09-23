@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/text/width"
 )
@@ -23,29 +24,47 @@ func segmentGraphemes(text string) []string {
 	if text == "" {
 		return nil
 	}
-	runes := []rune(text)
+	// A cluster is a contiguous run of the input, so the clusters are substring
+	// headers rather than freshly built strings — building one string per cluster
+	// was the largest single source of allocations in markdown rendering.
+	//
+	// Nothing in ASCII extends a cluster, so every byte is a cluster and there is
+	// no need to look at runes at all.
+	if isASCII(text) {
+		segments := make([]string, len(text))
+		for index := 0; index < len(text); index++ {
+			segments[index] = text[index : index+1]
+		}
+		return segments
+	}
+
 	var segments []string
-	var cluster []rune
-	flush := func() {
-		if len(cluster) > 0 {
-			segments = append(segments, string(cluster))
-			cluster = cluster[:0]
-		}
-	}
-	for index, r := range runes {
-		if index == 0 {
-			cluster = append(cluster, r)
+	clusterStart := 0
+	previous := rune(0)
+	for index, current := range text {
+		if index == clusterStart {
+			previous = current
 			continue
 		}
-		if extendsCluster(cluster[len(cluster)-1], r) {
-			cluster = append(cluster, r)
+		if extendsCluster(previous, current) {
+			previous = current
 			continue
 		}
-		flush()
-		cluster = append(cluster, r)
+		segments = append(segments, text[clusterStart:index])
+		clusterStart = index
+		previous = current
 	}
-	flush()
-	return segments
+	return append(segments, text[clusterStart:])
+}
+
+// isASCII reports whether every byte is plain ASCII.
+func isASCII(text string) bool {
+	for index := 0; index < len(text); index++ {
+		if text[index] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 // extendsCluster reports whether r continues the grapheme cluster that ends
@@ -197,14 +216,16 @@ func isInTable(r rune, table [][2]rune) bool {
 
 // couldBeEmoji pre-filters segments before the full emoji check.
 func couldBeEmoji(segment string) bool {
-	runes := []rune(segment)
-	first := runes[0]
+	first, size := utf8.DecodeRuneInString(segment)
+	if size == 0 {
+		return false
+	}
 	return (first >= 0x1F000 && first <= 0x1FBFF) ||
 		(first >= 0x2300 && first <= 0x23FF) ||
 		(first >= 0x2600 && first <= 0x27BF) ||
 		(first >= 0x2B50 && first <= 0x2B55) ||
 		strings.ContainsRune(segment, 0xFE0F) ||
-		len(runes) > 2
+		utf8.RuneCountInString(segment) > 2
 }
 
 // isPrintableASCII reports whether every byte is printable ASCII.
@@ -223,16 +244,16 @@ func graphemeWidth(segment string) int {
 		return 3
 	}
 
-	runes := []rune(segment)
+	first, firstSize := utf8.DecodeRuneInString(segment)
 
 	// Marks that terminals allocate cells for when attached to a base.
-	if len(runes) > 0 && isTerminalSpacingMark(runes[0]) && !isBaseCharacter(runes[0]) {
-		return len(runes)
+	if firstSize > 0 && isTerminalSpacingMark(first) && !isBaseCharacter(first) {
+		return utf8.RuneCountInString(segment)
 	}
 
 	// Zero-width clusters (ignorable code points, lone controls, marks).
 	zeroWidth := true
-	for _, r := range runes {
+	for _, r := range segment {
 		if !isZeroWidthCodePoint(r) {
 			zeroWidth = false
 			break
@@ -249,23 +270,22 @@ func graphemeWidth(segment string) int {
 
 	// The base visible code point.
 	base := stripLeadingNonPrinting(segment)
-	baseRunes := []rune(base)
-	if len(baseRunes) == 0 {
+	if base == "" {
 		return 0
 	}
-	first := baseRunes[0]
+	baseFirst, baseSize := utf8.DecodeRuneInString(base)
 
 	// Regional indicators render as full-width emoji even isolated.
-	if isRegionalIndicator(first) {
+	if isRegionalIndicator(baseFirst) {
 		return 2
 	}
 
-	width := eastAsianWidth(first)
+	width := eastAsianWidth(baseFirst)
 
 	// Trailing visible code points terminals may allocate cells for: indic
 	// consonants after marks, halfwidth/fullwidth forms, Thai/Lao AM vowels.
 	followsMark := false
-	for _, char := range baseRunes[1:] {
+	for _, char := range base[baseSize:] {
 		switch {
 		case isTerminalSpacingMark(char):
 			width++
@@ -337,34 +357,33 @@ func isNonPrintingCodePoint(r rune) bool {
 
 // stripLeadingNonPrinting removes leading ignorable code points.
 func stripLeadingNonPrinting(segment string) string {
-	runes := []rune(segment)
-	index := 0
-	for index < len(runes) && (isZeroWidthCodePoint(runes[index]) || isCombiningMark(runes[index])) {
-		index++
+	for index, r := range segment {
+		if !isZeroWidthCodePoint(r) && !isCombiningMark(r) {
+			return segment[index:]
+		}
 	}
-	return string(runes[index:])
+	return ""
 }
 
 // isEmojiPresentation reports emoji presentation: covered by the RGI set in
 // upstream; the port checks the presentation selector and the emoji block.
 func isEmojiPresentation(segment string) bool {
-	runes := []rune(segment)
 	// An explicit emoji presentation selector guarantees emoji presentation.
-	for _, r := range runes {
+	for _, r := range segment {
 		if r == 0xFE0F {
 			return true
 		}
 	}
 	// Keycap, regional flags, and ZWJ sequences render as emoji.
-	if len(runes) > 1 {
-		for _, r := range runes {
+	if utf8.RuneCountInString(segment) > 1 {
+		for _, r := range segment {
 			if r == 0x20E3 || isRegionalIndicator(r) || r == 0x200D {
 				return true
 			}
 		}
 	}
 	// Main emoji presentation ranges.
-	first := runes[0]
+	first, firstSize := utf8.DecodeRuneInString(segment)
 	switch {
 	case first >= 0x1F300 && first <= 0x1F5FF: // misc symbols and pictographs
 		return true
@@ -403,7 +422,11 @@ func isEmojiPresentation(segment string) bool {
 	case first == 0x2B50 || first == 0x2B55:
 		return true
 	case first == 0x00A9 || first == 0x00AE: // © ® (with VS16 only upstream)
-		return len(runes) > 1 && runes[1] == 0xFE0F
+		if firstSize == 0 || firstSize >= len(segment) {
+			return false
+		}
+		next, _ := utf8.DecodeRuneInString(segment[firstSize:])
+		return next == 0xFE0F
 	case first == 0x3030 || first == 0x303D || first == 0x3297 || first == 0x3299:
 		return true
 	}
