@@ -275,3 +275,34 @@ func GetCwdRelativePath(filePath string, cwd string) (string, bool) {
 	}
 	return rel, true
 }
+
+// IsLocalPath reports whether a resource argument names a filesystem path
+// rather than a package source (port of isLocalPath). A file: URL counts as
+// local, as upstream resolves it.
+func IsLocalPath(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	for _, prefix := range []string{"npm:", "git:", "github:", "http:", "https:", "ssh:"} {
+		if strings.HasPrefix(trimmed, prefix) {
+			return false
+		}
+	}
+	return true
+}
+
+// ResolveCLIPaths resolves the local entries of a CLI resource-path list
+// against cwd, leaving package sources untouched so a loader can reject them
+// with its own message (port of resolveCliPaths). Nil stays nil.
+func ResolveCLIPaths(cwd string, paths []string) []string {
+	if paths == nil {
+		return nil
+	}
+	out := make([]string, len(paths))
+	for i, path := range paths {
+		if IsLocalPath(path) {
+			out[i] = ResolvePath(path, cwd, PathInputOptions{})
+			continue
+		}
+		out[i] = path
+	}
+	return out
+}

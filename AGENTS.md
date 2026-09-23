@@ -457,10 +457,11 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   way: publishing must not overwrite an entry that appeared after the load, and
   a waiter slot is only claimed once the entry is confirmed published.
 - D153 — **`--use-theme`, `--name`, `--approve`/`--no-approve`, `--models`,
-  `--api-key`, `@file` arguments and the CLI's parse diagnostics are wired**
-  (`cmd/pier/main.go`, with the pure parts in `coding/clidiagnostics.go` and
-  `coding/cliinitial.go`). All seven were parsed, documented in `--help`, and
-  read by nothing: an unknown single-dash option, a bad `--thinking` value or a
+  `--api-key`, `--skill`, `--no-skills`, `--no-context-files`, `@file`
+  arguments and the CLI's parse diagnostics are wired**
+  (`cmd/pier/main.go`, with the pure parts in `coding/clidiagnostics.go`,
+  `coding/cliinitial.go` and `coding/paths.go`). All ten were parsed,
+  documented in `--help`, and read by nothing: an unknown single-dash option, a bad `--thinking` value or a
   blank `--name` was accepted silently, `pier @notes.txt "explain"` sent no
   file at all, and `--use-theme` left the configured theme in place. Diagnostics
   are now reported right after parsing — before `--version`, as upstream does —
@@ -470,9 +471,19 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   deliberate gap**: upstream attaches `@file` **images** to that first message;
   this build's interactive mode has no image-input path at all, so the images
   are dropped and a warning is printed rather than letting the model be asked
-  about an image it never received. `--extensions`/`--no-extensions` remain out
-  of scope (extension mechanics, D41); note that an unknown `--flag` is still
-  swallowed into `UnknownFlags` for extensions rather than reported.
+  about an image it never received. `--skill` paths are resolved against the
+  working directory (`ResolveCLIPaths`/`IsLocalPath`, a port of upstream
+  `resolveCliPaths`) and **survive `--no-skills`**, which suppresses discovery
+  and the settings' skill paths but not what was asked for explicitly — that
+  asymmetry is upstream's `noSkills` handling in its resource loader.
+  `--no-context-files` suppresses AGENTS.md/CLAUDE.md discovery.
+  `--extensions`/`--no-extensions` remain out of scope (extension mechanics,
+  D41); note that an unknown `--flag` is still swallowed into `UnknownFlags`
+  for extensions rather than reported. **Still unwired**: `--prompt-template`,
+  `--no-prompt-templates`, `--theme` and `--no-themes` — these are not missing
+  wiring but missing *subsystems*: the port never loads prompt templates into
+  the session (the loader exists, nothing calls it) and never discovers themes
+  from paths (only the built-in set is known).
 - D152 — the Unix socket **publish is portable** (`server/unix.go`,
   `server/publish_linux.go`, `server/publish_other.go`). Upstream publishes a
   bound socket with a hard link, which is atomic and refuses to overwrite — so a

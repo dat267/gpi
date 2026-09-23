@@ -240,6 +240,11 @@ func run(appName string, args *coding.Args) error {
 		NoTools:      tools.NoTools,
 		// Model cycle scope (--models, or the settings' enabled models).
 		ScopedModels: scopedModels,
+		// Resource flags: explicit skill directories (resolved against cwd, as
+		// upstream resolveCliPaths does) and the discovery switches.
+		SkillPaths:     coding.ResolveCLIPaths(cwd, args.Skills),
+		NoSkills:       args.NoSkills,
+		NoContextFiles: args.NoContextFiles,
 	})
 	if err != nil {
 		return err

@@ -66,6 +66,15 @@ type CreateAgentSessionOptions struct {
 	// source; nil discovers APPEND_SYSTEM.md. Multiple entries join with a
 	// blank line.
 	AppendSystemPrompt []string
+	// SkillPaths are extra skill directories from the CLI (--skill), resolved
+	// by the caller. They load even under NoSkills: refusing discovery is not
+	// refusing what was asked for explicitly (upstream resourceLoader keeps its
+	// additionalSkillPaths when noSkills is set).
+	SkillPaths []string
+	// NoSkills suppresses skill discovery and the settings' skill paths.
+	NoSkills bool
+	// NoContextFiles suppresses AGENTS.md/CLAUDE.md discovery.
+	NoContextFiles bool
 }
 
 // CreateAgentSessionResult is the assembled session.
@@ -355,10 +364,19 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 	// and skills from the settings paths plus a trusted project's
 	// .pi/skills.
 	contextFiles := LoadProjectContextFiles(cwd, agentDir)
+	if options.NoContextFiles {
+		contextFiles = nil
+	}
 	projectTrusted := settingsManager.IsProjectTrusted()
+	// Explicit --skill paths survive --no-skills, so they are collected before
+	// the discovery switch is consulted.
+	skillPaths := append([]string{}, options.SkillPaths...)
+	if !options.NoSkills {
+		skillPaths = append(settingsManager.GetSkillPaths(), skillPaths...)
+	}
 	skillsResult := LoadSkills(LoadSkillsOptions{
-		Cwd: cwd, AgentDir: agentDir, SkillPaths: settingsManager.GetSkillPaths(),
-		IncludeDefaults: true,
+		Cwd: cwd, AgentDir: agentDir, SkillPaths: skillPaths,
+		IncludeDefaults: !options.NoSkills,
 	}, projectTrusted)
 	// The base/append system prompt follows the same rule as upstream's
 	// resource loader: an explicit --system-prompt / --append-system-prompt
