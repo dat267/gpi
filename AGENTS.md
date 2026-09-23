@@ -456,6 +456,29 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   refresh outcome, waiter count and canceled flag). Two races were fixed on the
   way: publishing must not overwrite an entry that appeared after the load, and
   a waiter slot is only claimed once the entry is confirmed published.
+- D155 — **the plumbing-to-nothing inventory** (the port's wiring structs
+  inject their collaborators as func fields, and several call sites nil-check a
+  seam and skip — so a seam nothing assigns is a feature that silently does
+  nothing). Two of these were reported and fixed: the queue controller's
+  `ShowStatus`/`ShowError`/`ShowWarning` (every status it raised was dropped, so
+  ctrl+t toggled with no feedback) and `HandlerWiring.HandleBashCommand`
+  (`!command` in the editor did nothing). `/new` was the same shape and is wired
+  too. **Still off**, each a feature to build rather than a line to connect:
+  `/import` (`ImportFromJSONL` — it does report "Import cancelled"), `/clone`
+  (`HandleCloneCommand`), deleting from the session picker (`DeleteSession`),
+  copying a selection (`CopyActiveSelection`), the login select
+  (`ShowAuthSelect`/`OnPromptShown`), the missing-cwd prompt, the settings side
+  effects (`ClearStatusContainerIfIdle`, `ApplyFullscreenScrollbarSetting`), the
+  session rebind (`RebindSession`), the partial-event hook, the tree label edit,
+  the external-editor action and the implicit trust save. **Deliberately off**
+  (out of scope): `ConfigureHTTPIdleTimeout` (no dispatcher counterpart, D41),
+  `CheckVersion`/`CheckPackageUpdates`/`ReportInstall` (package manager),
+  `LoadHighlightLanguages` (D74), `TmuxShow`, `DisposeRuntime`/
+  `KillDetachedChildren` (process-level), and the extension seams (D41). A
+  source-scanning test that flags these mechanically was written and then
+  dropped as not worth its keep: it needs AST heuristics (aliases, seams passed
+  as arguments, public seams an embedder assigns) plus a maintained allowlist,
+  and that machinery drifts — this row is the record instead.
 - D154 — **the port ships its own theme palette**. `coding/interactive/piertheme.go`
   defines two themes — one for a dark terminal background, one for a light one —
   and `cmd/pier` installs them at startup under the upstream names (`dark`,
