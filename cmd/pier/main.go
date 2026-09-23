@@ -347,6 +347,8 @@ func run(appName string, args *coding.Args) error {
 		InitialMessage:      initialPrompt.Message,
 		InitialMessages:     initialPrompt.Rest,
 		InitialThemeSetting: args.UseTheme,
+		// A model restore or resolution fallback is surfaced at startup.
+		ModelFallbackMessage: created.ModelFallbackMessage,
 		// Model-scope warnings ("No models match pattern ...") are shown at
 		// startup, the way upstream passes its startup diagnostics in.
 		StartupDiagnostics: startupDiagnostics,

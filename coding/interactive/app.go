@@ -74,6 +74,9 @@ type AppOptions struct {
 	// InitialMessage/InitialMessages are sent after startup.
 	InitialMessage  string
 	InitialMessages []string
+	// ModelFallbackMessage explains a model restore or resolution fallback; it is
+	// shown as a chat warning at startup.
+	ModelFallbackMessage string
 	// StartupDiagnostics are reported before the first render (upstream's
 	// startupDiagnostics, e.g. a --models pattern that matched nothing).
 	StartupDiagnostics []StartupDiagnostic
@@ -529,13 +532,14 @@ func (a *App) Run(ctx context.Context) {
 		RegisterSignals: func() { a.Lifecycle.RegisterSignalHandlers() },
 		Mount:           func() {},
 	}, RunOptions{
-		Offline:             a.options.Offline,
-		Hyperlinks:          a.options.Hyperlinks,
-		StartupDiagnostics:  a.options.StartupDiagnostics,
-		InitialMessage:      a.options.InitialMessage,
-		InitialMessages:     a.options.InitialMessages,
-		ModelDefaultMessage: modelDefault.Message,
-		ModelDefaultWarning: modelDefault.Warning,
+		Offline:              a.options.Offline,
+		Hyperlinks:           a.options.Hyperlinks,
+		StartupDiagnostics:   a.options.StartupDiagnostics,
+		ModelFallbackMessage: a.options.ModelFallbackMessage,
+		InitialMessage:       a.options.InitialMessage,
+		InitialMessages:      a.options.InitialMessages,
+		ModelDefaultMessage:  modelDefault.Message,
+		ModelDefaultWarning:  modelDefault.Warning,
 	})
 	a.Close()
 }
