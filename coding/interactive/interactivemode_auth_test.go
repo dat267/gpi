@@ -163,7 +163,7 @@ func TestAuthShowAuthPrompt(t *testing.T) {
 		}
 		return "chosen", nil
 	}
-	dialog := NewLoginDialogComponent(nil, "p", nil, "", "")
+	dialog := NewLoginDialogComponent(nil, nil, "p", nil, "", "")
 	value, err := wiring.ShowAuthPrompt(dialog, ai.AuthPrompt{Type: ai.AuthPromptSelect})
 	if err != nil || value != "chosen" {
 		t.Fatalf("value = %q, err = %v", value, err)
@@ -212,7 +212,7 @@ func TestAuthShowAuthPrompt(t *testing.T) {
 // TestAuthNotifyDialog covers the event mapping.
 func TestAuthNotifyDialog(t *testing.T) {
 	wiring, _ := newAuthTestWiring(t)
-	dialog := NewLoginDialogComponent(nil, "p", nil, "", "")
+	dialog := NewLoginDialogComponent(nil, nil, "p", nil, "", "")
 	wiring.NotifyAuthDialog(dialog, ai.AuthEvent{Type: ai.AuthEventAuthURL, URL: "https://example.com", Instructions: "open"})
 	wiring.NotifyAuthDialog(dialog, ai.AuthEvent{Type: ai.AuthEventDeviceCode, VerificationURI: "https://x", UserCode: "ABC"})
 	wiring.NotifyAuthDialog(dialog, ai.AuthEvent{Type: ai.AuthEventInfo, Message: "info"})

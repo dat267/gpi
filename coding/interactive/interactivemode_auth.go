@@ -441,24 +441,54 @@ func (w *AuthWiring) LoginProvider(ctx context.Context, dialog *LoginDialogCompo
 	return err
 }
 
+// post marshals a mutation from a login flow's goroutine onto the UI loop.
+func (w *AuthWiring) post(fn func()) {
+	if w.UI != nil {
+		w.UI.Post(fn)
+		return
+	}
+	fn()
+}
+
+// startLogin runs a login flow off the UI loop and posts its continuation back.
+//
+// The flow waits on the dialog for input, so running it on the loop would
+// deadlock: the loop would sit inside the flow, unable to deliver the keystroke
+// the flow is waiting for. Upstream awaits the flow inline, which its
+// single-threaded runtime can afford; here the flow gets its own goroutine and
+// touches the UI only through posted mutations (the dialog marshals its own).
+// The continuation runs on the loop, because restoring the editor, reporting
+// errors and synchronizing the model all mutate UI and session state.
+func (w *AuthWiring) startLogin(ctx context.Context, dialog *LoginDialogComponent, providerID string, providerName string, authType string, previousModel *ai.Model) {
+	go func() {
+		err := w.LoginProvider(ctx, dialog, providerID, authType)
+		w.post(func() {
+			w.restoreEditor()
+			if err != nil {
+				syncPrefix, failurePrefix := "Logged in to", "Failed to login to"
+				if authType == "api_key" {
+					syncPrefix, failurePrefix = "Saved API key for", "Failed to save API key for"
+				}
+				w.reportLoginError(err, providerName, syncPrefix, failurePrefix)
+				return
+			}
+			w.CompleteProviderAuthentication(ctx, providerID, providerName, authType, previousModel)
+		})
+	}()
+}
+
 // ShowLoginDialog runs an OAuth login.
 func (w *AuthWiring) ShowLoginDialog(ctx context.Context, providerID string, providerName string) {
 	previousModel := w.Session.Model()
-	dialog := NewLoginDialogComponent(w.UI, providerID, func(bool, string) {}, providerName, "")
+	dialog := NewLoginDialogComponent(w.UI, w.post, providerID, func(bool, string) {}, providerName, "")
 	w.showDialog(dialog)
-	err := w.LoginProvider(ctx, dialog, providerID, "oauth")
-	w.restoreEditor()
-	if err != nil {
-		w.reportLoginError(err, providerName, "Logged in to", "Failed to login to")
-		return
-	}
-	w.CompleteProviderAuthentication(ctx, providerID, providerName, "oauth", previousModel)
+	w.startLogin(ctx, dialog, providerID, providerName, "oauth", previousModel)
 }
 
 // ShowApiKeyLoginDialog runs an API-key login.
 func (w *AuthWiring) ShowApiKeyLoginDialog(ctx context.Context, providerID string, providerName string) {
 	previousModel := w.Session.Model()
-	dialog := NewLoginDialogComponent(w.UI, providerID, func(bool, string) {}, providerName, "")
+	dialog := NewLoginDialogComponent(w.UI, w.post, providerID, func(bool, string) {}, providerName, "")
 	if providerID == "amazon-bedrock" {
 		theme := ActiveTheme()
 		docsPath := "providers.md"
@@ -472,13 +502,7 @@ func (w *AuthWiring) ShowApiKeyLoginDialog(ctx context.Context, providerID strin
 		})
 	}
 	w.showDialog(dialog)
-	err := w.LoginProvider(ctx, dialog, providerID, "api_key")
-	w.restoreEditor()
-	if err != nil {
-		w.reportLoginError(err, providerName, "Saved API key for", "Failed to save API key for")
-		return
-	}
-	w.CompleteProviderAuthentication(ctx, providerID, providerName, "api_key", previousModel)
+	w.startLogin(ctx, dialog, providerID, providerName, "api_key", previousModel)
 }
 
 func (w *AuthWiring) reportLoginError(err error, providerName string, syncPrefix string, failurePrefix string) {
@@ -506,7 +530,7 @@ func (w *AuthWiring) showDialog(dialog *LoginDialogComponent) {
 
 // ShowAmbientAuthDialog shows the ambient-auth info dialog.
 func (w *AuthWiring) ShowAmbientAuthDialog(providerOption AuthSelectorProvider) {
-	dialog := NewLoginDialogComponent(w.UI, providerOption.ID,
+	dialog := NewLoginDialogComponent(w.UI, w.post, providerOption.ID,
 		func(bool, string) { w.restoreEditor() }, providerOption.Name, providerOption.Name+" setup")
 	methodName := "Authentication"
 	switch typed := providerOption.Method.(type) {

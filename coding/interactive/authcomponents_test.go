@@ -244,7 +244,7 @@ func TestLoginDialogAgainstUpstreamGolden(t *testing.T) {
 
 	for _, label := range sortedKeys(corpus.Login) {
 		spec := corpus.Login[label]
-		component := NewLoginDialogComponent(nil, "openai", nil, "", "")
+		component := NewLoginDialogComponent(nil, nil, "openai", nil, "", "")
 		if len(spec.DeviceCode) == 2 {
 			component.ShowDeviceCode(spec.DeviceCode[0], spec.DeviceCode[1])
 		}
@@ -291,7 +291,7 @@ func TestLoginDialogCancellation(t *testing.T) {
 	InitTheme("dark", false)
 
 	var completed []string
-	component := NewLoginDialogComponent(nil, "test", func(success bool, message string) {
+	component := NewLoginDialogComponent(nil, nil, "test", func(success bool, message string) {
 		completed = append(completed, message)
 	}, "", "")
 	results := component.ShowPrompt("code?", "")
@@ -314,7 +314,7 @@ func TestLoginDialogCancellation(t *testing.T) {
 	}
 
 	// Submitting resolves the prompt with the value.
-	component2 := NewLoginDialogComponent(nil, "test", nil, "", "")
+	component2 := NewLoginDialogComponent(nil, nil, "test", nil, "", "")
 	results2 := component2.ShowPrompt("code?", "")
 	component2.HandleInput("a")
 	component2.HandleInput("\r")
@@ -337,7 +337,7 @@ func TestBrowserOpenerHook(t *testing.T) {
 	SetBrowserOpener(func(url string) { opened = append(opened, url) })
 	defer SetBrowserOpener(nil)
 
-	component := NewLoginDialogComponent(nil, "test", nil, "", "")
+	component := NewLoginDialogComponent(nil, nil, "test", nil, "", "")
 	component.ShowAuth("https://example.com/auth", "instructions")
 	if len(opened) != 1 || opened[0] != "https://example.com/auth" {
 		t.Fatalf("opened = %v", opened)

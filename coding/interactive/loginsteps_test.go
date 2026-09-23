@@ -15,7 +15,7 @@ func newLoginDialogForTest(t *testing.T) *LoginDialogComponent {
 	SetTrueColorSupport(true)
 	SetStyleColorsEnabled(true)
 	InitTheme("dark", false)
-	return NewLoginDialogComponent(nil, "amazon-bedrock", func(bool, string) {}, "", "")
+	return NewLoginDialogComponent(nil, nil, "amazon-bedrock", func(bool, string) {}, "", "")
 }
 
 var bedrockMethodPrompt = ai.AuthPrompt{
