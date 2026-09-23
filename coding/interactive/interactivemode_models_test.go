@@ -260,17 +260,23 @@ func TestSessionSelectorWiring(t *testing.T) {
 	// A missing-cwd error can be resolved by prompting.
 	wiring.SwitchSession = func(_ context.Context, _ string, cwdOverride string) (*SessionSwitchResult, error) {
 		if cwdOverride == "" {
-			return nil, errors.New("Missing session cwd")
+			return nil, &coding.MissingSessionCwdError{Issue: coding.SessionCwdIssue{
+				SessionCwd: "/gone", FallbackCwd: "/here",
+			}}
 		}
 		return &SessionSwitchResult{}, nil
 	}
-	wiring.PromptForMissingCwd = func(context.Context, string) (string, bool) { return "/tmp/other", true }
+	wiring.PromptForMissingCwd = func(_ context.Context, issue coding.SessionCwdIssue, onCwd func(string, bool)) {
+		onCwd(issue.FallbackCwd, true)
+	}
 	wiring.HandleResumeSession(context.Background(), "session-c")
 	if statuses[len(statuses)-1] != "Resumed session in current cwd" {
 		t.Fatalf("statuses = %v", statuses)
 	}
 	// Declining the prompt cancels.
-	wiring.PromptForMissingCwd = func(context.Context, string) (string, bool) { return "", false }
+	wiring.PromptForMissingCwd = func(_ context.Context, _ coding.SessionCwdIssue, onCwd func(string, bool)) {
+		onCwd("", false)
+	}
 	wiring.HandleResumeSession(context.Background(), "session-d")
 	if statuses[len(statuses)-1] != "Resume cancelled" {
 		t.Fatalf("statuses = %v", statuses)

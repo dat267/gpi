@@ -42,8 +42,9 @@ type TrustCrashWiring struct {
 	Stop func(fullscreenExitOutput string)
 	// Exit terminates the process.
 	Exit func(code int)
-	// ShowExtensionConfirm shows a confirm dialog (extension UI seam).
-	ShowExtensionConfirm func(ctx context.Context, title string, message string) (bool, error)
+	// ShowExtensionConfirm asks a yes/no question; the answer arrives through the
+	// callback on the UI loop.
+	ShowExtensionConfirm func(ctx context.Context, title string, message string, onAnswer func(confirmed bool))
 
 	// bugReportHintShown dedupes the /bug hint.
 }
@@ -77,15 +78,23 @@ func (w *TrustCrashWiring) RenderProjectTrustWarningIfNeeded() {
 }
 
 // PromptForMissingSessionCwd asks for a fallback cwd.
-func (w *TrustCrashWiring) PromptForMissingSessionCwd(ctx context.Context, issue coding.SessionCwdIssue) (string, bool) {
+func (w *TrustCrashWiring) PromptForMissingSessionCwd(ctx context.Context, issue coding.SessionCwdIssue, onCwd func(cwd string, ok bool)) {
 	if w.ShowExtensionConfirm == nil {
-		return "", false
+		if onCwd != nil {
+			onCwd("", false)
+		}
+		return
 	}
-	confirmed, err := w.ShowExtensionConfirm(ctx, "Session cwd not found", coding.FormatMissingSessionCwdPrompt(issue))
-	if err != nil || !confirmed {
-		return "", false
-	}
-	return issue.FallbackCwd, true
+	w.ShowExtensionConfirm(ctx, "Session cwd not found", coding.FormatMissingSessionCwdPrompt(issue), func(confirmed bool) {
+		if onCwd == nil {
+			return
+		}
+		if !confirmed {
+			onCwd("", false)
+			return
+		}
+		onCwd(issue.FallbackCwd, true)
+	})
 }
 
 // HandleFatalRuntimeError reports a fatal error, records the crash and exits.
@@ -396,6 +405,10 @@ func trimSlash(value string) string { return strings.TrimPrefix(value, "/") }
 // newTrustCrashWiring assembles the TrustCrashWiring (port of the corresponding InteractiveMode wiring).
 func newTrustCrashWiring(app *App) *TrustCrashWiring {
 	return &TrustCrashWiring{
+		// The trust prompt's confirm, same dialog again.
+		ShowExtensionConfirm: func(ctx context.Context, title string, message string, onAnswer func(confirmed bool)) {
+			app.askConfirm(title, message, onAnswer)
+		},
 		Chat:             app.Chat,
 		UI:               app.UI,
 		Settings:         app.Settings,

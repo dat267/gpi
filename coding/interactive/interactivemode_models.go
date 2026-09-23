@@ -342,7 +342,7 @@ type SessionWiring struct {
 	// SwitchSession resumes a session (runtimeHost.switchSession).
 	SwitchSession func(ctx context.Context, sessionPath string, cwdOverride string) (*SessionSwitchResult, error)
 	// PromptForMissingCwd resolves a missing-cwd error.
-	PromptForMissingCwd func(ctx context.Context, message string) (string, bool)
+	PromptForMissingCwd func(ctx context.Context, issue coding.SessionCwdIssue, onCwd func(cwd string, ok bool))
 	// ShowStatus reports a status line.
 	ShowStatus func(message string)
 	// ShowError reports an error.
@@ -430,49 +430,45 @@ func (w *SessionWiring) ShowSessionSelector() {
 }
 
 // HandleResumeSession switches to another session.
-func (w *SessionWiring) HandleResumeSession(ctx context.Context, sessionPath string) SessionSwitchResult {
+func (w *SessionWiring) HandleResumeSession(ctx context.Context, sessionPath string) {
 	if w.ClearStatusIndicator != nil {
 		w.ClearStatusIndicator()
 	}
 	if w.SwitchSession == nil {
-		return SessionSwitchResult{}
-	}
-	result, err := w.SwitchSession(ctx, sessionPath, "")
-	if err == nil {
-		if result != nil && result.Cancelled {
-			return *result
-		}
-		w.showStatus("Resumed session")
-		if result == nil {
-			return SessionSwitchResult{}
-		}
-		return *result
+		return
 	}
 
-	// A missing cwd can be resolved by prompting for one.
-	// Upstream keys the retry on MissingSessionCwdError; the message itself says
-	// "working directory", so a substring check would never match.
-	var cwdErr *coding.MissingSessionCwdError
-	if w.PromptForMissingCwd != nil && errors.As(err, &cwdErr) {
-		selectedCwd, ok := w.PromptForMissingCwd(ctx, err.Error())
-		if !ok {
-			w.showStatus("Resume cancelled")
-			return SessionSwitchResult{Cancelled: true}
-		}
-		result, err = w.SwitchSession(ctx, sessionPath, selectedCwd)
+	// resumeWith switches and, when the session's stored cwd is gone, offers to
+	// continue in the fallback before trying again — upstream's awaits as a
+	// callback chain.
+	var resumeWith func(cwdOverride string)
+	resumeWith = func(cwdOverride string) {
+		result, err := w.SwitchSession(ctx, sessionPath, cwdOverride)
 		if err == nil {
 			if result != nil && result.Cancelled {
-				return *result
+				return
+			}
+			if cwdOverride == "" {
+				w.showStatus("Resumed session")
+				return
 			}
 			w.showStatus("Resumed session in current cwd")
-			if result == nil {
-				return SessionSwitchResult{}
-			}
-			return *result
+			return
 		}
+		var cwdErr *coding.MissingSessionCwdError
+		if w.PromptForMissingCwd != nil && errors.As(err, &cwdErr) {
+			w.PromptForMissingCwd(ctx, cwdErr.Issue, func(selectedCwd string, selected bool) {
+				if !selected {
+					w.showStatus("Resume cancelled")
+					return
+				}
+				resumeWith(selectedCwd)
+			})
+			return
+		}
+		w.showError("Failed to resume session: " + err.Error())
 	}
-	w.showError("Failed to resume session: " + err.Error())
-	return SessionSwitchResult{}
+	resumeWith("")
 }
 
 // newModelWiring assembles the ModelWiring (port of the corresponding InteractiveMode wiring).
@@ -494,6 +490,10 @@ func newModelWiring(app *App) *ModelWiring {
 // newSessionWiring assembles the SessionWiring (port of the corresponding InteractiveMode wiring).
 func newSessionWiring(app *App) *SessionWiring {
 	return &SessionWiring{
+		// The resume flow's missing-cwd prompt, same dialog as the import's.
+		PromptForMissingCwd: func(ctx context.Context, issue coding.SessionCwdIssue, onCwd func(cwd string, ok bool)) {
+			app.askMissingSessionCwd(issue, onCwd)
+		},
 		Slot:                 app.Slot,
 		Settings:             app.Settings,
 		SessionInfo:          app.SessionMgr,

@@ -138,14 +138,14 @@ func TestCommandExportImport(t *testing.T) {
 		t.Fatalf("errors = %v", errorsShown)
 	}
 	// A declined confirm cancels.
-	wiring.ShowExtensionConfirm = func(context.Context, string, string) (bool, error) { return false, nil }
+	wiring.ShowExtensionConfirm = func(_ context.Context, _, _ string, onAnswer func(bool)) { onAnswer(false) }
 	wiring.HandleImportCommand(context.Background(), "/import in.jsonl")
 	if statuses[len(statuses)-1] != "Import cancelled" {
 		t.Fatalf("statuses = %v", statuses)
 	}
 	// A successful import.
 	imported := []string{}
-	wiring.ShowExtensionConfirm = func(context.Context, string, string) (bool, error) { return true, nil }
+	wiring.ShowExtensionConfirm = func(_ context.Context, _, _ string, onAnswer func(bool)) { onAnswer(true) }
 	wiring.ImportFromJSONL = func(_ context.Context, path string, _ string) (bool, error) {
 		imported = append(imported, path)
 		return false, nil
@@ -157,11 +157,15 @@ func TestCommandExportImport(t *testing.T) {
 	// A missing-cwd error prompts and retries.
 	wiring.ImportFromJSONL = func(_ context.Context, _ string, cwdOverride string) (bool, error) {
 		if cwdOverride == "" {
-			return false, errors.New("Missing session cwd")
+			return false, &coding.MissingSessionCwdError{Issue: coding.SessionCwdIssue{
+				SessionCwd: "/gone", FallbackCwd: "/here",
+			}}
 		}
 		return false, nil
 	}
-	wiring.PromptForMissingCwd = func(context.Context, string) (string, bool) { return "/tmp/other", true }
+	wiring.PromptForMissingCwd = func(_ context.Context, issue coding.SessionCwdIssue, onCwd func(string, bool)) {
+		onCwd(issue.FallbackCwd, true)
+	}
 	wiring.HandleImportCommand(context.Background(), "/import in.jsonl")
 	if statuses[len(statuses)-1] != "Session imported from: in.jsonl" {
 		t.Fatalf("statuses = %v", statuses)

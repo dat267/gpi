@@ -24,6 +24,23 @@ func withSessionDir(t *testing.T, app *App) string {
 	return dir
 }
 
+// answerConfirm drives the confirm dialog the import flow shows, choosing the
+// option at the given index (0 = Yes/Continue).
+func answerConfirm(t *testing.T, app *App, option int) {
+	t.Helper()
+	if !app.Slot.HasActiveSelector() {
+		t.Fatal("the import flow showed no dialog")
+	}
+	selector, ok := app.Slot.ActiveSelectorComponent().(*ExtensionSelectorComponent)
+	if !ok {
+		t.Fatalf("dialog = %T, want the extension selector", app.Slot.ActiveSelectorComponent())
+	}
+	for i := 0; i < option; i++ {
+		selector.HandleInput("\x1b[B")
+	}
+	selector.HandleInput("\r")
+}
+
 // writeImportableSession writes a session file under its own directory, the way
 // a session from another project or machine would look.
 func writeImportableSession(t *testing.T, dir string) string {
@@ -53,6 +70,7 @@ func TestImportCommandCopiesIntoTheSessionDir(t *testing.T) {
 	sessionDir := withSessionDir(t, app)
 	source := writeImportableSession(t, t.TempDir())
 	newCommandWiring(app).HandleImportCommand(context.Background(), "/import "+source)
+	answerConfirm(t, app, 0)
 
 	copied := filepath.Join(sessionDir, filepath.Base(source))
 	if _, err := os.Stat(copied); err != nil {
@@ -86,6 +104,7 @@ func TestImportCommandDoesNotClobber(t *testing.T) {
 	}
 
 	newCommandWiring(app).HandleImportCommand(context.Background(), "/import "+source)
+	answerConfirm(t, app, 0)
 
 	content, err := os.ReadFile(existing)
 	if err != nil {
@@ -120,6 +139,7 @@ func TestImportCommandUsesAStoredFileInPlace(t *testing.T) {
 	}
 
 	newCommandWiring(app).HandleImportCommand(context.Background(), "/import "+target)
+	answerConfirm(t, app, 0)
 
 	if got := app.SessionMgr.GetSessionFile(); got != target {
 		t.Errorf("session file = %q, want the stored file %q", got, target)
@@ -135,31 +155,66 @@ func TestImportCommandMissingFile(t *testing.T) {
 
 	missing := filepath.Join(t.TempDir(), "nope.jsonl")
 	newCommandWiring(app).HandleImportCommand(context.Background(), "/import "+missing)
+	answerConfirm(t, app, 0)
 
 	if !transcriptContains(app, "Failed to import session: File not found: ") {
 		t.Errorf("no file-not-found report: %q", transcriptTexts(app))
 	}
 }
 
-// A session whose stored working directory is gone reports the cwd, which is
-// what the retry path looks for (upstream MissingSessionCwdError).
-func TestImportCommandMissingCwd(t *testing.T) {
-	app, cleanup := newTestApp(t)
-	defer cleanup()
-
-	gone := t.TempDir()
-	source := writeImportableSession(t, gone)
-	if err := os.RemoveAll(gone); err != nil {
-		t.Fatal(err)
+// A session whose stored working directory is gone asks whether to continue in
+// the fallback, and imports there when the answer is yes (upstream
+// MissingSessionCwdError → promptForMissingSessionCwd → retry).
+func TestImportCommandMissingCwdPrompt(t *testing.T) {
+	newGoneSession := func(t *testing.T) string {
+		t.Helper()
+		gone := t.TempDir()
+		source := writeImportableSession(t, gone)
+		if err := os.RemoveAll(gone); err != nil {
+			t.Fatal(err)
+		}
+		return source
 	}
 
-	newCommandWiring(app).HandleImportCommand(context.Background(), "/import "+source)
+	t.Run("continue imports in the fallback cwd", func(t *testing.T) {
+		app, cleanup := newTestApp(t)
+		defer cleanup()
+		sessionDir := withSessionDir(t, app)
+		source := newGoneSession(t)
 
-	// Upstream's wording (the retry path keys on the typed error, not on this
-	// text), and it names the fallback the prompt would offer.
-	if !transcriptContains(app, "Stored session working directory does not exist: ") {
-		t.Errorf("no cwd report: %q", transcriptTexts(app))
-	}
+		newCommandWiring(app).HandleImportCommand(context.Background(), "/import "+source)
+		answerConfirm(t, app, 0) // "Replace current session?" — yes
+		answerConfirm(t, app, 0) // "Session cwd not found" — continue in the fallback
+
+		if !transcriptHasStatus(app, "Session imported from: "+source) {
+			t.Errorf("no import status: %q", transcriptTexts(app))
+		}
+		// The imported session lives in this project's session directory. Its name
+		// is not pinned: the first attempt copies before it fails the cwd check, so
+		// the retry takes a numbered name — upstream leaves that copy behind too.
+		imported := app.SessionMgr.GetSessionFile()
+		if filepath.Dir(imported) != sessionDir {
+			t.Errorf("session file = %q, want a copy in %q", imported, sessionDir)
+		}
+		if !strings.HasPrefix(filepath.Base(imported), strings.TrimSuffix(filepath.Base(source), ".jsonl")) {
+			t.Errorf("session file = %q, want it derived from %q", imported, filepath.Base(source))
+		}
+	})
+
+	t.Run("cancel reports the cancellation", func(t *testing.T) {
+		app, cleanup := newTestApp(t)
+		defer cleanup()
+		withSessionDir(t, app)
+		source := newGoneSession(t)
+
+		newCommandWiring(app).HandleImportCommand(context.Background(), "/import "+source)
+		answerConfirm(t, app, 0) // replace the current session
+		answerConfirm(t, app, 1) // cancel at the cwd prompt
+
+		if !transcriptHasStatus(app, "Import cancelled") {
+			t.Errorf("no cancellation status: %q", transcriptTexts(app))
+		}
+	})
 }
 
 // A usage error is reported rather than silently ignored.

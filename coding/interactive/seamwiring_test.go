@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dat267/pier/ai"
+	"github.com/dat267/pier/coding"
 )
 
 // ctrl+shift+e hands the prompt to $EDITOR and takes the result back: the editor
@@ -101,4 +102,79 @@ func TestFullscreenScrollbarWiring(t *testing.T) {
 		t.Fatal("the settings wiring cannot apply the scrollbar setting")
 	}
 	wiring.ApplyFullscreenScrollbarSetting()
+}
+
+// selectorIn returns the dialog currently shown.
+func selectorIn(t *testing.T, app *App) *ExtensionSelectorComponent {
+	t.Helper()
+	component := app.Slot.ActiveSelectorComponent()
+	selector, ok := component.(*ExtensionSelectorComponent)
+	if !ok {
+		t.Fatalf("dialog = %T, want the extension selector", component)
+	}
+	return selector
+}
+
+// The native dialogs the confirm seams use (upstream reaches the same steps
+// through its extension UI).
+func TestAppConfirmDialogs(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+
+	t.Run("confirm yes", func(t *testing.T) {
+		var answer bool
+		answered := false
+		app.askConfirm("Title", "Message", func(confirmed bool) { answer, answered = confirmed, true })
+		selectorIn(t, app).HandleInput("\r")
+		if !answered || !answer {
+			t.Errorf("answered=%v answer=%v", answered, answer)
+		}
+		if app.Slot.HasActiveSelector() {
+			t.Error("the dialog stayed up after an answer")
+		}
+	})
+
+	t.Run("confirm no", func(t *testing.T) {
+		var answer bool
+		app.askConfirm("Title", "Message", func(confirmed bool) { answer = confirmed })
+		selector := selectorIn(t, app)
+		selector.HandleInput("\x1b[B") // move to No
+		selector.HandleInput("\r")
+		if answer {
+			t.Error("No was reported as yes")
+		}
+	})
+
+	t.Run("dismissal means no", func(t *testing.T) {
+		answered := false
+		answer := true
+		app.askConfirm("Title", "Message", func(confirmed bool) { answer, answered = confirmed, true })
+		selectorIn(t, app).HandleInput("\x1b")
+		if !answered || answer {
+			t.Errorf("answered=%v answer=%v, want a reported no", answered, answer)
+		}
+	})
+
+	t.Run("missing cwd continue", func(t *testing.T) {
+		issue := coding.SessionCwdIssue{SessionCwd: "/gone", FallbackCwd: "/fallback"}
+		var cwd string
+		var ok bool
+		app.askMissingSessionCwd(issue, func(selected string, selectedOK bool) { cwd, ok = selected, selectedOK })
+		selectorIn(t, app).HandleInput("\r")
+		if !ok || cwd != "/fallback" {
+			t.Errorf("cwd=%q ok=%v, want the fallback", cwd, ok)
+		}
+	})
+
+	t.Run("missing cwd cancel", func(t *testing.T) {
+		issue := coding.SessionCwdIssue{SessionCwd: "/gone", FallbackCwd: "/fallback"}
+		var ok bool
+		app.askMissingSessionCwd(issue, func(_ string, selectedOK bool) { ok = selectedOK })
+		selector := selectorIn(t, app)
+		selector.HandleInput("\x1b[B") // move to Cancel
+		selector.HandleInput("\r")
+		if ok {
+			t.Error("Cancel reported a cwd")
+		}
+	})
 }

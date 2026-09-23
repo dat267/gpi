@@ -59,10 +59,11 @@ type CommandWiring struct {
 	NewSession func(ctx context.Context) (bool, error)
 	// ImportFromJSONL imports a session ("" cwd = the session's cwd).
 	ImportFromJSONL func(ctx context.Context, inputPath string, cwdOverride string) (bool, error)
-	// ShowExtensionConfirm shows a confirm dialog (extension UI seam).
-	ShowExtensionConfirm func(ctx context.Context, title string, message string) (bool, error)
+	// ShowExtensionConfirm asks a yes/no question; the answer arrives through the
+	// callback on the UI loop (upstream's extension-UI confirm, awaited there).
+	ShowExtensionConfirm func(ctx context.Context, title string, message string, onAnswer func(confirmed bool))
 	// PromptForMissingCwd resolves a missing-cwd error.
-	PromptForMissingCwd func(ctx context.Context, message string) (string, bool)
+	PromptForMissingCwd func(ctx context.Context, issue coding.SessionCwdIssue, onCwd func(cwd string, ok bool))
 	// CopyToClipboard copies text, returning (ok, message).
 	CopyToClipboard func(text string) (bool, string)
 	// CopyActiveSelection copies the alt-screen selection.
@@ -182,40 +183,20 @@ func (w *CommandWiring) HandleImportCommand(ctx context.Context, text string) {
 		w.showError("Usage: /import <path.jsonl>")
 		return
 	}
-	if w.ShowExtensionConfirm != nil {
-		confirmed, err := w.ShowExtensionConfirm(ctx, "Import session", "Replace current session with "+inputPath+"?")
-		if err != nil || !confirmed {
+
+	// importWith runs the import and, when the session's stored cwd is gone,
+	// offers to continue in the fallback before trying again — upstream's
+	// await, then await again, as a callback chain.
+	var importWith func(cwdOverride string)
+	importWith = func(cwdOverride string) {
+		if w.ImportFromJSONL == nil {
 			w.showStatus("Import cancelled")
 			return
 		}
-	}
-	if w.ImportFromJSONL == nil {
-		w.showStatus("Import cancelled")
-		return
-	}
-	if w.ClearStatusIndicator != nil {
-		w.ClearStatusIndicator()
-	}
-	cancelled, err := w.ImportFromJSONL(ctx, inputPath, "")
-	if err == nil {
-		if cancelled {
-			w.showStatus("Import cancelled")
-			return
+		if w.ClearStatusIndicator != nil {
+			w.ClearStatusIndicator()
 		}
-		w.showStatus("Session imported from: " + inputPath)
-		return
-	}
-	// A missing cwd can be resolved by prompting for one.
-	// Upstream keys the retry on MissingSessionCwdError; the message itself says
-	// "working directory", so a substring check would never match.
-	var cwdErr *coding.MissingSessionCwdError
-	if w.PromptForMissingCwd != nil && errors.As(err, &cwdErr) {
-		selectedCwd, ok := w.PromptForMissingCwd(ctx, err.Error())
-		if !ok {
-			w.showStatus("Import cancelled")
-			return
-		}
-		cancelled, err = w.ImportFromJSONL(ctx, inputPath, selectedCwd)
+		cancelled, err := w.ImportFromJSONL(ctx, inputPath, cwdOverride)
 		if err == nil {
 			if cancelled {
 				w.showStatus("Import cancelled")
@@ -224,8 +205,31 @@ func (w *CommandWiring) HandleImportCommand(ctx context.Context, text string) {
 			w.showStatus("Session imported from: " + inputPath)
 			return
 		}
+		var cwdErr *coding.MissingSessionCwdError
+		if w.PromptForMissingCwd != nil && errors.As(err, &cwdErr) {
+			w.PromptForMissingCwd(ctx, cwdErr.Issue, func(selectedCwd string, selected bool) {
+				if !selected {
+					w.showStatus("Import cancelled")
+					return
+				}
+				importWith(selectedCwd)
+			})
+			return
+		}
+		w.showError("Failed to import session: " + err.Error())
 	}
-	w.showError("Failed to import session: " + err.Error())
+
+	if w.ShowExtensionConfirm == nil {
+		importWith("")
+		return
+	}
+	w.ShowExtensionConfirm(ctx, "Import session", "Replace current session with "+inputPath+"?", func(confirmed bool) {
+		if !confirmed {
+			w.showStatus("Import cancelled")
+			return
+		}
+		importWith("")
+	})
 }
 
 // HandleReloadCommand runs /reload (upstream handleReloadCommand): guard
@@ -735,6 +739,14 @@ func newCommandWiring(app *App) *CommandWiring {
 		// `/new` starts a fresh session. The seam was never assigned, so the
 		// command cleared the editor and returned without a word; the keybinding
 		// (app.session.new) already used this implementation.
+		// The dialogs the import flow asks: upstream reaches them through its
+		// extension UI; here they are the selector slot with a callback.
+		ShowExtensionConfirm: func(ctx context.Context, title string, message string, onAnswer func(confirmed bool)) {
+			app.askConfirm(title, message, onAnswer)
+		},
+		PromptForMissingCwd: func(ctx context.Context, issue coding.SessionCwdIssue, onCwd func(cwd string, ok bool)) {
+			app.askMissingSessionCwd(issue, onCwd)
+		},
 		// `/import` copies a session file into this project's session directory and
 		// switches to it.
 		ImportFromJSONL: func(ctx context.Context, inputPath string, cwdOverride string) (bool, error) {
