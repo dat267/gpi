@@ -658,6 +658,26 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
 - D137 — model-selector callbacks run outside the state mutex.
 - D138 — terminal input is delivered outside the terminal lock.
 - D139 — stdin-buffer callbacks are emitted outside the buffer lock.
+- D156 — **the login flow runs off the UI loop** (the fifth deadlock, and the
+  first found by reading rather than by driving the binary in a PTY).
+  `ShowLoginDialog`/`ShowApiKeyLoginDialog` called `LoginProvider` inline, and
+  the flow waits on the dialog for its answer — `ShowAuthPrompt` selects over
+  the dialog's input channel — so the loop sat inside the flow, waiting for a
+  keystroke only the loop could deliver. Every provider whose login prompts
+  hung: OAuth device flows, API-key entry, Bedrock's method/profile selects.
+  The dispatch is on the loop, the same reason the neighbouring
+  `HandleBashCommand` needed its off-loop fix. **Fixed**: `AuthWiring.startLogin`
+  (shared by the OAuth and API-key dialogs, which differed only in their message
+  prefixes) runs the flow on its own goroutine and posts its continuation —
+  editor restore, error report, `CompleteProviderAuthentication` — and
+  `LoginDialogComponent` takes a `post` func so its own `Show*` mutations are
+  marshaled onto the loop. The prompt channel is still created synchronously and
+  the browser opener stays on the flow's goroutine (exec can block); with a nil
+  `post` the mutations apply inline, which is how the dialog tests drive it.
+  Upstream awaits the flow inline, which its single-threaded runtime can afford.
+  `TestApiKeyLoginRunsOffTheUILoop` models production's single loop goroutine —
+  dispatch, then render and route input — and fails ("the login flow is running
+  on the UI loop") instead of hanging when the dispatch blocks.
 
 ## Out of scope (documented)
 
@@ -673,8 +693,10 @@ components), then the interactive coding-agent mode (theme, every component,
 and the mode method groups), each round verified against upstream Node goldens
 and committed locally with a README scoreboard update. The CLI
 (`cmd/pier`, originally `cmd/pi`) and its composition layer (`app.go`) came last,
-followed by four deadlock fixes found by driving the real binary in a PTY:
-D136 (editor submit), D137 (model selector), D138 (scroll), D139 (exit). The
+followed by five deadlock fixes: D136 (editor submit), D137 (model selector),
+D138 (scroll) and D139 (exit) were found by driving the real binary in a PTY,
+and D156 (login) by reading the dispatch path, with a test that fails instead of
+hanging when the regression returns. The
 executable was then renamed from `pi` to `gpi` and finally to `pier` (the display name follows the
 invoked file name).
 
