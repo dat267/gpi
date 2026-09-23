@@ -2,6 +2,7 @@ package interactive
 
 import (
 	"context"
+	"os/exec"
 	"strings"
 
 	"github.com/dat267/pier/ai"
@@ -413,6 +414,19 @@ func newTrustCrashWiring(app *App) *TrustCrashWiring {
 	}
 }
 
+// ResolveAutocompleteFdPath locates the `fd` binary the fuzzy file completion
+// uses. An empty result disables the fd-backed completion paths rather than
+// failing: the provider guards on it, so path completion still works through
+// the in-process directory listing. Hidden entries are not filtered by either
+// path — fd runs with --hidden, and the in-process listing applies only a
+// prefix filter — so `.pi` is offered after `~/` without typing the dot.
+func ResolveAutocompleteFdPath() string {
+	if path, err := exec.LookPath("fd"); err == nil {
+		return path
+	}
+	return ""
+}
+
 // newAutocompleteWiring assembles the AutocompleteWiring (port of the corresponding InteractiveMode wiring).
 func newAutocompleteWiring(app *App) *AutocompleteWiring {
 	return &AutocompleteWiring{
@@ -422,6 +436,7 @@ func newAutocompleteWiring(app *App) *AutocompleteWiring {
 		UI:             app.UI,
 		DefaultEditor:  app.DefaultEditor,
 		Editor:         app.DefaultEditor,
+		FdPath:         ResolveAutocompleteFdPath(),
 		LoginProviders: func() []AuthSelectorProvider { return app.Auth.GetLoginProviderOptions("") },
 		Skills:         app.skillCommands}
 }
