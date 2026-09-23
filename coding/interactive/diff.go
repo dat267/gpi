@@ -173,8 +173,8 @@ func diffComponents(oldTokens []string, newTokens []string) []*diffComponent {
 	for editLength <= maxEditLength {
 		found := false
 		var foundPath *diffPath
-		start := maxIntLocal(minDiagonalToConsider, -editLength)
-		end := minIntLocal(maxDiagonalToConsider, editLength)
+		start := max(minDiagonalToConsider, -editLength)
+		end := min(maxDiagonalToConsider, editLength)
 		for diagonalPath := start; diagonalPath <= end; diagonalPath += 2 {
 			removePath := bestPath[diagonalPath-1]
 			addPath := bestPath[diagonalPath+1]
@@ -206,10 +206,10 @@ func diffComponents(oldTokens []string, newTokens []string) []*diffComponent {
 			}
 			bestPath[diagonalPath] = basePath
 			if basePath.oldPos+1 >= oldLen {
-				maxDiagonalToConsider = minIntLocal(maxDiagonalToConsider, diagonalPath-1)
+				maxDiagonalToConsider = min(maxDiagonalToConsider, diagonalPath-1)
 			}
 			if newPos+1 >= newLen {
-				minDiagonalToConsider = maxIntLocal(minDiagonalToConsider, diagonalPath+1)
+				minDiagonalToConsider = max(minDiagonalToConsider, diagonalPath+1)
 			}
 		}
 		if found {
@@ -239,7 +239,7 @@ func buildDiffValues(components []*diffComponent, newTokens []string, oldTokens 
 	oldPos := 0
 	for _, component := range components {
 		if !component.removed {
-			end := minIntLocal(newPos+component.count, len(newTokens))
+			end := min(newPos+component.count, len(newTokens))
 			change := DiffChange{Value: diffJoin(newTokens[newPos:end])}
 			if !component.added {
 				change.Added = false
@@ -252,7 +252,7 @@ func buildDiffValues(components []*diffComponent, newTokens []string, oldTokens 
 			changes = append(changes, change)
 			continue
 		}
-		end := minIntLocal(oldPos+component.count, len(oldTokens))
+		end := min(oldPos+component.count, len(oldTokens))
 		changes = append(changes, DiffChange{Value: diffJoin(oldTokens[oldPos:end]), Removed: true})
 		oldPos = end
 	}
@@ -436,7 +436,7 @@ func overlapCount(a string, b string) int {
 	if len(a) < len(b) {
 		endB = len(a)
 	}
-	mapping := make([]int, maxIntLocal(1, endB))
+	mapping := make([]int, max(1, endB))
 	k := 0
 	if endB > 0 {
 		mapping[0] = 0
@@ -597,13 +597,6 @@ func RenderDiff(diffText string, options RenderDiffOptions) string {
 		}
 	}
 	return strings.Join(result, "\n")
-}
-
-func minIntLocal(a int, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func decodeRuneAt(value string, index int) (rune, int) {

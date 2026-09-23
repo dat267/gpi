@@ -146,7 +146,7 @@ func (b *DynamicBorder) Invalidate() {}
 
 // Render renders the border line.
 func (b *DynamicBorder) Render(width int) []string {
-	return []string{b.Color(strings.Repeat("─", maxIntLocal(1, width)))}
+	return []string{b.Color(strings.Repeat("─", max(1, width)))}
 }
 
 // VisualTruncateResult is the truncation outcome.
@@ -176,13 +176,6 @@ func TruncateToVisualLines(text string, maxVisualLines int, width int, paddingX 
 		VisualLines:  allVisualLines[start:],
 		SkippedCount: len(allVisualLines) - maxVisualLines,
 	}
-}
-
-func maxIntLocal(a int, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // secondTicker is time.NewTicker(1s) behind a small indirection so tests can

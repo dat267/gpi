@@ -2235,7 +2235,7 @@ func (m *SettingsManager) GetEditorPaddingX() int {
 func (m *SettingsManager) SetEditorPaddingX(padding int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	padding = maxInt(0, minInt(3, padding))
+	padding = max(0, min(3, padding))
 	m.globalSettings.EditorPaddingX = &padding
 	m.markModified("editorPaddingX", "")
 	m.save()
@@ -2274,7 +2274,7 @@ func (m *SettingsManager) GetAutocompleteMaxVisible() int {
 func (m *SettingsManager) SetAutocompleteMaxVisible(maxVisible int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	maxVisible = maxInt(3, minInt(20, maxVisible))
+	maxVisible = max(3, min(20, maxVisible))
 	m.globalSettings.AutocompleteMaxVisible = &maxVisible
 	m.markModified("autocompleteMaxVisible", "")
 	m.save()
@@ -2334,18 +2334,4 @@ func (m *SettingsManager) SetWarnings(warnings SettingsWarnings) {
 	m.globalSettings.Warnings = &copied
 	m.markModified("warnings", "")
 	m.save()
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

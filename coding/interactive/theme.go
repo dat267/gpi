@@ -305,8 +305,8 @@ func rgbTo256(r int, g int, b int) int {
 	grayIndex := 232 + grayIdx
 	grayDist := colorDistance(r, g, b, grayValue, grayValue, grayValue)
 
-	maxC := maxInt(r, maxInt(g, b))
-	minC := minInt(r, minInt(g, b))
+	maxC := max(r, max(g, b))
+	minC := min(r, min(g, b))
 	spread := maxC - minC
 
 	if spread < 10 && grayDist < cubeDist {
@@ -506,26 +506,6 @@ func AvailableThemes() []string {
 		names = append(names, info.Name)
 	}
 	return names
-}
-
-func maxInt(values ...int) int {
-	result := values[0]
-	for _, value := range values[1:] {
-		if value > result {
-			result = value
-		}
-	}
-	return result
-}
-
-func minInt(values ...int) int {
-	result := values[0]
-	for _, value := range values[1:] {
-		if value < result {
-			result = value
-		}
-	}
-	return result
 }
 
 func localeCompareTheme(a string, b string) int {

@@ -1177,7 +1177,7 @@ func StreamBedrockConverseSimple(model *Model, context TranscriptContext, option
 		budgets = *options.ThinkingBudgets
 	}
 	clampedReasoning := ClampReasoning(options.Reasoning)
-	room := maxInt(0, maxTokens-1024)
+	room := max(0, maxTokens-1024)
 	budget := thinkingBudget
 	if budget > room {
 		budget = room
@@ -1194,13 +1194,6 @@ func StreamBedrockConverseSimple(model *Model, context TranscriptContext, option
 	}
 	bedrockOptions.ThinkingBudgets = &budgets
 	return StreamBedrockConverse(model, context, bedrockOptions)
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // BedrockAPIKeyAuth is the Bedrock auth that accepts a bearer token, an AWS

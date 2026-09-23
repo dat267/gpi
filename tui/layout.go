@@ -55,15 +55,15 @@ type layoutContext struct {
 }
 
 func intersectRect(a LayoutRect, b LayoutRect) LayoutRect {
-	x := maxInt(a.X, b.X)
-	y := maxInt(a.Y, b.Y)
-	right := minInt(a.X+a.Width, b.X+b.Width)
-	bottom := minInt(a.Y+a.Height, b.Y+b.Height)
-	return LayoutRect{X: x, Y: y, Width: maxInt(0, right-x), Height: maxInt(0, bottom-y)}
+	x := max(a.X, b.X)
+	y := max(a.Y, b.Y)
+	right := min(a.X+a.Width, b.X+b.Width)
+	bottom := min(a.Y+a.Height, b.Y+b.Height)
+	return LayoutRect{X: x, Y: y, Width: max(0, right-x), Height: max(0, bottom-y)}
 }
 
 func renderCached(context *layoutContext, component Component, width int) []string {
-	safeWidth := maxInt(1, width)
+	safeWidth := max(1, width)
 	widths, ok := context.renderCache[component]
 	if !ok {
 		widths = map[int][]string{}
@@ -114,13 +114,13 @@ func layoutComponent(
 	height *int,
 	clip LayoutRect,
 ) *LayoutBox {
-	safeWidth := maxInt(1, width)
+	safeWidth := max(1, width)
 	node, hasNode := GetLayoutNode(component)
 	if !hasNode {
 		lines := renderCached(context, component, safeWidth)
 		allocatedHeight := len(lines)
 		if height != nil {
-			allocatedHeight = maxInt(0, *height)
+			allocatedHeight = max(0, *height)
 		}
 		lineOffset := 0
 		if len(lines) > allocatedHeight && allocatedHeight > 0 {
@@ -154,7 +154,7 @@ func layoutComponent(
 		contentHeight := childBox.Rect.Height
 		viewportHeight := contentHeight
 		if height != nil {
-			viewportHeight = maxInt(0, *height)
+			viewportHeight = max(0, *height)
 		}
 		state.UpdateLayout(contentHeight, viewportHeight, context.requestRender)
 		translateBox(childBox, previousScrollTop-state.ScrollTop())
@@ -179,7 +179,7 @@ func layoutComponent(
 	}
 
 	entries := VisibleStackEntries(node.Stack.Entries, context.viewport)
-	gapTotal := maxInt(0, len(entries)-1) * node.Stack.Gap
+	gapTotal := max(0, len(entries)-1) * node.Stack.Gap
 
 	if node.Kind == "vstack" {
 		intrinsicHeights := make([]int, len(entries))
@@ -197,7 +197,7 @@ func layoutComponent(
 		}
 		allocatedHeight := naturalHeight
 		if height != nil {
-			allocatedHeight = maxInt(0, *height)
+			allocatedHeight = max(0, *height)
 		}
 		rect := LayoutRect{X: x, Y: y, Width: safeWidth, Height: allocatedHeight}
 		box := &LayoutBox{Component: component, Rect: rect, Clip: intersectRect(clip, rect)}
@@ -224,14 +224,14 @@ func layoutComponent(
 	widths := AllocateStackSizes(entries, intrinsicWidths, &safeWidth, node.Stack.Gap)
 	intrinsicHeights := make([]int, len(entries))
 	for index, entry := range entries {
-		intrinsicHeights[index] = measureHeight(context, entry.Component, maxInt(1, widths[index]))
+		intrinsicHeights[index] = measureHeight(context, entry.Component, max(1, widths[index]))
 	}
 	allocatedHeight := 0
 	if height != nil {
-		allocatedHeight = maxInt(0, *height)
+		allocatedHeight = max(0, *height)
 	} else {
 		for _, childHeight := range intrinsicHeights {
-			allocatedHeight = maxInt(allocatedHeight, childHeight)
+			allocatedHeight = max(allocatedHeight, childHeight)
 		}
 	}
 	rect := LayoutRect{X: x, Y: y, Width: safeWidth, Height: allocatedHeight}
@@ -239,7 +239,7 @@ func layoutComponent(
 	childX := x
 	for index, entry := range entries {
 		naturalChildHeight := intrinsicHeights[index]
-		childHeight := minInt(allocatedHeight, naturalChildHeight)
+		childHeight := min(allocatedHeight, naturalChildHeight)
 		if node.Stack.Align == "stretch" {
 			childHeight = allocatedHeight
 		}
@@ -286,7 +286,7 @@ func replaceScrollbarCell(
 	}
 	before := SliceByColumn(line, 0, start, true)
 	target := SliceByColumn(line, start, end-start, true)
-	after := SliceByColumn(line, end, maxInt(0, totalWidth-end), true)
+	after := SliceByColumn(line, end, max(0, totalWidth-end), true)
 
 	targetPrefix := ""
 	targetIndex := 0
@@ -298,9 +298,9 @@ func replaceScrollbarCell(
 		targetPrefix += code
 		targetIndex += length
 	}
-	beforePadding := repeatSpaces(maxInt(0, start-VisibleWidth(before)))
-	cellPaddingBefore := repeatSpaces(maxInt(0, column-start))
-	cellPaddingAfter := repeatSpaces(maxInt(0, end-column-1))
+	beforePadding := repeatSpaces(max(0, start-VisibleWidth(before)))
+	cellPaddingBefore := repeatSpaces(max(0, column-start))
+	cellPaddingAfter := repeatSpaces(max(0, end-column-1))
 	targetStyle := segmentReset
 	if preserveTargetBackground {
 		targetStyle += GetActiveBackgroundAnsi(targetPrefix)
@@ -333,9 +333,9 @@ func GetScrollbarGeometry(box *LayoutBox, includeHiddenAuto bool) (ScrollbarGeom
 		return ScrollbarGeometry{}, false
 	}
 
-	minThumbHeight := minInt(2, trackHeight)
-	thumbHeight := maxInt(minThumbHeight, minInt(trackHeight, int(roundHalfUp(float64(trackHeight*trackHeight)/float64(contentHeight)))))
-	maxScrollTop := maxInt(0, contentHeight-trackHeight)
+	minThumbHeight := min(2, trackHeight)
+	thumbHeight := max(minThumbHeight, min(trackHeight, int(roundHalfUp(float64(trackHeight*trackHeight)/float64(contentHeight)))))
+	maxScrollTop := max(0, contentHeight-trackHeight)
 	maxThumbTop := trackHeight - thumbHeight
 	thumbOffset := 0
 	if maxScrollTop != 0 {
@@ -395,8 +395,8 @@ func paintScrollbar(box *LayoutBox, screen []string, totalWidth int) {
 func paintBox(box *LayoutBox, screen []string, totalWidth int) {
 	if box.HasLines {
 		offset := box.LineOffset
-		firstRow := maxInt(box.Rect.Y, maxInt(box.Clip.Y, 0))
-		lastRow := minInt(box.Rect.Y+box.Rect.Height, minInt(box.Clip.Y+box.Clip.Height, len(screen)))
+		firstRow := max(box.Rect.Y, max(box.Clip.Y, 0))
+		lastRow := min(box.Rect.Y+box.Rect.Height, min(box.Clip.Y+box.Clip.Height, len(screen)))
 		for row := firstRow; row < lastRow; row++ {
 			sourceIndex := offset + row - box.Rect.Y
 			if sourceIndex < 0 || sourceIndex >= len(box.Lines) {
@@ -404,8 +404,8 @@ func paintBox(box *LayoutBox, screen []string, totalWidth int) {
 			}
 			line := stripOSC133ZonePrefix(box.Lines[sourceIndex])
 			if metadata, hasMetadata := GetKittyImageMetadata(line); hasMetadata {
-				clipBottom := minInt(len(screen), box.Clip.Y+box.Clip.Height)
-				visibleRows := minInt(metadata.Rows, clipBottom-row)
+				clipBottom := min(len(screen), box.Clip.Y+box.Clip.Height)
+				visibleRows := min(metadata.Rows, clipBottom-row)
 				if visibleRows < metadata.Rows {
 					line = CropKittyImageLine(line, 0, visibleRows)
 				}
@@ -432,7 +432,7 @@ func paintBox(box *LayoutBox, screen []string, totalWidth int) {
 			if metadata, hasMetadata := GetKittyImageMetadata(imageLine); hasMetadata {
 				hiddenRows := box.ScrollView.ScrollTop() - imageRow
 				if hiddenRows < metadata.Rows {
-					visibleRows := minInt(box.Rect.Height, metadata.Rows-hiddenRows)
+					visibleRows := min(box.Rect.Height, metadata.Rows-hiddenRows)
 					cropped := CropKittyImageLine(imageLine, hiddenRows, visibleRows)
 					if box.Rect.X == 0 && box.Rect.Width >= totalWidth {
 						if box.Rect.Y >= 0 && box.Rect.Y < len(screen) {
@@ -454,8 +454,8 @@ func paintBox(box *LayoutBox, screen []string, totalWidth int) {
 // RenderLayoutFrame lays out a component tree and paints it into a screen
 // buffer.
 func RenderLayoutFrame(root Component, width int, height int, requestRender func()) LayoutFrame {
-	safeWidth := maxInt(1, width)
-	safeHeight := maxInt(1, height)
+	safeWidth := max(1, width)
+	safeHeight := max(1, height)
 	context := &layoutContext{
 		viewport:      LayoutViewport{Width: safeWidth, Height: safeHeight},
 		renderCache:   map[Component]map[int][]string{},

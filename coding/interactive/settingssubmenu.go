@@ -77,7 +77,7 @@ func NewSelectSubmenu(title string, description string, options []tui.SelectItem
 }
 
 func (c *SelectSubmenu) buildSelectList(options []tui.SelectItem, preselect string) *tui.SelectList {
-	maxVisible := minIntLocal(len(options), 10)
+	maxVisible := min(len(options), 10)
 	list := tui.NewSelectList(options, maxVisible, GetSelectListTheme(), c.listLayout)
 	for index, option := range options {
 		if option.Value == preselect {

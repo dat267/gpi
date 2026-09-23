@@ -104,8 +104,8 @@ func (t *Text) Render(width int) []string {
 	normalizedText := strings.ReplaceAll(t.text, "\t", "   ")
 
 	// Reduce the margins so content and padding fit the available width.
-	paddingX := minInt(t.paddingX, maxInt(0, (width-1)/2))
-	contentWidth := maxInt(1, width-paddingX*2)
+	paddingX := min(t.paddingX, max(0, (width-1)/2))
+	contentWidth := max(1, width-paddingX*2)
 
 	// Wrap (ANSI-preserving, no padding).
 	wrappedLines := WrapTextWithAnsi(normalizedText, contentWidth)
@@ -119,7 +119,7 @@ func (t *Text) Render(width int) []string {
 		if t.customBgFn != nil {
 			contentLines = append(contentLines, ApplyBackgroundToLine(lineWithMargins, width, t.customBgFn))
 		} else {
-			paddingNeeded := maxInt(0, width-VisibleWidth(lineWithMargins))
+			paddingNeeded := max(0, width-VisibleWidth(lineWithMargins))
 			contentLines = append(contentLines, lineWithMargins+strings.Repeat(" ", paddingNeeded))
 		}
 	}

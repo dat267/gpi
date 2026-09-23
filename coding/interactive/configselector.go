@@ -301,7 +301,7 @@ func (h *ConfigSelectorHeader) Render(width int) []string {
 		actionHint = RawKeyHint("space", "cycle inherit/+/-")
 	}
 	hint := switchHint + actionHint + sep + RawKeyHint("esc", "close")
-	spacing := maxIntLocal(1, width-tui.VisibleWidth(title)-tui.VisibleWidth(hint))
+	spacing := max(1, width-tui.VisibleWidth(title)-tui.VisibleWidth(hint))
 	scopeHint := theme.Fg("muted", "~/"+coding.ConfigDirName+"/agent/settings.json")
 	if h.writeScope == ConfigWriteScopeProject {
 		scopeHint = theme.Fg("muted", coding.ConfigDirName+"/settings.json · inherited global resources are dimmed")
@@ -351,7 +351,7 @@ func NewResourceList(groupsByScope map[ConfigWriteScope][]*resourceGroup, settin
 	if terminalHeight == 0 {
 		terminalHeight = 24
 	}
-	list.maxVisible = maxIntLocal(5, terminalHeight-chrome)
+	list.maxVisible = max(5, terminalHeight-chrome)
 	list.buildFlatList()
 	list.filteredItems = append([]flatEntry{}, list.flatItems...)
 	return list
@@ -514,8 +514,8 @@ func (r *ResourceList) Render(width int) []string {
 		return lines
 	}
 
-	startIndex := maxIntLocal(0, minIntLocal(r.selectedIndex-r.maxVisible/2, len(r.filteredItems)-r.maxVisible))
-	endIndex := minIntLocal(startIndex+r.maxVisible, len(r.filteredItems))
+	startIndex := max(0, min(r.selectedIndex-r.maxVisible/2, len(r.filteredItems)-r.maxVisible))
+	endIndex := min(startIndex+r.maxVisible, len(r.filteredItems))
 
 	for i := startIndex; i < endIndex; i++ {
 		entry := r.filteredItems[i]
@@ -591,7 +591,7 @@ func (r *ResourceList) HandleInput(data string) {
 		r.selectedIndex = r.findNextItem(r.selectedIndex, 1)
 		return
 	case kb.Matches(data, "tui.select.pageUp"):
-		target := maxIntLocal(0, r.selectedIndex-r.maxVisible)
+		target := max(0, r.selectedIndex-r.maxVisible)
 		for target < len(r.filteredItems) && r.filteredItems[target].Kind != flatItem {
 			target++
 		}
@@ -600,7 +600,7 @@ func (r *ResourceList) HandleInput(data string) {
 		}
 		return
 	case kb.Matches(data, "tui.select.pageDown"):
-		target := minIntLocal(len(r.filteredItems)-1, r.selectedIndex+r.maxVisible)
+		target := min(len(r.filteredItems)-1, r.selectedIndex+r.maxVisible)
 		for target >= 0 && r.filteredItems[target].Kind != flatItem {
 			target--
 		}

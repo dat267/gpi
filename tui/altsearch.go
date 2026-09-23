@@ -160,13 +160,13 @@ func findSearchCorpusMatches(corpus searchCorpus, normalizedQuery string) []AltS
 			startCol := span.startCol
 			endCol := span.endCol
 			if span.linearColumns {
-				startCol = span.startCol + maxInt(start, span.textStart) - span.textStart
-				endCol = span.startCol + minInt(end, span.textEnd) - span.textStart
+				startCol = span.startCol + max(start, span.textStart) - span.textStart
+				endCol = span.startCol + min(end, span.textEnd) - span.textStart
 			}
 			if len(segments) > 0 {
 				previous := &segments[len(segments)-1]
 				if previous.Row == span.row && startCol <= previous.EndCol {
-					previous.EndCol = maxInt(previous.EndCol, endCol)
+					previous.EndCol = max(previous.EndCol, endCol)
 					continue
 				}
 			}
@@ -344,8 +344,8 @@ func (c *AltScreenSearchComponent) Invalidate() { c.input.Invalidate() }
 
 // Render renders the overlay.
 func (c *AltScreenSearchComponent) Render(width int) []string {
-	safeWidth := maxInt(1, width)
-	innerWidth := maxInt(0, safeWidth-2)
+	safeWidth := max(1, width)
+	innerWidth := max(0, safeWidth-2)
 	formatKey := func(key string, hasKey bool) string {
 		if !hasKey || key == "" {
 			return "Unbound"
@@ -385,26 +385,26 @@ func (c *AltScreenSearchComponent) Render(width int) []string {
 			result = itoa(c.resultIndex+1) + "/" + itoa(c.resultCount)
 		}
 	}
-	resultSpace := maxInt(0, innerWidth-3)
+	resultSpace := max(0, innerWidth-3)
 	visibleResult := TruncateToWidth(result, resultSpace, "", false)
 	resultText := ""
 	if visibleResult != "" {
 		resultText = "\x1b[2m " + visibleResult + " \x1b[22m"
 	}
-	inputWidth := maxInt(0, innerWidth-VisibleWidth(resultText))
+	inputWidth := max(0, innerWidth-VisibleWidth(resultText))
 	inputLine := ""
-	if lines := c.input.Render(maxInt(1, inputWidth)); len(lines) > 0 {
+	if lines := c.input.Render(max(1, inputWidth)); len(lines) > 0 {
 		inputLine = lines[0]
 	}
 	inputLine = TruncateToWidth(inputLine, inputWidth, "", false)
-	inputPadding := repeatSpaces(maxInt(0, inputWidth-VisibleWidth(inputLine)))
+	inputPadding := repeatSpaces(max(0, inputWidth-VisibleWidth(inputLine)))
 	content := inputLine + inputPadding + resultText
 
 	previousButton := "↑ " + previousKey
 	nextButton := "↓ " + nextKey
 	separator := " · "
 	outerGapWidth := 1
-	availableControlsWidth := maxInt(0, innerWidth-outerGapWidth*2-1)
+	availableControlsWidth := max(0, innerWidth-outerGapWidth*2-1)
 	controlsWidth := VisibleWidth(previousButton) + VisibleWidth(separator) + VisibleWidth(nextButton)
 	if controlsWidth > availableControlsWidth {
 		previousButton = "↑"
@@ -431,7 +431,7 @@ func (c *AltScreenSearchComponent) Render(width int) []string {
 	if showButtons {
 		controlsWidthIfShown = controlsWidth
 	}
-	leftRuleWidth := maxInt(0, innerWidth-controlsWidthIfShown-outerGapsWidth-rightRuleWidth)
+	leftRuleWidth := max(0, innerWidth-controlsWidthIfShown-outerGapsWidth-rightRuleWidth)
 	previousStart := 1 + leftRuleWidth + outerGapWidth
 	if showButtons {
 		c.previousButtonStart = previousStart

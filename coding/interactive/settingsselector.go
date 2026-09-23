@@ -161,7 +161,7 @@ func newWarningSettingsSubmenu(warnings WarningSettings, onChange func(WarningSe
 		CurrentValue: boolStr(enabled),
 		Values:       []string{"true", "false"},
 	}}
-	submenu.settingsList = tui.NewSettingsList(items, minIntLocal(len(items), 10), GetSettingsListTheme(),
+	submenu.settingsList = tui.NewSettingsList(items, min(len(items), 10), GetSettingsListTheme(),
 		func(id string, newValue string) {
 			if id != "anthropic-extra-usage" {
 				return
@@ -425,7 +425,7 @@ func (c *ThemeSubmenu) showAutomaticMenu() {
 		},
 	}
 
-	settingsList := tui.NewSettingsList(items, minIntLocal(len(items), 10), GetSettingsListTheme(),
+	settingsList := tui.NewSettingsList(items, min(len(items), 10), GetSettingsListTheme(),
 		func(id string, newValue string) {
 			switch id {
 			case "single-mode":

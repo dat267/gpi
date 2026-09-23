@@ -80,7 +80,7 @@ func detectCacheMissFor(prev *previousRequest, message *ai.AssistantMessage, mod
 		return CacheMiss{}, false
 	}
 
-	missedTokens := min64(prev.PromptTokens, promptTokens) - usage.CacheRead
+	missedTokens := min(prev.PromptTokens, promptTokens) - usage.CacheRead
 	if missedTokens <= noiseFloorTokens {
 		return CacheMiss{}, false
 	}
@@ -106,7 +106,7 @@ func detectCacheMissFor(prev *previousRequest, message *ai.AssistantMessage, mod
 	return CacheMiss{
 		MissedTokens: missedTokens,
 		MissedCost:   float64(missedTokens) * math.Max(0, paidPerToken-readPerToken),
-		IdleMs:       max64(0, message.Timestamp-prev.Timestamp),
+		IdleMs:       max(0, message.Timestamp-prev.Timestamp),
 		ModelChanged: fmt.Sprintf("%s/%s", message.Provider, message.Model) != prev.ModelKey,
 	}, true
 }
@@ -282,18 +282,4 @@ func decodeAssistantMessage(raw json.RawMessage) *ai.AssistantMessage {
 		return nil
 	}
 	return &message
-}
-
-func min64(left, right int64) int64 {
-	if left < right {
-		return left
-	}
-	return right
-}
-
-func max64(left, right int64) int64 {
-	if left > right {
-		return left
-	}
-	return right
 }

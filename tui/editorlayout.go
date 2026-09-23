@@ -170,7 +170,7 @@ func WordWrapLine(line string, maxWidth int, preSegmented []editorSegment) []Tex
 
 // createScrollBorder renders the scroll indicator border.
 func createScrollBorder(direction string, hiddenLineCount int, width int) string {
-	availableWidth := maxInt(0, width)
+	availableWidth := max(0, width)
 	label := " " + direction + " " + itoa(hiddenLineCount) + " more "
 	labelWidth := VisibleWidth(label)
 	if labelWidth+2 <= availableWidth {
@@ -186,7 +186,7 @@ func createScrollBorder(direction string, hiddenLineCount int, width int) string
 
 	ellipsisRunes := []rune("...")
 	if availableWidth < len(ellipsisRunes) {
-		ellipsisRunes = ellipsisRunes[:maxInt(0, availableWidth)]
+		ellipsisRunes = ellipsisRunes[:max(0, availableWidth)]
 	}
 	ellipsis := string(ellipsisRunes)
 	indicatorWidth := availableWidth - VisibleWidth(ellipsis)

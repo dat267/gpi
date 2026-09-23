@@ -140,7 +140,7 @@ func (s *SelectList) SetFilter(filter string) {
 
 // SetSelectedIndex clamps and sets the selection.
 func (s *SelectList) SetSelectedIndex(index int) {
-	s.selectedIndex = maxInt(0, minInt(index, len(s.filteredItems)-1))
+	s.selectedIndex = max(0, min(index, len(s.filteredItems)-1))
 }
 
 // Invalidate drops cached state (none).
@@ -187,7 +187,7 @@ func (s *SelectList) HandleMouse(event TuiMouseEvent) *TuiMouseDispatchResult {
 			delta = -1
 		}
 		previousIndex := s.selectedIndex
-		s.selectedIndex = maxInt(0, minInt(len(s.filteredItems)-1, s.selectedIndex+delta))
+		s.selectedIndex = max(0, min(len(s.filteredItems)-1, s.selectedIndex+delta))
 		if s.selectedIndex != previousIndex {
 			s.notifySelectionChange()
 		}
@@ -261,8 +261,8 @@ func (s *SelectList) HandleInput(keyData string) {
 }
 
 func (s *SelectList) getVisibleRange() (startIndex int, endIndex int) {
-	startIndex = maxInt(0, minInt(s.selectedIndex-s.maxVisible/2, len(s.filteredItems)-s.maxVisible))
-	return startIndex, minInt(startIndex+s.maxVisible, len(s.filteredItems))
+	startIndex = max(0, min(s.selectedIndex-s.maxVisible/2, len(s.filteredItems)-s.maxVisible))
+	return startIndex, min(startIndex+s.maxVisible, len(s.filteredItems))
 }
 
 func (s *SelectList) renderItem(item SelectItem, isSelected bool, width int, descriptionSingleLine string, primaryColumnWidth int) string {
@@ -273,11 +273,11 @@ func (s *SelectList) renderItem(item SelectItem, isSelected bool, width int, des
 	prefixWidth := VisibleWidth(prefix)
 
 	if descriptionSingleLine != "" && width > 40 {
-		effectivePrimaryColumnWidth := maxInt(1, minInt(primaryColumnWidth, width-prefixWidth-4))
-		maxPrimaryWidth := maxInt(1, effectivePrimaryColumnWidth-primaryColumnGap)
+		effectivePrimaryColumnWidth := max(1, min(primaryColumnWidth, width-prefixWidth-4))
+		maxPrimaryWidth := max(1, effectivePrimaryColumnWidth-primaryColumnGap)
 		truncatedValue := s.truncatePrimary(item, isSelected, maxPrimaryWidth, effectivePrimaryColumnWidth)
 		truncatedValueWidth := VisibleWidth(truncatedValue)
-		spacing := repeatSpaces(maxInt(1, effectivePrimaryColumnWidth-truncatedValueWidth))
+		spacing := repeatSpaces(max(1, effectivePrimaryColumnWidth-truncatedValueWidth))
 		descriptionStart := prefixWidth + truncatedValueWidth + len(spacing)
 		remainingWidth := width - descriptionStart - 2 // safety margin
 
@@ -303,7 +303,7 @@ func (s *SelectList) getPrimaryColumnWidth() int {
 	minWidth, maxWidth := s.getPrimaryColumnBounds()
 	widest := 0
 	for _, item := range s.filteredItems {
-		widest = maxInt(widest, VisibleWidth(s.getDisplayValue(item))+primaryColumnGap)
+		widest = max(widest, VisibleWidth(s.getDisplayValue(item))+primaryColumnGap)
 	}
 	return clampInt(widest, minWidth, maxWidth)
 }
@@ -321,7 +321,7 @@ func (s *SelectList) getPrimaryColumnBounds() (minWidth int, maxWidth int) {
 	} else if s.layout.HasMin {
 		rawMax = s.layout.MinPrimaryColumnWidth
 	}
-	return maxInt(1, minInt(rawMin, rawMax)), maxInt(1, maxInt(rawMin, rawMax))
+	return max(1, min(rawMin, rawMax)), max(1, max(rawMin, rawMax))
 }
 
 func (s *SelectList) truncatePrimary(item SelectItem, isSelected bool, maxWidth int, columnWidth int) string {
@@ -392,7 +392,7 @@ func (t *TruncatedText) Render(width int) []string {
 		result = append(result, emptyLine)
 	}
 
-	availableWidth := maxInt(1, width-t.PaddingX*2)
+	availableWidth := max(1, width-t.PaddingX*2)
 
 	singleLineText := t.Text
 	if newlineIndex := strings.Index(t.Text, "\n"); newlineIndex != -1 {
@@ -401,9 +401,9 @@ func (t *TruncatedText) Render(width int) []string {
 
 	displayText := TruncateToWidth(singleLineText, availableWidth, "...", false)
 
-	leftPadding := repeatSpaces(maxInt(0, t.PaddingX))
+	leftPadding := repeatSpaces(max(0, t.PaddingX))
 	lineWithPadding := leftPadding + displayText + leftPadding
-	paddingNeeded := maxInt(0, width-VisibleWidth(lineWithPadding))
+	paddingNeeded := max(0, width-VisibleWidth(lineWithPadding))
 	result = append(result, lineWithPadding+repeatSpaces(paddingNeeded))
 
 	for i := 0; i < t.PaddingY; i++ {
@@ -723,7 +723,7 @@ func (c *AltScreenFlashContainer) Flash(message string, durationMS int) {
 	entry := flashEntry{
 		id:        c.nextID,
 		message:   message,
-		expiresAt: time.Now().Add(time.Duration(maxInt(0, durationMS)) * time.Millisecond),
+		expiresAt: time.Now().Add(time.Duration(max(0, durationMS)) * time.Millisecond),
 	}
 	c.nextID++
 	c.entries = append(c.entries, entry)

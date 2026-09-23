@@ -278,9 +278,9 @@ func (h *SessionSelectorHeader) Render(width int) []string {
 	}
 
 	rightText := tui.TruncateToWidth(scopeText+"  "+nameText+"  "+sortText, width, "", false)
-	availableLeft := maxIntLocal(0, width-tui.VisibleWidth(rightText)-1)
+	availableLeft := max(0, width-tui.VisibleWidth(rightText)-1)
 	left := tui.TruncateToWidth(leftText, availableLeft, "", false)
-	spacing := maxIntLocal(0, width-tui.VisibleWidth(left)-tui.VisibleWidth(rightText))
+	spacing := max(0, width-tui.VisibleWidth(left)-tui.VisibleWidth(rightText))
 
 	var hintLine1, hintLine2 string
 	switch {
@@ -540,7 +540,7 @@ func (l *SessionList) FilterSessions(query string) {
 		}
 	}
 	if l.selectedIndex > len(l.filtered)-1 {
-		l.selectedIndex = maxIntLocal(0, len(l.filtered)-1)
+		l.selectedIndex = max(0, len(l.filtered)-1)
 	}
 }
 
@@ -608,8 +608,8 @@ func (l *SessionList) Render(width int) []string {
 		return lines
 	}
 
-	startIndex := maxIntLocal(0, minIntLocal(l.selectedIndex-l.maxVisible/2, len(l.filtered)-l.maxVisible))
-	endIndex := minIntLocal(startIndex+l.maxVisible, len(l.filtered))
+	startIndex := max(0, min(l.selectedIndex-l.maxVisible/2, len(l.filtered)-l.maxVisible))
+	endIndex := min(startIndex+l.maxVisible, len(l.filtered))
 
 	now := l.now()
 	for i := startIndex; i < endIndex; i++ {
@@ -647,7 +647,7 @@ func (l *SessionList) Render(width int) []string {
 		rightWidth := tui.VisibleWidth(rightPart) + 2
 		availableForMsg := width - 2 - prefixWidth - rightWidth
 
-		truncatedMsg := tui.TruncateToWidth(normalizedMessage, maxIntLocal(10, availableForMsg), "…", false)
+		truncatedMsg := tui.TruncateToWidth(normalizedMessage, max(10, availableForMsg), "…", false)
 
 		messageColor := ""
 		switch {
@@ -668,7 +668,7 @@ func (l *SessionList) Render(width int) []string {
 
 		leftPart := cursor + theme.Fg("dim", prefix) + styledMsg
 		leftWidth := tui.VisibleWidth(leftPart)
-		spacing := maxIntLocal(1, width-leftWidth-tui.VisibleWidth(rightPart))
+		spacing := max(1, width-leftWidth-tui.VisibleWidth(rightPart))
 		rightColor := "dim"
 		if isConfirmingDelete {
 			rightColor = "error"
@@ -784,13 +784,13 @@ func (l *SessionList) HandleInput(keyData string) {
 	l.selectionTouched = true
 	switch {
 	case kb.Matches(keyData, "tui.select.up"):
-		l.selectedIndex = maxIntLocal(0, l.selectedIndex-1)
+		l.selectedIndex = max(0, l.selectedIndex-1)
 	case kb.Matches(keyData, "tui.select.down"):
-		l.selectedIndex = minIntLocal(len(l.filtered)-1, l.selectedIndex+1)
+		l.selectedIndex = min(len(l.filtered)-1, l.selectedIndex+1)
 	case kb.Matches(keyData, "tui.select.pageUp"):
-		l.selectedIndex = maxIntLocal(0, l.selectedIndex-l.maxVisible)
+		l.selectedIndex = max(0, l.selectedIndex-l.maxVisible)
 	case kb.Matches(keyData, "tui.select.pageDown"):
-		l.selectedIndex = minIntLocal(len(l.filtered)-1, l.selectedIndex+l.maxVisible)
+		l.selectedIndex = min(len(l.filtered)-1, l.selectedIndex+l.maxVisible)
 	case kb.Matches(keyData, "tui.select.confirm"):
 		if l.selectedIndex >= 0 && l.selectedIndex < len(l.filtered) && l.OnSelect != nil {
 			l.OnSelect(l.filtered[l.selectedIndex].Session.Path)

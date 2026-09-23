@@ -597,7 +597,7 @@ func applyMistralEvent(model *Model, output *AssistantMessage, stream *Assistant
 	if usage, ok := parseMistralUsage(event.Usage); ok {
 		promptTokens := usage.PromptTokens
 		cachedPromptTokens := mistralCachedPromptTokens(event.Usage, promptTokens)
-		output.Usage.Input = max64(0, promptTokens-cachedPromptTokens)
+		output.Usage.Input = max(0, promptTokens-cachedPromptTokens)
 		output.Usage.Output = usage.CompletionTokens
 		output.Usage.CacheRead = cachedPromptTokens
 		output.Usage.CacheWrite = 0
@@ -867,12 +867,12 @@ func mistralCachedPromptTokens(raw json.RawMessage, promptTokens int64) int64 {
 		{"prompt_token_details", "cached_tokens"},
 	} {
 		if value, ok := pick(usage[candidate.container], candidate.key); ok {
-			return min64(promptTokens, max64(0, value))
+			return min(promptTokens, max(0, value))
 		}
 	}
 	for _, key := range []string{"numCachedTokens", "num_cached_tokens"} {
 		if value, ok := usage[key].(float64); ok {
-			return min64(promptTokens, max64(0, int64(value)))
+			return min(promptTokens, max(0, int64(value)))
 		}
 	}
 	return 0
@@ -1121,18 +1121,4 @@ func mapMistralReasoningEffort(model *Model, level ThinkingLevel) MistralReasoni
 		return *mapped
 	}
 	return "high"
-}
-
-func max64(a, b int64) int64 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min64(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-	return b
 }

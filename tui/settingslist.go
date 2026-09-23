@@ -154,9 +154,9 @@ func (s *SettingsList) renderMainList(width int) []string {
 	maxLabelWidth := 36
 	widest := 0
 	for _, item := range s.items {
-		widest = maxInt(widest, VisibleWidth(item.Label))
+		widest = max(widest, VisibleWidth(item.Label))
 	}
-	maxLabelWidth = minInt(maxLabelWidth, widest)
+	maxLabelWidth = min(maxLabelWidth, widest)
 
 	for i := startIndex; i < endIndex; i++ {
 		item := displayItems[i]
@@ -167,7 +167,7 @@ func (s *SettingsList) renderMainList(width int) []string {
 		}
 		prefixWidth := VisibleWidth(prefix)
 
-		labelPadded := item.Label + repeatSpaces(maxInt(0, maxLabelWidth-VisibleWidth(item.Label)))
+		labelPadded := item.Label + repeatSpaces(max(0, maxLabelWidth-VisibleWidth(item.Label)))
 		labelText := s.theme.Label(labelPadded, isSelected)
 
 		separator := "  "
@@ -229,7 +229,7 @@ func (s *SettingsList) HandleMouse(event TuiMouseEvent) *TuiMouseDispatchResult 
 			delta = -1
 		}
 		previousIndex := s.selectedIndex
-		s.selectedIndex = maxInt(0, minInt(len(displayItems)-1, s.selectedIndex+delta))
+		s.selectedIndex = max(0, min(len(displayItems)-1, s.selectedIndex+delta))
 		return &TuiMouseDispatchResult{TuiMouseEventResult: TuiMouseEventResult{
 			Handled: true, Render: s.selectedIndex != previousIndex, HasRender: true,
 		}}
@@ -329,8 +329,8 @@ func (s *SettingsList) getDisplayItems() []SettingItem {
 }
 
 func (s *SettingsList) getVisibleRange(displayItems []SettingItem) (startIndex int, endIndex int) {
-	startIndex = maxInt(0, minInt(s.selectedIndex-s.maxVisible/2, len(displayItems)-s.maxVisible))
-	return startIndex, minInt(startIndex+s.maxVisible, len(displayItems))
+	startIndex = max(0, min(s.selectedIndex-s.maxVisible/2, len(displayItems)-s.maxVisible))
+	return startIndex, min(startIndex+s.maxVisible, len(displayItems))
 }
 
 func (s *SettingsList) activateItem() {

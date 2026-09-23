@@ -271,7 +271,7 @@ func (s *MainScreen) getKittyImageReservedRows(lines []string, index int, maxInd
 	if rows <= 1 {
 		return 1
 	}
-	limit := maxInt(1, minInt(rows, minInt(maxIndex-index+1, len(lines)-index)))
+	limit := max(1, min(rows, min(maxIndex-index+1, len(lines)-index)))
 	reservedRows := 1
 	for reservedRows < limit {
 		next := ""
@@ -296,8 +296,8 @@ func (s *MainScreen) expandChangedRangeForKittyImages(firstChanged int, lastChan
 			}
 			blockEnd := i + s.getKittyImageReservedRows(lines, i, len(lines)-1) - 1
 			if i >= firstChanged || (i <= lastChanged && blockEnd >= firstChanged) {
-				expandedFirst = minInt(expandedFirst, i)
-				expandedLast = maxInt(expandedLast, blockEnd)
+				expandedFirst = min(expandedFirst, i)
+				expandedLast = max(expandedLast, blockEnd)
 			}
 		}
 	}
@@ -311,7 +311,7 @@ func (s *MainScreen) deleteChangedKittyImages(firstChanged int, lastChanged int)
 		return ""
 	}
 	ids := map[int]bool{}
-	maxLine := minInt(lastChanged, len(s.previousLines)-1)
+	maxLine := min(lastChanged, len(s.previousLines)-1)
 	for i := firstChanged; i <= maxLine; i++ {
 		for _, id := range extractKittyImageIDs(s.previousLines[i]) {
 			ids[id] = true
@@ -334,7 +334,7 @@ func (s *MainScreen) doRender() {
 	}
 	prevViewportTop := s.previousViewportTop
 	if heightChanged {
-		prevViewportTop = maxInt(0, previousBufferLength-height)
+		prevViewportTop = max(0, previousBufferLength-height)
 	}
 	viewportTop := prevViewportTop
 	hardwareCursorRow := s.hardwareCursorRow
@@ -394,17 +394,17 @@ func (s *MainScreen) doRender() {
 		}
 		output.Append("\x1b[?2026l") // End synchronized output
 		output.Flush()
-		s.cursorRow = maxInt(0, len(newLines)-1)
+		s.cursorRow = max(0, len(newLines)-1)
 		s.hardwareCursorRow = s.cursorRow
 		if clear {
 			s.maxLinesRendered = len(newLines)
 		} else {
-			s.maxLinesRendered = maxInt(s.maxLinesRendered, len(newLines))
+			s.maxLinesRendered = max(s.maxLinesRendered, len(newLines))
 		}
-		bufferLength := maxInt(height, len(newLines))
+		bufferLength := max(height, len(newLines))
 		// Commit the render state under s.mu: the stop path reads it
 		// concurrently with in-flight timer renders.
-		s.previousViewportTop = maxInt(0, bufferLength-height)
+		s.previousViewportTop = max(0, bufferLength-height)
 		s.positionHardwareCursor(cursorPos.Row, cursorPos.Col, cursorPos.Has, len(newLines))
 		s.previousLines = newLines
 		s.previousKittyImageIDs = s.collectKittyImageIDs(newLines)
@@ -434,7 +434,7 @@ func (s *MainScreen) doRender() {
 
 	firstChanged := -1
 	lastChanged := -1
-	maxLines := maxInt(len(newLines), len(s.previousLines))
+	maxLines := max(len(newLines), len(s.previousLines))
 	for i := 0; i < maxLines; i++ {
 		oldLine := ""
 		if i < len(s.previousLines) {
@@ -476,7 +476,7 @@ func (s *MainScreen) doRender() {
 			output := NewBoundedTerminalWriter(func(data string) { s.Terminal.Write(data) })
 			output.Append("\x1b[?2026h")
 			output.Append(s.deleteChangedKittyImages(firstChanged, lastChanged))
-			targetRow := maxInt(0, len(newLines)-1)
+			targetRow := max(0, len(newLines)-1)
 			if targetRow < prevViewportTop {
 				fullRender(true)
 				return
@@ -506,7 +506,7 @@ func (s *MainScreen) doRender() {
 					output.Append("\x1b[1B")
 				}
 			}
-			moveBack := maxInt(0, extraLines-1+clearStartOffset)
+			moveBack := max(0, extraLines-1+clearStartOffset)
 			if moveBack > 0 {
 				output.Append("\x1b[" + strconv.Itoa(moveBack) + "A")
 			}
@@ -539,7 +539,7 @@ func (s *MainScreen) doRender() {
 		moveTargetRow = firstChanged - 1
 	}
 	if moveTargetRow > prevViewportBottom {
-		currentScreenRow := maxInt(0, minInt(height-1, hardwareCursorRow-prevViewportTop))
+		currentScreenRow := max(0, min(height-1, hardwareCursorRow-prevViewportTop))
 		moveToBottom := height - 1 - currentScreenRow
 		if moveToBottom > 0 {
 			output.Append("\x1b[" + strconv.Itoa(moveToBottom) + "B")
@@ -563,7 +563,7 @@ func (s *MainScreen) doRender() {
 		output.Append("\r")
 	}
 
-	renderEnd := minInt(lastChanged, len(newLines)-1)
+	renderEnd := min(lastChanged, len(newLines)-1)
 	for i := firstChanged; i <= renderEnd; i++ {
 		if i > firstChanged {
 			output.Append("\r\n")
@@ -617,10 +617,10 @@ func (s *MainScreen) doRender() {
 	output.Append("\x1b[?2026l")
 	output.Flush()
 
-	s.cursorRow = maxInt(0, len(newLines)-1)
+	s.cursorRow = max(0, len(newLines)-1)
 	s.hardwareCursorRow = finalCursorRow
-	s.maxLinesRendered = maxInt(s.maxLinesRendered, len(newLines))
-	s.previousViewportTop = maxInt(prevViewportTop, finalCursorRow-height+1)
+	s.maxLinesRendered = max(s.maxLinesRendered, len(newLines))
+	s.previousViewportTop = max(prevViewportTop, finalCursorRow-height+1)
 
 	s.positionHardwareCursor(cursorPos.Row, cursorPos.Col, cursorPos.Has, len(newLines))
 
@@ -680,8 +680,8 @@ func (s *MainScreen) positionHardwareCursor(row int, col int, hasCursor bool, to
 		s.Terminal.HideCursor()
 		return
 	}
-	targetRow := maxInt(0, minInt(row, totalLines-1))
-	targetCol := maxInt(0, col)
+	targetRow := max(0, min(row, totalLines-1))
+	targetCol := max(0, col)
 
 	rowDelta := targetRow - s.hardwareCursorRow
 	var builder strings.Builder

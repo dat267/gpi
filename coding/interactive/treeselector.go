@@ -64,14 +64,14 @@ const (
 // renderHorizontalViewport clips the tree rows horizontally, keeping the
 // gutter visible and panning only when the selected row's anchor needs it.
 func renderHorizontalViewport(rows []horizontalViewportRow, width int) []string {
-	viewportWidth := maxIntLocal(0, width-treeGutterWidth)
+	viewportWidth := max(0, width-treeGutterWidth)
 	maxBodyWidth := 0
 	for _, row := range rows {
 		if row.BodyWidth > maxBodyWidth {
 			maxBodyWidth = row.BodyWidth
 		}
 	}
-	maxHorizontalScroll := maxIntLocal(0, maxBodyWidth-viewportWidth)
+	maxHorizontalScroll := max(0, maxBodyWidth-viewportWidth)
 
 	var selectedRow *horizontalViewportRow
 	for index := range rows {
@@ -83,12 +83,12 @@ func renderHorizontalViewport(rows []horizontalViewportRow, width int) []string 
 
 	horizontalScroll := 0
 	if selectedRow != nil && maxHorizontalScroll > 0 {
-		minVisible := minIntLocal(maxVisibleAnchorContentWidth,
-			maxIntLocal(minVisibleAnchorContentWidth, viewportWidth/3))
+		minVisible := min(maxVisibleAnchorContentWidth,
+			max(minVisibleAnchorContentWidth, viewportWidth/3))
 		if selectedRow.AnchorCol > viewportWidth-minVisible {
-			anchorContext := minIntLocal(maxAnchorContextWidth,
-				maxIntLocal(minAnchorContextWidth, viewportWidth/4))
-			horizontalScroll = minIntLocal(maxHorizontalScroll, selectedRow.AnchorCol-anchorContext)
+			anchorContext := min(maxAnchorContextWidth,
+				max(minAnchorContextWidth, viewportWidth/4))
+			horizontalScroll = min(maxHorizontalScroll, selectedRow.AnchorCol-anchorContext)
 		}
 	}
 
@@ -338,9 +338,9 @@ func (t *TreeList) flattenTree(roots []*coding.SessionTreeNode) []*flatNode {
 		connectorDisplayed := item.showConnector && !item.isVirtualRootChild
 		currentDisplayIndent := item.indent
 		if t.multipleRoots {
-			currentDisplayIndent = maxIntLocal(0, item.indent-1)
+			currentDisplayIndent = max(0, item.indent-1)
 		}
-		connectorPosition := maxIntLocal(0, currentDisplayIndent-1)
+		connectorPosition := max(0, currentDisplayIndent-1)
 		childGutters := item.gutters
 		if connectorDisplayed {
 			childGutters = append(append([]gutterInfo{}, item.gutters...),
@@ -446,7 +446,7 @@ func (t *TreeList) ApplyFilter() {
 	if t.lastSelectedID != nil {
 		t.selectedIndex = t.findNearestVisibleIndex(t.lastSelectedID)
 	} else if t.selectedIndex >= len(t.filteredNodes) {
-		t.selectedIndex = maxIntLocal(0, len(t.filteredNodes)-1)
+		t.selectedIndex = max(0, len(t.filteredNodes)-1)
 	}
 
 	if len(t.filteredNodes) > 0 {
@@ -561,9 +561,9 @@ func (t *TreeList) recalculateVisualStructure() {
 		connectorDisplayed := item.showConnector && !item.isVirtualRootChild
 		currentDisplayIndent := item.indent
 		if t.multipleRoots {
-			currentDisplayIndent = maxIntLocal(0, item.indent-1)
+			currentDisplayIndent = max(0, item.indent-1)
 		}
-		connectorPosition := maxIntLocal(0, currentDisplayIndent-1)
+		connectorPosition := max(0, currentDisplayIndent-1)
 		childGutters := item.gutters
 		if connectorDisplayed {
 			childGutters = append(append([]gutterInfo{}, item.gutters...),
@@ -709,11 +709,11 @@ func (t *TreeList) Render(width int) []string {
 		return lines
 	}
 
-	startIndex := maxIntLocal(0, minIntLocal(
+	startIndex := max(0, min(
 		t.selectedIndex-t.maxVisibleLines/2,
 		len(t.filteredNodes)-t.maxVisibleLines,
 	))
-	endIndex := minIntLocal(startIndex+t.maxVisibleLines, len(t.filteredNodes))
+	endIndex := min(startIndex+t.maxVisibleLines, len(t.filteredNodes))
 
 	var rows []horizontalViewportRow
 	for i := startIndex; i < endIndex; i++ {
@@ -728,7 +728,7 @@ func (t *TreeList) Render(width int) []string {
 
 		displayIndent := flatNode.Indent
 		if t.multipleRoots {
-			displayIndent = maxIntLocal(0, flatNode.Indent-1)
+			displayIndent = max(0, flatNode.Indent-1)
 		}
 
 		connector := ""
@@ -1201,9 +1201,9 @@ func (t *TreeList) HandleInput(keyData string) {
 			t.selectedIndex = t.findBranchSegmentStart("down")
 		}
 	case kb.Matches(keyData, "tui.editor.cursorLeft") || kb.Matches(keyData, "tui.select.pageUp"):
-		t.selectedIndex = maxIntLocal(0, t.selectedIndex-t.maxVisibleLines)
+		t.selectedIndex = max(0, t.selectedIndex-t.maxVisibleLines)
 	case kb.Matches(keyData, "tui.editor.cursorRight") || kb.Matches(keyData, "tui.select.pageDown"):
-		t.selectedIndex = minIntLocal(len(t.filteredNodes)-1, t.selectedIndex+t.maxVisibleLines)
+		t.selectedIndex = min(len(t.filteredNodes)-1, t.selectedIndex+t.maxVisibleLines)
 	case kb.Matches(keyData, "tui.select.confirm"):
 		if node := t.selectedNode(); node != nil && t.OnSelect != nil {
 			t.OnSelect(node.Node.Entry.ID)
@@ -1415,7 +1415,7 @@ func (h *TreeHelp) Render(width int) []string {
 		}
 	}
 
-	availableWidth := maxIntLocal(1, width)
+	availableWidth := max(1, width)
 	const indent = "  "
 	const separator = " · "
 	var lines []string
@@ -1651,7 +1651,7 @@ func NewTreeSelectorComponent(tree []*coding.SessionTreeNode, currentLeafID *str
 		component.scheduleTimer = options.ScheduleTimer
 	}
 
-	maxVisibleLines := maxIntLocal(5, terminalHeight/2)
+	maxVisibleLines := max(5, terminalHeight/2)
 	component.treeList = NewTreeList(tree, currentLeafID, maxVisibleLines, options.InitialSelectedID, options.InitialFilterMode)
 	if options.Now != nil {
 		component.treeList.SetNow(options.Now)

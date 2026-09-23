@@ -171,10 +171,3 @@ func PathKey(path Path) string {
 	builder.WriteByte(']')
 	return builder.String()
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

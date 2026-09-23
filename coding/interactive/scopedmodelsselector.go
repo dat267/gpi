@@ -405,7 +405,7 @@ func (c *ScopedModelsSelectorComponent) refreshList() {
 	} else {
 		c.filteredItems = items
 	}
-	c.selectedIndex = minIntLocal(c.selectedIndex, maxIntLocal(0, len(c.filteredItems)-1))
+	c.selectedIndex = min(c.selectedIndex, max(0, len(c.filteredItems)-1))
 	c.updateList()
 	c.footerText.SetText(c.getFooterText())
 }
@@ -430,8 +430,8 @@ func (c *ScopedModelsSelectorComponent) updateList() {
 		return
 	}
 
-	startIndex := maxIntLocal(0, minIntLocal(c.selectedIndex-c.maxVisible/2, len(c.filteredItems)-c.maxVisible))
-	endIndex := minIntLocal(startIndex+c.maxVisible, len(c.filteredItems))
+	startIndex := max(0, min(c.selectedIndex-c.maxVisible/2, len(c.filteredItems)-c.maxVisible))
+	endIndex := min(startIndex+c.maxVisible, len(c.filteredItems))
 	for i := startIndex; i < endIndex; i++ {
 		item := c.filteredItems[i]
 		isSelected := i == c.selectedIndex

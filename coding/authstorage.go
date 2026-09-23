@@ -262,9 +262,9 @@ func (b *FileAuthStorageBackend) acquireAuthLockAsync(ctx context.Context) (func
 		if !errors.Is(err, errAuthLocked) || remaining <= 0 {
 			return nil, err
 		}
-		baseDelayMs := minFloat(math.Pow(2, float64(retry))*10, float64(maxDelayMs)/2)
+		baseDelayMs := min(math.Pow(2, float64(retry))*10, float64(maxDelayMs)/2)
 		retry++
-		delayMs := minFloat(baseDelayMs*(1+rand.Float64()), float64(remaining.Milliseconds()))
+		delayMs := min(baseDelayMs*(1+rand.Float64()), float64(remaining.Milliseconds()))
 		if delayMs < 1 {
 			delayMs = 1
 		}
@@ -276,13 +276,6 @@ func (b *FileAuthStorageBackend) acquireAuthLockAsync(ctx context.Context) (func
 		case <-timer.C:
 		}
 	}
-}
-
-func minFloat(left, right float64) float64 {
-	if left < right {
-		return left
-	}
-	return right
 }
 
 // writeFileMode writes with the creation mode masked by the process umask,

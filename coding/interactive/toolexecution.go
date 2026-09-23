@@ -243,7 +243,7 @@ func (c *ToolExecutionComponent) SetShowImages(show bool) {
 
 // SetImageWidthCells updates the image width.
 func (c *ToolExecutionComponent) SetImageWidthCells(width int) {
-	c.imageWidthCells = maxIntLocal(1, width)
+	c.imageWidthCells = max(1, width)
 	c.updateDisplay()
 }
 

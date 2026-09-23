@@ -174,7 +174,7 @@ func (c *FirstTimeSetupComponent) addOptionList(labels []string, selectedIndex i
 
 func (c *FirstTimeSetupComponent) moveSelection(delta int) {
 	if c.step == "theme" {
-		next := maxIntLocal(0, minIntLocal(1, c.themeIndex+delta))
+		next := max(0, min(1, c.themeIndex+delta))
 		if next != c.themeIndex {
 			c.themeIndex = next
 			if c.options.OnThemePreview != nil {
@@ -186,7 +186,7 @@ func (c *FirstTimeSetupComponent) moveSelection(delta int) {
 			}
 		}
 	} else {
-		c.analyticsIndex = maxIntLocal(0, minIntLocal(1, c.analyticsIndex+delta))
+		c.analyticsIndex = max(0, min(1, c.analyticsIndex+delta))
 	}
 	c.update()
 }
@@ -363,13 +363,13 @@ func (c *DaxnutsComponent) Render(width int) []string {
 
 	center := func(value string) string {
 		visible := tui.VisibleWidth(value)
-		left := maxIntLocal(0, (width-visible)/2)
+		left := max(0, (width-visible)/2)
 		return strings.Repeat(" ", left) + value
 	}
 
 	lines = append(lines, "")
 
-	revealedRows := minIntLocal(len(c.image), c.tick*(len(c.image)+3)/c.maxTicks)
+	revealedRows := min(len(c.image), c.tick*(len(c.image)+3)/c.maxTicks)
 	for i := 0; i < len(c.image); i++ {
 		switch {
 		case i < revealedRows:
@@ -571,12 +571,12 @@ func (c *ArminComponent) Render(width int) []string {
 		} else {
 			clipped = strings.Join(row, "")
 		}
-		padRight := maxIntLocal(0, width-padding-tui.VisibleWidth(clipped))
+		padRight := max(0, width-padding-tui.VisibleWidth(clipped))
 		lines = append(lines, " "+theme.Fg("accent", clipped)+strings.Repeat(" ", padRight))
 	}
 
 	message := "ARMIN SAYS HI"
-	msgPadRight := maxIntLocal(0, width-padding-len(message))
+	msgPadRight := max(0, width-padding-len(message))
 	lines = append(lines, " "+theme.Fg("accent", message)+strings.Repeat(" ", msgPadRight))
 
 	c.cachedLines = lines

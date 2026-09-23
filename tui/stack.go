@@ -190,7 +190,7 @@ func distributeStackSizes(sizes []int, entries []StackLayoutEntry, amount int, m
 			if mode == "grow" {
 				totalWeight += item.entry.Grow
 			} else {
-				weight := item.entry.Shrink * maxInt(1, sizes[item.index])
+				weight := item.entry.Shrink * max(1, sizes[item.index])
 				totalWeight += weight
 			}
 		}
@@ -203,16 +203,16 @@ func distributeStackSizes(sizes []int, entries []StackLayoutEntry, amount int, m
 			if mode == "grow" {
 				weight = item.entry.Grow
 			} else {
-				weight = item.entry.Shrink * maxInt(1, sizes[item.index])
+				weight = item.entry.Shrink * max(1, sizes[item.index])
 			}
-			proposed := maxInt(1, remaining*weight/totalWeight)
+			proposed := max(1, remaining*weight/totalWeight)
 			capacity := 0
 			if mode == "grow" {
 				capacity = item.entry.MaxSize - sizes[item.index]
 			} else {
 				capacity = sizes[item.index] - item.entry.MinSize
 			}
-			delta := minInt(remaining, proposed, capacity)
+			delta := min(remaining, proposed, capacity)
 			if delta <= 0 {
 				continue
 			}
@@ -248,7 +248,7 @@ func AllocateStackSizes(entries []StackLayoutEntry, intrinsicSizes []int, availa
 		return sizes
 	}
 
-	contentSize := maxInt(0, *availableSize-maxInt(0, len(entries)-1)*gap)
+	contentSize := max(0, *availableSize-max(0, len(entries)-1)*gap)
 	total := 0
 	for _, size := range sizes {
 		total += size
@@ -273,7 +273,7 @@ func NewVStack(children []Component, options StackOptions) *VStack {
 
 // Render renders the children with the allocated heights and gaps.
 func (v *VStack) Render(width int) []string {
-	viewport := LayoutViewport{Width: maxInt(1, width), Height: math.MaxInt}
+	viewport := LayoutViewport{Width: max(1, width), Height: math.MaxInt}
 	entries := visibleStackEntryList(v.Entries, viewport)
 	rendered := make([][]string, len(entries))
 	for index, entry := range entries {
@@ -316,7 +316,7 @@ func NewHStack(children []Component, options StackOptions) *HStack {
 
 // Render composites the children side by side.
 func (h *HStack) Render(width int) []string {
-	safeWidth := maxInt(1, width)
+	safeWidth := max(1, width)
 	viewport := LayoutViewport{Width: safeWidth, Height: math.MaxInt}
 	entries := visibleStackEntryList(h.Entries, viewport)
 	if len(entries) == 0 {

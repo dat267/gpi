@@ -113,7 +113,7 @@ func FormatCwdForFooter(cwd string, home string) string {
 // ANSI (format.ts truncate).
 func FooterTruncate(text string, maxWidth int) string {
 	if maxWidth <= 3 {
-		return "..."[:maxIntLocal(0, maxWidth)]
+		return "..."[:max(0, maxWidth)]
 	}
 	if tui.VisibleWidth(text) <= maxWidth {
 		return text
@@ -135,7 +135,7 @@ func FooterTruncate(text string, maxWidth int) string {
 // (format.ts truncateLeft).
 func FooterTruncateLeft(text string, maxWidth int) string {
 	if maxWidth <= 3 {
-		return "..."[:maxIntLocal(0, maxWidth)]
+		return "..."[:max(0, maxWidth)]
 	}
 	if tui.VisibleWidth(text) <= maxWidth {
 		return text
@@ -190,7 +190,7 @@ func FooterLine(input FooterInput, width int) string {
 		parts = append(parts, FooterTruncateLeft(input.ModelID, 25))
 	}
 	parts = append(parts, FooterTruncate(filepath.Base(input.Cwd), 25))
-	return FooterTruncate(strings.Join(parts, " · "), minInt(80, maxIntLocal(0, width)))
+	return FooterTruncate(strings.Join(parts, " · "), min(80, max(0, width)))
 }
 
 // FooterComponent renders the footer line.

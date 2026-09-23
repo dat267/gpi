@@ -310,7 +310,7 @@ func NewUserMessageList(messages []UserMessageItem, initialSelectedID string) *U
 		}
 	}
 	if selected < 0 {
-		selected = maxIntLocal(0, len(messages)-1)
+		selected = max(0, len(messages)-1)
 	}
 	return &UserMessageList{messages: messages, selectedIndex: selected, maxVisible: 10}
 }
@@ -325,8 +325,8 @@ func (l *UserMessageList) Render(width int) []string {
 	if len(l.messages) == 0 {
 		return []string{theme.Fg("muted", "  No user messages found")}
 	}
-	startIndex := maxIntLocal(0, minIntLocal(l.selectedIndex-l.maxVisible/2, len(l.messages)-l.maxVisible))
-	endIndex := minIntLocal(startIndex+l.maxVisible, len(l.messages))
+	startIndex := max(0, min(l.selectedIndex-l.maxVisible/2, len(l.messages)-l.maxVisible))
+	endIndex := min(startIndex+l.maxVisible, len(l.messages))
 	for i := startIndex; i < endIndex; i++ {
 		message := l.messages[i]
 		isSelected := i == l.selectedIndex
@@ -540,10 +540,10 @@ func (c *TrustSelectorComponent) HandleInput(data string) {
 	kb := tui.GetKeybindings()
 	switch {
 	case kb.Matches(data, "tui.select.up") || data == "k":
-		c.selectedIndex = maxIntLocal(0, c.selectedIndex-1)
+		c.selectedIndex = max(0, c.selectedIndex-1)
 		c.updateList()
 	case kb.Matches(data, "tui.select.down") || data == "j":
-		c.selectedIndex = minIntLocal(len(c.trustOptions)-1, c.selectedIndex+1)
+		c.selectedIndex = min(len(c.trustOptions)-1, c.selectedIndex+1)
 		c.updateList()
 	case kb.Matches(data, "tui.select.confirm") || data == "\n":
 		if c.selectedIndex >= 0 && c.selectedIndex < len(c.trustOptions) && c.onSelect != nil {

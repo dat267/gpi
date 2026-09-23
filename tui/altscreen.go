@@ -202,7 +202,7 @@ type AltScreen struct {
 func NewAltScreen(terminal Terminal, showHardwareCursor bool, logDirectory string, options AltScreenOptions) *AltScreen {
 	screen := &AltScreen{
 		Renderer:                    NewRenderer(terminal),
-		wheelScrollLines:            maxInt(1, options.WheelScrollLines),
+		wheelScrollLines:            max(1, options.WheelScrollLines),
 		mouseEnabled:                true,
 		searchMatchStyle:            options.SearchMatchStyle,
 		searchCurrentMatchStyle:     options.SearchCurrentMatchStyle,
@@ -418,7 +418,7 @@ func (s *AltScreen) afterTerminalStop(options TuiStopOptions) {
 		s.Terminal.Write(beginSynchronizedOutput + exitAltScreen + "\x1b[?25h" + endSynchronizedOutput)
 		return
 	}
-	width := maxInt(1, s.Terminal.Columns())
+	width := max(1, s.Terminal.Columns())
 	documentLines := s.Render(width)
 	trimmed := make([]string, 0, len(documentLines))
 	for _, line := range documentLines {
@@ -703,7 +703,7 @@ func (s *AltScreen) refreshSearchLocked(layout LayoutFrame) bool {
 		case "next":
 			baseIndex := exactIndex
 			if baseIndex < 0 {
-				baseIndex = minInt(search.SelectedIndex, len(matches)-1)
+				baseIndex = min(search.SelectedIndex, len(matches)-1)
 			}
 			if baseIndex < 0 {
 				selectedIndex = 0
@@ -713,7 +713,7 @@ func (s *AltScreen) refreshSearchLocked(layout LayoutFrame) bool {
 		case "previous":
 			baseIndex := exactIndex
 			if baseIndex < 0 {
-				baseIndex = minInt(search.SelectedIndex, len(matches)-1)
+				baseIndex = min(search.SelectedIndex, len(matches)-1)
 			}
 			if baseIndex < 0 {
 				selectedIndex = len(matches) - 1
@@ -723,7 +723,7 @@ func (s *AltScreen) refreshSearchLocked(layout LayoutFrame) bool {
 		default:
 			selectedIndex = exactIndex
 			if selectedIndex < 0 {
-				selectedIndex = minInt(maxInt(0, search.SelectedIndex), len(matches)-1)
+				selectedIndex = min(max(0, search.SelectedIndex), len(matches)-1)
 			}
 		}
 	}
@@ -875,10 +875,10 @@ func (s *AltScreen) handleViewportInput(data string) TuiInputListenerResult {
 	}
 	viewportHeight := s.getPrimaryScrollViewLocked().ViewportHeight()
 	actions := []scrollAction{
-		{"tui.altScreen.pageUp", func() { s.scrollByLocked(-maxInt(1, viewportHeight-pageScrollOverlap)) }},
-		{"tui.altScreen.pageDown", func() { s.scrollByLocked(maxInt(1, viewportHeight-pageScrollOverlap)) }},
-		{"tui.altScreen.halfPageUp", func() { s.scrollByLocked(-maxInt(1, viewportHeight/2)) }},
-		{"tui.altScreen.halfPageDown", func() { s.scrollByLocked(maxInt(1, viewportHeight/2)) }},
+		{"tui.altScreen.pageUp", func() { s.scrollByLocked(-max(1, viewportHeight-pageScrollOverlap)) }},
+		{"tui.altScreen.pageDown", func() { s.scrollByLocked(max(1, viewportHeight-pageScrollOverlap)) }},
+		{"tui.altScreen.halfPageUp", func() { s.scrollByLocked(-max(1, viewportHeight/2)) }},
+		{"tui.altScreen.halfPageDown", func() { s.scrollByLocked(max(1, viewportHeight/2)) }},
 		{"tui.altScreen.lineUp", func() { s.scrollByLocked(-1) }},
 		{"tui.altScreen.lineDown", func() { s.scrollByLocked(1) }},
 		{"tui.altScreen.previousPrompt", func() { s.scrollToPromptLocked(-1) }},
@@ -923,8 +923,8 @@ func (s *AltScreen) createMouseEventLocked(eventType TuiMouseEventType, button i
 		Y:       y,
 		ScreenX: x,
 		ScreenY: y,
-		Width:   maxInt(1, s.Terminal.Columns()),
-		Height:  maxInt(1, s.Terminal.Rows()),
+		Width:   max(1, s.Terminal.Columns()),
+		Height:  max(1, s.Terminal.Rows()),
 		Shift:   (button & 4) != 0,
 		Alt:     (button & 8) != 0,
 		Ctrl:    (button & 16) != 0,
@@ -1270,7 +1270,7 @@ func (s *AltScreen) updateScrollbarHoverLocked(x int, y int) {
 
 func (s *AltScreen) scrollScrollbarToPointerLocked(scrollView *ScrollView, geometry ScrollbarGeometry, pointerY int, grabOffset int) {
 	maxThumbOffset := geometry.TrackHeight - geometry.ThumbHeight
-	thumbOffset := maxInt(0, minInt(maxThumbOffset, pointerY-geometry.TrackTop-grabOffset))
+	thumbOffset := max(0, min(maxThumbOffset, pointerY-geometry.TrackTop-grabOffset))
 	scrollTop := 0
 	if maxThumbOffset != 0 {
 		scrollTop = int(float64(thumbOffset)/float64(maxThumbOffset)*float64(geometry.MaxScrollTop) + 0.5)
@@ -1334,20 +1334,20 @@ func (s *AltScreen) getScrollSelectionPointLocked(scrollView *ScrollView, x int,
 	if !ok || box.Rect.Height <= 0 || box.Clip.Height <= 0 {
 		return altSelectionPoint{}, false
 	}
-	visibleTop := maxInt(0, maxInt(box.Rect.Y, box.Clip.Y))
-	visibleBottom := minInt(s.Terminal.Rows()-1, minInt(box.Rect.Y+box.Rect.Height-1, box.Clip.Y+box.Clip.Height-1))
+	visibleTop := max(0, max(box.Rect.Y, box.Clip.Y))
+	visibleBottom := min(s.Terminal.Rows()-1, min(box.Rect.Y+box.Rect.Height-1, box.Clip.Y+box.Clip.Height-1))
 	if visibleBottom < visibleTop {
 		return altSelectionPoint{}, false
 	}
-	pointerRow := maxInt(visibleTop, minInt(visibleBottom, y))
+	pointerRow := max(visibleTop, min(visibleBottom, y))
 	contentLines := 1
 	if box.ScrollContentLines != nil {
 		contentLines = len(box.ScrollContentLines)
 	}
-	maxContentRow := maxInt(0, contentLines-1)
+	maxContentRow := max(0, contentLines-1)
 	return altSelectionPoint{
-		Row:        maxInt(0, minInt(maxContentRow, scrollView.ScrollTop()+pointerRow-box.Rect.Y)),
-		Col:        maxInt(0, minInt(box.Rect.Width-1, x-box.Rect.X)),
+		Row:        max(0, min(maxContentRow, scrollView.ScrollTop()+pointerRow-box.Rect.Y)),
+		Col:        max(0, min(box.Rect.Width-1, x-box.Rect.X)),
 		ScrollView: scrollView,
 	}, true
 }
@@ -1359,8 +1359,8 @@ func (s *AltScreen) getSelectionPointLocked(event sgrMouseEvent, scrollView *Scr
 		}
 	}
 	return altSelectionPoint{
-		Row: maxInt(0, minInt(s.Terminal.Rows()-1, event.Y)),
-		Col: maxInt(0, minInt(s.Terminal.Columns()-1, event.X)),
+		Row: max(0, min(s.Terminal.Rows()-1, event.Y)),
+		Col: max(0, min(s.Terminal.Columns()-1, event.X)),
 	}
 }
 
@@ -1495,8 +1495,8 @@ func (s *AltScreen) updateSelectionAutoScrollLocked(event sgrMouseEvent) {
 		s.stopSelectionAutoScrollLocked()
 		return
 	}
-	visibleTop := maxInt(0, maxInt(box.Rect.Y, box.Clip.Y))
-	visibleBottom := minInt(s.Terminal.Rows()-1, minInt(box.Rect.Y+box.Rect.Height-1, box.Clip.Y+box.Clip.Height-1))
+	visibleTop := max(0, max(box.Rect.Y, box.Clip.Y))
+	visibleBottom := min(s.Terminal.Rows()-1, min(box.Rect.Y+box.Rect.Height-1, box.Clip.Y+box.Clip.Height-1))
 	pointer := struct{ X, Y int }{event.X, event.Y}
 	s.selectionDragPointer = &pointer
 	switch {
@@ -1696,8 +1696,8 @@ func (s *AltScreen) handleSelectionMouseEventLocked(event sgrMouseEvent) {
 	s.pressedURL = ""
 	s.hasPressedURL = false
 	if !hasRange {
-		row := maxInt(0, minInt(s.Terminal.Rows()-1, event.Y))
-		col := maxInt(0, minInt(s.Terminal.Columns()-1, event.X))
+		row := max(0, min(s.Terminal.Rows()-1, event.Y))
+		col := max(0, min(s.Terminal.Columns()-1, event.X))
 		line := ""
 		if row < len(s.previousScreen) {
 			line = s.previousScreen[row]
@@ -1730,25 +1730,25 @@ func (s *AltScreen) getSelectionBoundsLocked() (altSelectionRange, bool) {
 
 func (s *AltScreen) getSelectionColumnsLocked(line string, row int, selection altSelectionRange, minColumn int, maxColumn int) (int, int) {
 	lineWidth := VisibleWidth(line)
-	start := maxInt(0, minColumn)
-	end := minInt(lineWidth, maxColumn)
+	start := max(0, minColumn)
+	end := min(lineWidth, maxColumn)
 	if row == selection.Start.Row {
 		if cellRange, ok := GetGraphemeCellRange(line, selection.Start.Col); ok {
 			start = cellRange.Start
 		} else {
-			start = minInt(selection.Start.Col, lineWidth)
+			start = min(selection.Start.Col, lineWidth)
 		}
 	}
 	if row == selection.End.Row {
 		if selection.End.Boundary {
-			end = minInt(selection.End.Col, lineWidth)
+			end = min(selection.End.Col, lineWidth)
 		} else if cellRange, ok := GetGraphemeCellRange(line, selection.End.Col); ok {
 			end = cellRange.End
 		} else {
-			end = minInt(selection.End.Col+1, lineWidth)
+			end = min(selection.End.Col+1, lineWidth)
 		}
 	}
-	return maxInt(minColumn, start), minInt(maxColumn, end)
+	return max(minColumn, start), min(maxColumn, end)
 }
 
 func (s *AltScreen) getActiveSelectionTextLocked() (string, bool) {
@@ -1774,7 +1774,7 @@ func (s *AltScreen) getActiveSelectionTextLocked() (string, bool) {
 			line = sourceLines[row]
 		}
 		start, end := s.getSelectionColumnsLocked(line, row, selection, 0, VisibleWidth(line))
-		selected := SliceByColumn(line, start, maxInt(0, end-start), true)
+		selected := SliceByColumn(line, start, max(0, end-start), true)
 		lines = append(lines, strings.TrimRight(StripTerminalSequences(selected), " \t"))
 	}
 	text := strings.Join(lines, "\n")
@@ -1853,10 +1853,10 @@ func (s *AltScreen) applySearchHighlights(screen []string, layout LayoutFrame) [
 		scrollbarColumn = geometry.Column
 		hasScrollbarColumn = true
 	}
-	minRow := maxInt(0, maxInt(box.Rect.Y, box.Clip.Y))
-	maxRow := minInt(len(screen), minInt(box.Rect.Y+box.Rect.Height, box.Clip.Y+box.Clip.Height))
-	minColumn := maxInt(0, maxInt(box.Rect.X, box.Clip.X))
-	maxColumn := minInt(s.Terminal.Columns(), minInt(box.Rect.X+box.Rect.Width, box.Clip.X+box.Clip.Width))
+	minRow := max(0, max(box.Rect.Y, box.Clip.Y))
+	maxRow := min(len(screen), min(box.Rect.Y+box.Rect.Height, box.Clip.Y+box.Clip.Height))
+	minColumn := max(0, max(box.Rect.X, box.Clip.X))
+	maxColumn := min(s.Terminal.Columns(), min(box.Rect.X+box.Rect.Width, box.Clip.X+box.Clip.Width))
 	if hasScrollbarColumn && scrollbarColumn < maxColumn {
 		maxColumn = scrollbarColumn
 	}
@@ -1891,8 +1891,8 @@ func (s *AltScreen) applySearchHighlights(screen []string, layout LayoutFrame) [
 			if row < minRow || row >= maxRow {
 				continue
 			}
-			startCol := maxInt(minColumn, box.Rect.X+segment.StartCol)
-			endCol := minInt(maxColumn, box.Rect.X+segment.EndCol)
+			startCol := max(minColumn, box.Rect.X+segment.StartCol)
+			endCol := min(maxColumn, box.Rect.X+segment.EndCol)
 			if endCol <= startCol {
 				continue
 			}
@@ -1911,14 +1911,14 @@ func (s *AltScreen) applySearchHighlights(screen []string, layout LayoutFrame) [
 		lineWidth := VisibleWidth(line)
 		sortSearchRangesDescending(ranges)
 		for _, searchRange := range ranges {
-			startCol := minInt(searchRange.StartCol, lineWidth)
-			endCol := minInt(searchRange.EndCol, lineWidth)
+			startCol := min(searchRange.StartCol, lineWidth)
+			endCol := min(searchRange.EndCol, lineWidth)
 			if endCol <= startCol {
 				continue
 			}
 			before := SliceByColumn(line, 0, startCol, true)
 			highlighted := SliceByColumn(line, startCol, endCol-startCol, true)
-			after := SliceByColumn(line, endCol, maxInt(0, lineWidth-endCol), true)
+			after := SliceByColumn(line, endCol, max(0, lineWidth-endCol), true)
 			line = before + s.applySearchTextHighlight(highlighted, searchRange.Current) + after
 		}
 		result[row] = line
@@ -1973,10 +1973,10 @@ func (s *AltScreen) applySelection(screen []string, layout *LayoutFrame) []strin
 		if !ok {
 			return screen
 		}
-		minRow = maxInt(0, maxInt(box.Rect.Y, box.Clip.Y))
-		maxRow = minInt(len(screen)-1, minInt(box.Rect.Y+box.Rect.Height-1, box.Clip.Y+box.Clip.Height-1))
-		minColumn = maxInt(0, maxInt(box.Rect.X, box.Clip.X))
-		maxColumn = minInt(s.Terminal.Columns(), minInt(box.Rect.X+box.Rect.Width, box.Clip.X+box.Clip.Width))
+		minRow = max(0, max(box.Rect.Y, box.Clip.Y))
+		maxRow = min(len(screen)-1, min(box.Rect.Y+box.Rect.Height-1, box.Clip.Y+box.Clip.Height-1))
+		minColumn = max(0, max(box.Rect.X, box.Clip.X))
+		maxColumn = min(s.Terminal.Columns(), min(box.Rect.X+box.Rect.Width, box.Clip.X+box.Clip.Width))
 		scrollTop := selection.Start.ScrollView.ScrollTop()
 		screenSelection = altSelectionRange{
 			Start: altSelectionPoint{
@@ -2006,7 +2006,7 @@ func (s *AltScreen) applySelection(screen []string, layout *LayoutFrame) []strin
 		}
 		before := SliceByColumn(line, 0, start, true)
 		selected := SliceByColumn(line, start, end-start, true)
-		after := SliceByColumn(line, end, maxInt(0, lineWidth-end), true)
+		after := SliceByColumn(line, end, max(0, lineWidth-end), true)
 		out = append(out, before+s.applySelectionHighlight(selected)+after)
 	}
 	return out
@@ -2052,7 +2052,7 @@ func (s *AltScreen) compositeScrollToEndIndicator(screen []string, layout Layout
 	if geometry, ok := GetScrollbarGeometry(box, false); ok {
 		rightEdge = geometry.Column
 	}
-	availableWidth := maxInt(0, rightEdge-column)
+	availableWidth := max(0, rightEdge-column)
 	text := TruncateToWidth(label, availableWidth, "", false)
 	textWidth := VisibleWidth(text)
 	if textWidth == 0 {
@@ -2090,8 +2090,8 @@ func (s *AltScreen) doRender() {
 	if s.stopped.Load() || !s.altScreenActive {
 		return
 	}
-	width := maxInt(1, s.Terminal.Columns())
-	height := maxInt(1, s.Terminal.Rows())
+	width := max(1, s.Terminal.Columns())
+	height := max(1, s.Terminal.Rows())
 	root := s.getLayoutRoot()
 	if root == nil {
 		root = s.implicitScrollView
@@ -2184,7 +2184,7 @@ func (s *AltScreen) doRender() {
 	}
 
 	if hasCursor {
-		builder.WriteString("\x1b[" + itoa(row+1) + ";" + itoa(minInt(width, col)+1) + "H")
+		builder.WriteString("\x1b[" + itoa(row+1) + ";" + itoa(min(width, col)+1) + "H")
 		if s.ShowHardwareCursor {
 			builder.WriteString("\x1b[?25h")
 		} else {

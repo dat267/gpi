@@ -387,7 +387,7 @@ func (w *CacheWarmer) schedule(run *cacheWarmingRun) {
 		w.stop(reason, nil)
 		return
 	}
-	timer := time.AfterFunc(time.Duration(max64(0, run.nextWarmAt-time.Now().UnixMilli()))*time.Millisecond, func() {
+	timer := time.AfterFunc(time.Duration(max(0, run.nextWarmAt-time.Now().UnixMilli()))*time.Millisecond, func() {
 		w.refresh(run)
 	})
 	w.mu.Lock()

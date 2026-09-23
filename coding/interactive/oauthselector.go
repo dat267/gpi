@@ -349,7 +349,7 @@ func (c *OAuthSelectorComponent) FilterProviders(query string) {
 	} else {
 		c.filteredProviders = c.allProviders
 	}
-	c.selectedIndex = maxIntLocal(0, minIntLocal(c.selectedIndex, maxIntLocal(0, len(c.filteredProviders)-1)))
+	c.selectedIndex = max(0, min(c.selectedIndex, max(0, len(c.filteredProviders)-1)))
 	c.updateList()
 }
 
@@ -358,8 +358,8 @@ func (c *OAuthSelectorComponent) updateList() {
 	c.listContainer.Clear()
 
 	const maxVisible = 8
-	startIndex := maxIntLocal(0, minIntLocal(c.selectedIndex-maxVisible/2, len(c.filteredProviders)-maxVisible))
-	endIndex := minIntLocal(startIndex+maxVisible, len(c.filteredProviders))
+	startIndex := max(0, min(c.selectedIndex-maxVisible/2, len(c.filteredProviders)-maxVisible))
+	endIndex := min(startIndex+maxVisible, len(c.filteredProviders))
 	for i := startIndex; i < endIndex; i++ {
 		provider := c.filteredProviders[i]
 		isSelected := i == c.selectedIndex
@@ -425,13 +425,13 @@ func (c *OAuthSelectorComponent) HandleInput(data string) {
 		if len(c.filteredProviders) == 0 {
 			return
 		}
-		c.selectedIndex = maxIntLocal(0, c.selectedIndex-1)
+		c.selectedIndex = max(0, c.selectedIndex-1)
 		c.updateList()
 	case kb.Matches(data, "tui.select.down"):
 		if len(c.filteredProviders) == 0 {
 			return
 		}
-		c.selectedIndex = minIntLocal(len(c.filteredProviders)-1, c.selectedIndex+1)
+		c.selectedIndex = min(len(c.filteredProviders)-1, c.selectedIndex+1)
 		c.updateList()
 	case kb.Matches(data, "tui.select.confirm"):
 		if c.selectedIndex >= 0 && c.selectedIndex < len(c.filteredProviders) {

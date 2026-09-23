@@ -114,7 +114,7 @@ func (b *Box) matchCache(width int, bgSample string, hasBgSample bool) bool {
 
 // HandleMouse forwards an event to the child under the pointer.
 func (b *Box) HandleMouse(event TuiMouseEvent) *TuiMouseDispatchResult {
-	contentWidth := maxInt(1, event.Width-b.paddingX*2)
+	contentWidth := max(1, event.Width-b.paddingX*2)
 	contentY := event.Y - b.paddingY
 	contentX := event.X - b.paddingX
 	if contentY < 0 || contentX < 0 || contentX >= contentWidth {
@@ -149,7 +149,7 @@ func (b *Box) Render(width int) []string {
 		return nil
 	}
 
-	contentWidth := maxInt(1, width-b.paddingX*2)
+	contentWidth := max(1, width-b.paddingX*2)
 	leftPad := ""
 	if b.paddingX > 0 {
 		if len(b.leftPadCache) != b.paddingX {
@@ -217,7 +217,7 @@ func (b *Box) Render(width int) []string {
 }
 
 func (b *Box) applyBg(line string, width int) string {
-	padNeeded := maxInt(0, width-VisibleWidth(line))
+	padNeeded := max(0, width-VisibleWidth(line))
 	padded := line + strings.Repeat(" ", padNeeded)
 	if b.bgFn != nil {
 		return ApplyBackgroundToLine(padded, width, b.bgFn)

@@ -217,7 +217,7 @@ func (in *Input) HandleMouse(event TuiMouseEvent) *TuiMouseDispatchResult {
 	if event.Type != MousePress || event.Button != MouseButtonLeft || event.Y != 0 {
 		return nil
 	}
-	visibleColumn := maxInt(0, event.X-2)
+	visibleColumn := max(0, event.X-2)
 	targetColumn := in.renderedStartColumn + visibleColumn
 
 	currentColumn := 0
@@ -423,7 +423,7 @@ func (in *Input) Render(width int) []string {
 		}
 		cursorChar := "\x1b[7m" + in.placeholderStyle(atCursor) + "\x1b[27m"
 		textWithCursor := marker + cursorChar + in.placeholderStyle(afterCursor)
-		padding := repeatSpaces(maxInt(0, availableWidth-VisibleWidth(textWithCursor)))
+		padding := repeatSpaces(max(0, availableWidth-VisibleWidth(textWithCursor)))
 		return []string{in.prompt + textWithCursor + padding}
 	}
 
@@ -450,14 +450,14 @@ func (in *Input) Render(width int) []string {
 			case cursorCol < halfWidth:
 				startCol = 0
 			case cursorCol > totalWidth-halfWidth:
-				startCol = maxInt(0, totalWidth-scrollWidth)
+				startCol = max(0, totalWidth-scrollWidth)
 			default:
-				startCol = maxInt(0, cursorCol-halfWidth)
+				startCol = max(0, cursorCol-halfWidth)
 			}
 
 			in.renderedStartColumn = startCol
 			visibleText = SliceByColumn(in.value, startCol, scrollWidth, true)
-			beforeCursor := SliceByColumn(in.value, startCol, maxInt(0, cursorCol-startCol), true)
+			beforeCursor := SliceByColumn(in.value, startCol, max(0, cursorCol-startCol), true)
 			cursorDisplay = len(beforeCursor)
 		} else {
 			visibleText = ""
@@ -483,7 +483,7 @@ func (in *Input) Render(width int) []string {
 	cursorChar := "\x1b[7m" + atCursor + "\x1b[27m"
 	textWithCursor := beforeCursor + marker + cursorChar + afterCursor
 
-	padding := repeatSpaces(maxInt(0, availableWidth-VisibleWidth(textWithCursor)))
+	padding := repeatSpaces(max(0, availableWidth-VisibleWidth(textWithCursor)))
 	return []string{in.prompt + textWithCursor + padding}
 }
 
@@ -509,7 +509,7 @@ func lastGraphemeStart(value string, cursor int) int {
 		start = offset
 	}
 	if cursor > 0 {
-		return maxInt(0, cursor-1)
+		return max(0, cursor-1)
 	}
 	return 0
 }

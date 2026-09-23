@@ -221,7 +221,7 @@ func (m *Markdown) Render(width int) []string {
 		return m.cachedLines
 	}
 
-	contentWidth := maxInt(1, width-m.PaddingX*2)
+	contentWidth := max(1, width-m.PaddingX*2)
 	text := m.Text
 	if m.Options.Transform != nil {
 		text = m.Options.Transform(text, contentWidth)
@@ -249,7 +249,7 @@ func (m *Markdown) Render(width int) []string {
 	// render; only the changed tail is re-parsed and re-styled.
 	reuse := m.reusableTokens(tokens, width)
 
-	leftMargin := repeatSpaces(maxInt(0, m.PaddingX))
+	leftMargin := repeatSpaces(max(0, m.PaddingX))
 	rightMargin := leftMargin
 	var bgFn func(text string) string
 	if m.DefaultTextStyle != nil {
@@ -257,7 +257,7 @@ func (m *Markdown) Render(width int) []string {
 	}
 
 	var contentLines []string
-	tokenLines := make([][]string, 0, maxInt(0, len(tokens)-1))
+	tokenLines := make([][]string, 0, max(0, len(tokens)-1))
 	for index, token := range tokens {
 		var final []string
 		if index < reuse {
@@ -371,7 +371,7 @@ func (m *Markdown) finalizeTokenLines(rendered []string, width int, contentWidth
 			if bgFn != nil {
 				out = append(out, ApplyBackgroundToLine(lineWithMargins, width, bgFn))
 			} else {
-				paddingNeeded := maxInt(0, width-VisibleWidth(lineWithMargins))
+				paddingNeeded := max(0, width-VisibleWidth(lineWithMargins))
 				out = append(out, lineWithMargins+repeatSpaces(paddingNeeded))
 			}
 		}
@@ -562,7 +562,7 @@ func (m *Markdown) renderToken(token *MdToken, width int, nextTokenType string, 
 			return quoteStyle(lineWithReappliedStyle)
 		}
 
-		quoteContentWidth := maxInt(1, width-2)
+		quoteContentWidth := max(1, width-2)
 		quoteInlineStyleContext := inlineStyleContext{
 			applyText:   func(text string) string { return text },
 			stylePrefix: quoteStylePrefix,
@@ -594,8 +594,8 @@ func (m *Markdown) renderToken(token *MdToken, width int, nextTokenType string, 
 		}
 
 	case "hr":
-		hrWidth := minInt(width, 80)
-		lines = append(lines, m.Theme.Hr(strings.Repeat("─", maxInt(0, hrWidth))))
+		hrWidth := min(width, 80)
+		lines = append(lines, m.Theme.Hr(strings.Repeat("─", max(0, hrWidth))))
 		if nextTokenType != "" && nextTokenType != "space" {
 			lines = append(lines, "")
 		}
@@ -773,7 +773,7 @@ func (m *Markdown) renderList(token *MdToken, depth int, width int, styleContext
 		marker := bullet + taskMarker
 		firstPrefix := indent + m.Theme.ListBullet(marker)
 		continuationPrefix := indent + repeatSpaces(VisibleWidth(marker))
-		itemWidth := maxInt(1, width-VisibleWidth(firstPrefix))
+		itemWidth := max(1, width-VisibleWidth(firstPrefix))
 		renderedAnyLine := false
 
 		for _, itemToken := range item.Tokens {
@@ -812,18 +812,18 @@ func (m *Markdown) getLongestWordWidth(text string, maxWidth int, hasMaxWidth bo
 	words := strings.Fields(text)
 	longest := 0
 	for _, word := range words {
-		longest = maxInt(longest, VisibleWidth(word))
+		longest = max(longest, VisibleWidth(word))
 	}
 	if !hasMaxWidth {
 		return longest
 	}
-	return minInt(longest, maxWidth)
+	return min(longest, maxWidth)
 }
 
 // wrapCellText wraps a table cell, resetting styles after each non-final
 // fragment and restoring the surrounding style.
 func (m *Markdown) wrapCellText(text string, maxWidth int, stylePrefix string) []string {
-	lines := WrapTextWithAnsi(text, maxInt(1, maxWidth))
+	lines := WrapTextWithAnsi(text, max(1, maxWidth))
 	out := make([]string, 0, len(lines))
 	for index, line := range lines {
 		styleReset := ""
@@ -864,14 +864,14 @@ func (m *Markdown) renderTable(token *MdToken, availableWidth int, nextTokenType
 	for i := 0; i < numCols; i++ {
 		headerText := m.renderInlineTokens(token.Header[i].Tokens, styleContext)
 		naturalWidths[i] = VisibleWidth(headerText)
-		minWordWidths[i] = maxInt(1, m.getLongestWordWidth(headerText, maxUnbrokenWordWidth, true))
+		minWordWidths[i] = max(1, m.getLongestWordWidth(headerText, maxUnbrokenWordWidth, true))
 	}
 	for _, row := range token.Rows {
 		for i := 0; i < len(row); i++ {
 			cellText := m.renderInlineTokens(row[i].Tokens, styleContext)
 			if i < numCols {
-				naturalWidths[i] = maxInt(naturalWidths[i], VisibleWidth(cellText))
-				minWordWidths[i] = maxInt(minWordWidths[i], m.getLongestWordWidth(cellText, maxUnbrokenWordWidth, true))
+				naturalWidths[i] = max(naturalWidths[i], VisibleWidth(cellText))
+				minWordWidths[i] = max(minWordWidths[i], m.getLongestWordWidth(cellText, maxUnbrokenWordWidth, true))
 			}
 		}
 	}
@@ -889,11 +889,11 @@ func (m *Markdown) renderTable(token *MdToken, availableWidth int, nextTokenType
 		if remaining > 0 {
 			totalWeight := 0
 			for _, width := range minWordWidths {
-				totalWeight += maxInt(0, width-1)
+				totalWeight += max(0, width-1)
 			}
 			growth := make([]int, numCols)
 			for i, width := range minWordWidths {
-				weight := maxInt(0, width-1)
+				weight := max(0, width-1)
 				if totalWeight > 0 {
 					growth[i] = weight * remaining / totalWeight
 				}
@@ -917,18 +917,18 @@ func (m *Markdown) renderTable(token *MdToken, availableWidth int, nextTokenType
 	if totalNaturalWidth <= availableWidth {
 		columnWidths = make([]int, numCols)
 		for i := 0; i < numCols; i++ {
-			columnWidths[i] = maxInt(naturalWidths[i], minColumnWidths[i])
+			columnWidths[i] = max(naturalWidths[i], minColumnWidths[i])
 		}
 	} else {
 		totalGrowPotential := 0
 		for i := 0; i < numCols; i++ {
-			totalGrowPotential += maxInt(0, naturalWidths[i]-minColumnWidths[i])
+			totalGrowPotential += max(0, naturalWidths[i]-minColumnWidths[i])
 		}
-		extraWidth := maxInt(0, availableForCells-minCellsWidth)
+		extraWidth := max(0, availableForCells-minCellsWidth)
 		columnWidths = make([]int, numCols)
 		for i := 0; i < numCols; i++ {
 			naturalWidth := naturalWidths[i]
-			minWidthDelta := maxInt(0, naturalWidth-minColumnWidths[i])
+			minWidthDelta := max(0, naturalWidth-minColumnWidths[i])
 			grow := 0
 			if totalGrowPotential > 0 {
 				grow = minWidthDelta * extraWidth / totalGrowPotential
@@ -955,7 +955,7 @@ func (m *Markdown) renderTable(token *MdToken, availableWidth int, nextTokenType
 
 	topBorderCells := make([]string, numCols)
 	for i, w := range columnWidths {
-		topBorderCells[i] = strings.Repeat("─", maxInt(0, w))
+		topBorderCells[i] = strings.Repeat("─", max(0, w))
 	}
 	lines = append(lines, "┌─"+strings.Join(topBorderCells, "─┬─")+"─┐")
 
@@ -973,7 +973,7 @@ func (m *Markdown) renderTable(token *MdToken, availableWidth int, nextTokenType
 			if lineIdx < len(headerCellLines[colIdx]) {
 				text = headerCellLines[colIdx][lineIdx]
 			}
-			padded := text + repeatSpaces(maxInt(0, columnWidths[colIdx]-VisibleWidth(text)))
+			padded := text + repeatSpaces(max(0, columnWidths[colIdx]-VisibleWidth(text)))
 			rowParts[colIdx] = m.Theme.Bold(padded)
 		}
 		lines = append(lines, "│ "+strings.Join(rowParts, " │ ")+" │")
@@ -981,7 +981,7 @@ func (m *Markdown) renderTable(token *MdToken, availableWidth int, nextTokenType
 
 	separatorCells := make([]string, numCols)
 	for i, w := range columnWidths {
-		separatorCells[i] = strings.Repeat("─", maxInt(0, w))
+		separatorCells[i] = strings.Repeat("─", max(0, w))
 	}
 	separatorLine := "├─" + strings.Join(separatorCells, "─┼─") + "─┤"
 	lines = append(lines, separatorLine)
@@ -1004,7 +1004,7 @@ func (m *Markdown) renderTable(token *MdToken, availableWidth int, nextTokenType
 				if lineIdx < len(rowCellLines[colIdx]) {
 					text = rowCellLines[colIdx][lineIdx]
 				}
-				rowParts[colIdx] = text + repeatSpaces(maxInt(0, columnWidths[colIdx]-VisibleWidth(text)))
+				rowParts[colIdx] = text + repeatSpaces(max(0, columnWidths[colIdx]-VisibleWidth(text)))
 			}
 			lines = append(lines, "│ "+strings.Join(rowParts, " │ ")+" │")
 		}
@@ -1016,7 +1016,7 @@ func (m *Markdown) renderTable(token *MdToken, availableWidth int, nextTokenType
 
 	bottomBorderCells := make([]string, numCols)
 	for i, w := range columnWidths {
-		bottomBorderCells[i] = strings.Repeat("─", maxInt(0, w))
+		bottomBorderCells[i] = strings.Repeat("─", max(0, w))
 	}
 	lines = append(lines, "└─"+strings.Join(bottomBorderCells, "─┴─")+"─┘")
 

@@ -90,7 +90,7 @@ func NewScrollView(component Component, options ScrollViewOptions) *ScrollView {
 	// explicit 0 disables the timer (D119).
 	view.hideDelayMS = 1000
 	if options.HasScrollbarHideDelay {
-		view.hideDelayMS = maxInt(0, options.ScrollbarHideDelayMS)
+		view.hideDelayMS = max(0, options.ScrollbarHideDelayMS)
 	}
 	view.followingEnd = view.followEnd
 	view.Container.Children = append(view.Container.Children, component)
@@ -220,8 +220,8 @@ func (s *ScrollView) ScrollTo(scrollTop int, options ...ScrollToRequest) {
 		disableFollow = options[0].DisableFollow
 	}
 	requested := scrollTop
-	maxScrollTop := maxInt(0, s.contentHeight-s.currentViewportHeight)
-	next := maxInt(0, minInt(maxScrollTop, requested))
+	maxScrollTop := max(0, s.contentHeight-s.currentViewportHeight)
+	next := max(0, min(maxScrollTop, requested))
 	nextFollowSuppressedAtEnd := disableFollow && next == maxScrollTop
 	nextFollowingEnd := !nextFollowSuppressedAtEnd && s.followEnd && next == maxScrollTop
 	if next == s.currentScrollTop && nextFollowingEnd == s.followingEnd &&
@@ -247,12 +247,12 @@ func (s *ScrollView) ScrollBy(lines int) int {
 	if lines == 0 {
 		return 0
 	}
-	maxScrollTop := maxInt(0, s.contentHeight-s.currentViewportHeight)
+	maxScrollTop := max(0, s.contentHeight-s.currentViewportHeight)
 	start := s.currentScrollTop
 	if s.followingEnd {
 		start = maxScrollTop
 	}
-	next := maxInt(0, minInt(maxScrollTop, start+lines))
+	next := max(0, min(maxScrollTop, start+lines))
 	moved := next - start
 	wasFollowingEnd := s.followingEnd
 	s.currentScrollTop = next
@@ -290,7 +290,7 @@ func (s *ScrollView) ScrollToStart() {
 
 // ScrollToEnd scrolls to the end.
 func (s *ScrollView) ScrollToEnd() {
-	next := maxInt(0, s.contentHeight-s.currentViewportHeight)
+	next := max(0, s.contentHeight-s.currentViewportHeight)
 	changed := s.currentScrollTop != next || s.followingEnd != s.followEnd
 	s.currentScrollTop = next
 	s.followingEnd = s.followEnd
@@ -307,14 +307,14 @@ func (s *ScrollView) ScrollToEnd() {
 
 // UpdateLayout records the content and viewport heights (layout interface).
 func (s *ScrollView) UpdateLayout(contentHeight int, viewportHeight int, requestRender func()) {
-	s.contentHeight = maxInt(0, contentHeight)
-	s.currentViewportHeight = maxInt(0, viewportHeight)
+	s.contentHeight = max(0, contentHeight)
+	s.currentViewportHeight = max(0, viewportHeight)
 	s.requestRenderCallback = requestRender
-	maxScrollTop := maxInt(0, s.contentHeight-s.currentViewportHeight)
+	maxScrollTop := max(0, s.contentHeight-s.currentViewportHeight)
 	if s.followingEnd {
 		s.currentScrollTop = maxScrollTop
 	} else {
-		s.currentScrollTop = maxInt(0, minInt(s.currentScrollTop, maxScrollTop))
+		s.currentScrollTop = max(0, min(s.currentScrollTop, maxScrollTop))
 	}
 	if s.currentScrollTop < maxScrollTop {
 		s.followSuppressedAtEnd = false

@@ -1156,7 +1156,7 @@ func (t *Renderer) CompositeOverlays(lines []string, termWidth int, termHeight i
 		entry.hasBounds = true
 
 		rendered = append(rendered, renderedOverlay{entry: entry, overlayLines: overlayLines, row: final.Row, col: final.Col, w: width})
-		minLinesNeeded = maxInt(minLinesNeeded, final.Row+len(overlayLines))
+		minLinesNeeded = max(minLinesNeeded, final.Row+len(overlayLines))
 	}
 
 	t.renderedOverlayLayouts = make([]renderedOverlayLayout, 0, len(rendered))
@@ -1168,12 +1168,12 @@ func (t *Renderer) CompositeOverlays(lines []string, termWidth int, termHeight i
 
 	// Pad to at least the terminal height so overlays have screen-relative
 	// positions.
-	workingHeight := maxInt(len(result), termHeight, minLinesNeeded)
+	workingHeight := max(len(result), termHeight, minLinesNeeded)
 	for len(result) < workingHeight {
 		result = append(result, "")
 	}
 
-	viewportStart := maxInt(0, workingHeight-termHeight)
+	viewportStart := max(0, workingHeight-termHeight)
 
 	for _, item := range rendered {
 		for i := 0; i < len(item.overlayLines); i++ {
@@ -1215,7 +1215,7 @@ func (t *Renderer) ApplyLineResets(lines []string) []string {
 // ExtractCursorPosition finds and extracts the cursor position from rendered
 // lines, stripping the marker. Only the bottom height lines are scanned.
 func (t *Renderer) ExtractCursorPosition(lines []string, height int) (row int, col int, ok bool) {
-	viewportTop := maxInt(0, len(lines)-height)
+	viewportTop := max(0, len(lines)-height)
 	for r := len(lines) - 1; r >= viewportTop; r-- {
 		line := lines[r]
 		markerIndex := indexOf(line, CursorMarker)

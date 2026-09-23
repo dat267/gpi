@@ -325,7 +325,7 @@ func (e *Editor) renderTopBorder(width int, hiddenLineCount int) string {
 
 // DefaultRenderTopBorder is the built-in top border rendering.
 func (e *Editor) DefaultRenderTopBorder(width int, hiddenLineCount int) string {
-	border := strings.Repeat("─", maxInt(0, width))
+	border := strings.Repeat("─", max(0, width))
 	if hiddenLineCount > 0 {
 		border = createScrollBorder("↑", hiddenLineCount, width)
 	}
@@ -333,7 +333,7 @@ func (e *Editor) DefaultRenderTopBorder(width int, hiddenLineCount int) string {
 }
 
 func (e *Editor) renderBottomBorder(width int, hiddenLineCount int) string {
-	border := strings.Repeat("─", maxInt(0, width))
+	border := strings.Repeat("─", max(0, width))
 	if hiddenLineCount > 0 {
 		border = createScrollBorder("↓", hiddenLineCount, width)
 	}
@@ -343,13 +343,13 @@ func (e *Editor) renderBottomBorder(width int, hiddenLineCount int) string {
 // Render renders the editor.
 func (e *Editor) Render(width int) []string {
 
-	maxPadding := maxInt(0, (width-1)/2)
-	paddingX := minInt(e.paddingX, maxPadding)
-	contentWidth := maxInt(1, width-paddingX*2)
+	maxPadding := max(0, (width-1)/2)
+	paddingX := min(e.paddingX, maxPadding)
+	contentWidth := max(1, width-paddingX*2)
 
 	layoutWidth := contentWidth
 	if paddingX == 0 {
-		layoutWidth = maxInt(1, contentWidth-1)
+		layoutWidth = max(1, contentWidth-1)
 	}
 
 	e.lastWidth = layoutWidth
@@ -359,7 +359,7 @@ func (e *Editor) Render(width int) []string {
 	if e.host != nil {
 		terminalRows = e.host.Rows()
 	}
-	maxVisibleLines := maxInt(5, terminalRows*3/10)
+	maxVisibleLines := max(5, terminalRows*3/10)
 
 	cursorLineIndex := 0
 	for index, line := range layoutLines {
@@ -374,10 +374,10 @@ func (e *Editor) Render(width int) []string {
 	} else if cursorLineIndex >= e.scrollOffset+maxVisibleLines {
 		e.scrollOffset = cursorLineIndex - maxVisibleLines + 1
 	}
-	maxScrollOffset := maxInt(0, len(layoutLines)-maxVisibleLines)
-	e.scrollOffset = maxInt(0, minInt(e.scrollOffset, maxScrollOffset))
+	maxScrollOffset := max(0, len(layoutLines)-maxVisibleLines)
+	e.scrollOffset = max(0, min(e.scrollOffset, maxScrollOffset))
 
-	end := minInt(e.scrollOffset+maxVisibleLines, len(layoutLines))
+	end := min(e.scrollOffset+maxVisibleLines, len(layoutLines))
 	visibleLines := layoutLines[e.scrollOffset:end]
 	e.renderedVisibleLineCount = len(visibleLines)
 
@@ -418,10 +418,10 @@ func (e *Editor) Render(width int) []string {
 			}
 		}
 
-		padding := repeatSpaces(maxInt(0, contentWidth-lineVisibleWidth))
+		padding := repeatSpaces(max(0, contentWidth-lineVisibleWidth))
 		lineRightPadding := rightPadding
 		if cursorInPadding {
-			lineRightPadding = rightPadding[minInt(1, len(rightPadding)):]
+			lineRightPadding = rightPadding[min(1, len(rightPadding)):]
 		}
 		result = append(result, leftPadding+displayText+padding+lineRightPadding)
 	}
@@ -434,7 +434,7 @@ func (e *Editor) Render(width int) []string {
 		autocompleteResult := e.autocompleteList.Render(contentWidth)
 		e.renderedAutocompleteHeight = len(autocompleteResult)
 		for _, line := range autocompleteResult {
-			linePadding := repeatSpaces(maxInt(0, contentWidth-VisibleWidth(line)))
+			linePadding := repeatSpaces(max(0, contentWidth-VisibleWidth(line)))
 			result = append(result, leftPadding+line+linePadding+rightPadding)
 		}
 	}
@@ -448,9 +448,9 @@ func (e *Editor) HandleMouse(event TuiMouseEvent) *TuiMouseDispatchResult {
 	autocompleteStartRow := e.renderedVisibleLineCount + 2
 	if e.autocompleteState != "" && e.autocompleteList != nil &&
 		event.Y >= autocompleteStartRow && event.Y < autocompleteStartRow+e.renderedAutocompleteHeight {
-		maxPadding := maxInt(0, (event.Width-1)/2)
-		paddingX := minInt(e.paddingX, maxPadding)
-		contentWidth := maxInt(1, event.Width-paddingX*2)
+		maxPadding := max(0, (event.Width-1)/2)
+		paddingX := min(e.paddingX, maxPadding)
+		contentWidth := max(1, event.Width-paddingX*2)
 		childEvent := event
 		childEvent.X = event.X - paddingX
 		childEvent.Y = event.Y - autocompleteStartRow
@@ -492,9 +492,9 @@ func (e *Editor) HandleMouse(event TuiMouseEvent) *TuiMouseDispatchResult {
 	}
 	chunk := logicalLine[visualLine.startCol:chunkEnd]
 
-	maxPadding := maxInt(0, (event.Width-1)/2)
-	paddingX := minInt(e.paddingX, maxPadding)
-	targetColumn := maxInt(0, event.X-paddingX)
+	maxPadding := max(0, (event.Width-1)/2)
+	paddingX := min(e.paddingX, maxPadding)
+	targetColumn := max(0, event.X-paddingX)
 
 	visibleColumn := 0
 	targetIndex := len(chunk)
@@ -892,7 +892,7 @@ func (e *Editor) insertTextAtCursorInternal(text string) {
 	insertedLines := strings.Split(normalized, "\n")
 
 	currentLine := e.currentLine()
-	cursorCol := minInt(e.state.cursorCol, len(currentLine))
+	cursorCol := min(e.state.cursorCol, len(currentLine))
 	beforeCursor := currentLine[:cursorCol]
 	afterCursor := currentLine[cursorCol:]
 
@@ -927,7 +927,7 @@ func (e *Editor) insertCharacterLocked(char string, skipUndoCoalescing bool) {
 	}
 
 	line := e.currentLine()
-	cursorCol := minInt(e.state.cursorCol, len(line))
+	cursorCol := min(e.state.cursorCol, len(line))
 	e.state.lines[e.state.cursorLine] = line[:cursorCol] + char + line[cursorCol:]
 	e.setCursorCol(cursorCol + len(char))
 
@@ -978,7 +978,7 @@ func containsString(values []string, value string) bool {
 
 func (e *Editor) textBeforeCursor() string {
 	line := e.currentLine()
-	return line[:minInt(e.state.cursorCol, len(line))]
+	return line[:min(e.state.cursorCol, len(line))]
 }
 
 func (e *Editor) handlePasteLocked(pastedText string) {
@@ -1057,7 +1057,7 @@ func (e *Editor) addNewLineLocked() {
 	e.pushUndoSnapshot()
 
 	currentLine := e.currentLine()
-	cursorCol := minInt(e.state.cursorCol, len(currentLine))
+	cursorCol := min(e.state.cursorCol, len(currentLine))
 	before := currentLine[:cursorCol]
 	after := currentLine[cursorCol:]
 
@@ -1119,7 +1119,7 @@ func (e *Editor) handleBackspaceLocked() {
 		e.pushUndoSnapshot()
 
 		line := e.currentLine()
-		cursorCol := minInt(e.state.cursorCol, len(line))
+		cursorCol := min(e.state.cursorCol, len(line))
 		beforeCursor := line[:cursorCol]
 		segments := e.segmentLocked(beforeCursor, "grapheme")
 		graphemeLength := 1
@@ -1159,8 +1159,8 @@ func (e *Editor) handleBackspaceLocked() {
 		}
 
 		line = e.currentLine()
-		before := line[:minInt(e.state.cursorCol-graphemeLength, len(line))]
-		after := line[minInt(e.state.cursorCol, len(line)):]
+		before := line[:min(e.state.cursorCol-graphemeLength, len(line))]
+		after := line[min(e.state.cursorCol, len(line)):]
 		e.state.lines[e.state.cursorLine] = before + after
 		e.setCursorCol(e.state.cursorCol - graphemeLength)
 	} else if e.state.cursorLine > 0 {
@@ -1229,14 +1229,14 @@ func (e *Editor) moveToVisualLine(visualLines []editorVisualLine, currentVisualL
 
 	isLastSourceSegment := currentVisualLine == len(visualLines)-1 ||
 		visualLines[currentVisualLine+1].logicalLine != currentVL.logicalLine
-	sourceMaxVisualCol := maxInt(0, currentVL.length-1)
+	sourceMaxVisualCol := max(0, currentVL.length-1)
 	if isLastSourceSegment {
 		sourceMaxVisualCol = currentVL.length
 	}
 
 	isLastTargetSegment := targetVisualLine == len(visualLines)-1 ||
 		visualLines[targetVisualLine+1].logicalLine != targetVL.logicalLine
-	targetMaxVisualCol := maxInt(0, targetVL.length-1)
+	targetMaxVisualCol := max(0, targetVL.length-1)
 	if isLastTargetSegment {
 		targetMaxVisualCol = targetVL.length
 	}
@@ -1249,7 +1249,7 @@ func (e *Editor) moveToVisualLine(visualLines []editorVisualLine, currentVisualL
 	if targetVL.logicalLine < len(e.state.lines) {
 		logicalLine = e.state.lines[targetVL.logicalLine]
 	}
-	e.state.cursorCol = minInt(targetCol, len(logicalLine))
+	e.state.cursorCol = min(targetCol, len(logicalLine))
 
 	// Snap the cursor to atomic segment boundaries (e.g. paste markers).
 	for _, segment := range e.segmentLocked(logicalLine, "grapheme") {
@@ -1326,10 +1326,10 @@ func (e *Editor) deleteToStartOfLineLocked() {
 
 	if e.state.cursorCol > 0 {
 		e.pushUndoSnapshot()
-		deletedText := currentLine[:minInt(e.state.cursorCol, len(currentLine))]
+		deletedText := currentLine[:min(e.state.cursorCol, len(currentLine))]
 		e.killRing.Push(deletedText, KillRingPushOptions{Prepend: true, Accumulate: e.lastAction == "kill"})
 		e.lastAction = "kill"
-		e.state.lines[e.state.cursorLine] = currentLine[minInt(e.state.cursorCol, len(currentLine)):]
+		e.state.lines[e.state.cursorLine] = currentLine[min(e.state.cursorCol, len(currentLine)):]
 		e.setCursorCol(0)
 	} else if e.state.cursorLine > 0 {
 		e.pushUndoSnapshot()
@@ -1394,10 +1394,10 @@ func (e *Editor) deleteWordBackwardsLocked() {
 		deleteFrom := e.state.cursorCol
 		e.setCursorCol(oldCursorCol)
 
-		deletedText := currentLine[deleteFrom:minInt(e.state.cursorCol, len(currentLine))]
+		deletedText := currentLine[deleteFrom:min(e.state.cursorCol, len(currentLine))]
 		e.killRing.Push(deletedText, KillRingPushOptions{Prepend: true, Accumulate: wasKill})
 		e.lastAction = "kill"
-		e.state.lines[e.state.cursorLine] = currentLine[:deleteFrom] + currentLine[minInt(e.state.cursorCol, len(currentLine)):]
+		e.state.lines[e.state.cursorLine] = currentLine[:deleteFrom] + currentLine[min(e.state.cursorCol, len(currentLine)):]
 		e.setCursorCol(deleteFrom)
 	}
 
@@ -1452,7 +1452,7 @@ func (e *Editor) handleForwardDeleteLocked() {
 			graphemeLength = len(segments[0].Segment)
 		}
 		before := currentLine[:e.state.cursorCol]
-		after := currentLine[minInt(e.state.cursorCol+graphemeLength, len(currentLine)):]
+		after := currentLine[min(e.state.cursorCol+graphemeLength, len(currentLine)):]
 		e.state.lines[e.state.cursorLine] = before + after
 	} else if e.state.cursorLine < len(e.state.lines)-1 {
 		e.pushUndoSnapshot()
@@ -1550,7 +1550,7 @@ func (e *Editor) moveCursorLocked(deltaLine int, deltaCol int) {
 			}
 		} else {
 			if e.state.cursorCol > 0 {
-				beforeCursor := currentLine[:minInt(e.state.cursorCol, len(currentLine))]
+				beforeCursor := currentLine[:min(e.state.cursorCol, len(currentLine))]
 				segments := e.segmentLocked(beforeCursor, "grapheme")
 				back := 1
 				if len(segments) > 0 {
@@ -1575,11 +1575,11 @@ func (e *Editor) pageScrollLocked(direction int) {
 	if e.host != nil {
 		terminalRows = e.host.Rows()
 	}
-	pageSize := maxInt(5, terminalRows*3/10)
+	pageSize := max(5, terminalRows*3/10)
 
 	visualLines := e.buildVisualLineMap(e.lastWidth)
 	currentVisualLine := e.findCurrentVisualLine(visualLines)
-	targetVisualLine := maxInt(0, minInt(len(visualLines)-1, currentVisualLine+direction*pageSize))
+	targetVisualLine := max(0, min(len(visualLines)-1, currentVisualLine+direction*pageSize))
 	e.moveToVisualLine(visualLines, currentVisualLine, targetVisualLine)
 }
 
@@ -1776,12 +1776,12 @@ func (e *Editor) insertYankedTextLocked(text string) {
 
 	if len(lines) == 1 {
 		currentLine := e.currentLine()
-		cursorCol := minInt(e.state.cursorCol, len(currentLine))
+		cursorCol := min(e.state.cursorCol, len(currentLine))
 		e.state.lines[e.state.cursorLine] = currentLine[:cursorCol] + text + currentLine[cursorCol:]
 		e.setCursorCol(cursorCol + len(text))
 	} else {
 		currentLine := e.currentLine()
-		cursorCol := minInt(e.state.cursorCol, len(currentLine))
+		cursorCol := min(e.state.cursorCol, len(currentLine))
 		before := currentLine[:cursorCol]
 		after := currentLine[cursorCol:]
 
@@ -1816,8 +1816,8 @@ func (e *Editor) deleteYankedTextLocked() {
 	if len(yankLines) == 1 {
 		currentLine := e.currentLine()
 		deleteLen := len(yankedText)
-		before := currentLine[:maxInt(0, minInt(e.state.cursorCol-deleteLen, len(currentLine)))]
-		after := currentLine[minInt(e.state.cursorCol, len(currentLine)):]
+		before := currentLine[:max(0, min(e.state.cursorCol-deleteLen, len(currentLine)))]
+		after := currentLine[min(e.state.cursorCol, len(currentLine)):]
 		e.state.lines[e.state.cursorLine] = before + after
 		e.setCursorCol(e.state.cursorCol - deleteLen)
 	} else {
@@ -1831,9 +1831,9 @@ func (e *Editor) deleteYankedTextLocked() {
 		afterCursor := ""
 		if e.state.cursorLine < len(e.state.lines) {
 			currentLine := e.state.lines[e.state.cursorLine]
-			afterCursor = currentLine[minInt(e.state.cursorCol, len(currentLine)):]
+			afterCursor = currentLine[min(e.state.cursorCol, len(currentLine)):]
 		}
-		beforeYank := startLineText[:maxInt(0, minInt(startCol, len(startLineText)))]
+		beforeYank := startLineText[:max(0, min(startCol, len(startLineText)))]
 
 		newLines := append([]string(nil), e.state.lines[:startLine]...)
 		newLines = append(newLines, beforeYank+afterCursor)

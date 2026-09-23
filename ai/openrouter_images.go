@@ -231,9 +231,9 @@ func parseOpenRouterImagesUsage(raw struct {
 	}
 	cacheRead := reportedCached
 	if cacheWrite > 0 {
-		cacheRead = max64(0, reportedCached-cacheWrite)
+		cacheRead = max(0, reportedCached-cacheWrite)
 	}
-	inputTokens := max64(0, promptTokens-cacheRead-cacheWrite)
+	inputTokens := max(0, promptTokens-cacheRead-cacheWrite)
 	outputTokens := int64(raw.CompletionTokens)
 	usage := Usage{
 		Input: inputTokens, Output: outputTokens,

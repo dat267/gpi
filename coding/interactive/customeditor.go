@@ -173,7 +173,7 @@ func (c *CustomEditor) renderTopBorder(width int, hiddenLineCount int) string {
 		return c.Editor.DefaultRenderTopBorder(width, hiddenLineCount)
 	}
 
-	status := c.workingStatusIndicator.RenderInBorder(maxIntLocal(1, width-5))
+	status := c.workingStatusIndicator.RenderInBorder(max(1, width-5))
 	statusWidth := tui.VisibleWidth(status)
 	if statusWidth == 0 {
 		return c.Editor.DefaultRenderTopBorder(width, hiddenLineCount)
@@ -199,18 +199,18 @@ func (c *CustomEditor) renderTopBorder(width int, hiddenLineCount int) string {
 	if canFitOverflow() {
 		leftBlockWidth := 3 + statusWidth + 1
 		return c.BorderColor("── ") + status +
-			c.BorderColor(" "+strings.Repeat("─", maxIntLocal(0, overflowStart-leftBlockWidth))+
-				overflowLabel+strings.Repeat("─", maxIntLocal(0, width-overflowStart-overflowLabelWidth)))
+			c.BorderColor(" "+strings.Repeat("─", max(0, overflowStart-leftBlockWidth))+
+				overflowLabel+strings.Repeat("─", max(0, width-overflowStart-overflowLabelWidth)))
 	}
 
 	if width >= statusWidth+5 {
 		return c.BorderColor("── ") + status +
-			c.BorderColor(" "+strings.Repeat("─", maxIntLocal(0, width-statusWidth-4)))
+			c.BorderColor(" "+strings.Repeat("─", max(0, width-statusWidth-4)))
 	}
 
 	status = c.workingStatusIndicator.RenderSpinnerInBorder(width)
 	statusWidth = tui.VisibleWidth(status)
-	prefixWidth := minIntLocal(3, maxIntLocal(0, width-statusWidth))
+	prefixWidth := min(3, max(0, width-statusWidth))
 	return c.BorderColor(strings.Repeat("─", prefixWidth)) + status +
-		c.BorderColor(strings.Repeat("─", maxIntLocal(0, width-prefixWidth-statusWidth)))
+		c.BorderColor(strings.Repeat("─", max(0, width-prefixWidth-statusWidth)))
 }

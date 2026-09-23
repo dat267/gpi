@@ -195,7 +195,7 @@ func (c *ModelSelectorComponent) loadModelsFromSnapshot() {
 	if currentIndex >= 0 {
 		c.selectedIndex = currentIndex
 	} else {
-		c.selectedIndex = minIntLocal(c.selectedIndex, maxIntLocal(0, len(c.filteredModels)-1))
+		c.selectedIndex = min(c.selectedIndex, max(0, len(c.filteredModels)-1))
 	}
 }
 
@@ -420,7 +420,7 @@ func (c *ModelSelectorComponent) filterModels(query string) {
 	if query != "" {
 		c.selectedIndex = 0
 	} else {
-		c.selectedIndex = minIntLocal(c.selectedIndex, maxIntLocal(0, len(c.filteredModels)-1))
+		c.selectedIndex = min(c.selectedIndex, max(0, len(c.filteredModels)-1))
 	}
 	c.updateList()
 }
@@ -430,8 +430,8 @@ func (c *ModelSelectorComponent) updateList() {
 	c.listContainer.Clear()
 
 	const maxVisible = 10
-	startIndex := maxIntLocal(0, minIntLocal(c.selectedIndex-maxVisible/2, len(c.filteredModels)-maxVisible))
-	endIndex := minIntLocal(startIndex+maxVisible, len(c.filteredModels))
+	startIndex := max(0, min(c.selectedIndex-maxVisible/2, len(c.filteredModels)-maxVisible))
+	endIndex := min(startIndex+maxVisible, len(c.filteredModels))
 
 	for i := startIndex; i < endIndex; i++ {
 		item := c.filteredModels[i]

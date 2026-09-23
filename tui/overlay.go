@@ -125,13 +125,13 @@ func resolveOverlayLayout(options *OverlayOptions, overlayHeight int, termWidth 
 		opt = *options
 	}
 
-	marginTop := maxInt(0, opt.Margin.Top)
-	marginRight := maxInt(0, opt.Margin.Right)
-	marginBottom := maxInt(0, opt.Margin.Bottom)
-	marginLeft := maxInt(0, opt.Margin.Left)
+	marginTop := max(0, opt.Margin.Top)
+	marginRight := max(0, opt.Margin.Right)
+	marginBottom := max(0, opt.Margin.Bottom)
+	marginLeft := max(0, opt.Margin.Left)
 
-	availWidth := maxInt(1, termWidth-marginLeft-marginRight)
-	availHeight := maxInt(1, termHeight-marginTop-marginBottom)
+	availWidth := max(1, termWidth-marginLeft-marginRight)
+	availHeight := max(1, termHeight-marginTop-marginBottom)
 
 	// Width: percentage of the terminal, else min(80, available).
 	layoutWidth := 0
@@ -146,12 +146,12 @@ func resolveOverlayLayout(options *OverlayOptions, overlayHeight int, termWidth 
 		}
 	}
 	if !hasWidth {
-		layoutWidth = minInt(80, availWidth)
+		layoutWidth = min(80, availWidth)
 	}
 	if opt.MinWidth != nil {
-		layoutWidth = maxInt(layoutWidth, *opt.MinWidth)
+		layoutWidth = max(layoutWidth, *opt.MinWidth)
 	}
-	layoutWidth = maxInt(1, minInt(layoutWidth, availWidth))
+	layoutWidth = max(1, min(layoutWidth, availWidth))
 
 	// Max height: percentage of the terminal, clamped to available space.
 	maxHeight := 0
@@ -166,12 +166,12 @@ func resolveOverlayLayout(options *OverlayOptions, overlayHeight int, termWidth 
 		}
 	}
 	if hasMax {
-		maxHeight = maxInt(1, minInt(maxHeight, availHeight))
+		maxHeight = max(1, min(maxHeight, availHeight))
 	}
 
 	effectiveHeight := overlayHeight
 	if hasMax {
-		effectiveHeight = minInt(overlayHeight, maxHeight)
+		effectiveHeight = min(overlayHeight, maxHeight)
 	}
 
 	// Row: explicit, percentage, or anchor-based.
@@ -181,7 +181,7 @@ func resolveOverlayLayout(options *OverlayOptions, overlayHeight int, termWidth 
 		row = *opt.Row
 	case opt.RowPercent != "":
 		if percent, ok := parsePercentValue(opt.RowPercent); ok {
-			maxRow := maxInt(0, availHeight-effectiveHeight)
+			maxRow := max(0, availHeight-effectiveHeight)
 			row = marginTop + int(float64(maxRow)*percent/100)
 		} else {
 			row = resolveAnchorRow(OverlayAnchorCenter, effectiveHeight, availHeight, marginTop)
@@ -200,7 +200,7 @@ func resolveOverlayLayout(options *OverlayOptions, overlayHeight int, termWidth 
 		col = *opt.Col
 	case opt.ColPercent != "":
 		if percent, ok := parsePercentValue(opt.ColPercent); ok {
-			maxCol := maxInt(0, availWidth-layoutWidth)
+			maxCol := max(0, availWidth-layoutWidth)
 			col = marginLeft + int(float64(maxCol)*percent/100)
 		} else {
 			col = resolveAnchorCol(OverlayAnchorCenter, layoutWidth, availWidth, marginLeft)
@@ -216,8 +216,8 @@ func resolveOverlayLayout(options *OverlayOptions, overlayHeight int, termWidth 
 	// Offsets, then clamping within the margins.
 	row += opt.OffsetY
 	col += opt.OffsetX
-	row = maxInt(marginTop, minInt(row, termHeight-marginBottom-effectiveHeight))
-	col = maxInt(marginLeft, minInt(col, termWidth-marginRight-layoutWidth))
+	row = max(marginTop, min(row, termHeight-marginBottom-effectiveHeight))
+	col = max(marginLeft, min(col, termWidth-marginRight-layoutWidth))
 
 	return overlayLayout{Width: layoutWidth, Row: row, Col: col, MaxHeight: maxHeight, HasMax: hasMax}
 }
@@ -257,12 +257,12 @@ func CompositeTuiLine(baseLine string, overlayLine string, startCol int, overlay
 	afterStart := startCol + overlayWidth
 	base := ExtractSegments(baseLine, startCol, afterStart, totalWidth-afterStart, true)
 	overlay := SliceWithWidth(overlayLine, 0, overlayWidth, true)
-	beforePad := maxInt(0, startCol-base.BeforeWidth)
-	overlayPad := maxInt(0, overlayWidth-overlay.Width)
-	actualBeforeWidth := maxInt(startCol, base.BeforeWidth)
-	actualOverlayWidth := maxInt(overlayWidth, overlay.Width)
-	afterTarget := maxInt(0, totalWidth-actualBeforeWidth-actualOverlayWidth)
-	afterPad := maxInt(0, afterTarget-base.AfterWidth)
+	beforePad := max(0, startCol-base.BeforeWidth)
+	overlayPad := max(0, overlayWidth-overlay.Width)
+	actualBeforeWidth := max(startCol, base.BeforeWidth)
+	actualOverlayWidth := max(overlayWidth, overlay.Width)
+	afterTarget := max(0, totalWidth-actualBeforeWidth-actualOverlayWidth)
+	afterPad := max(0, afterTarget-base.AfterWidth)
 
 	var result strings.Builder
 	result.WriteString(base.Before)
@@ -281,22 +281,3 @@ func CompositeTuiLine(baseLine string, overlayLine string, startCol int, overlay
 }
 
 // minInt and maxInt mirror Math.min/Math.max's variadic form.
-func minInt(values ...int) int {
-	result := values[0]
-	for _, value := range values[1:] {
-		if value < result {
-			result = value
-		}
-	}
-	return result
-}
-
-func maxInt(values ...int) int {
-	result := values[0]
-	for _, value := range values[1:] {
-		if value > result {
-			result = value
-		}
-	}
-	return result
-}

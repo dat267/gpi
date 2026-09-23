@@ -571,7 +571,7 @@ func (t *ProcessTerminal) DrainInput(maxMs int, idleMs int) error {
 		if idle >= time.Duration(idleMs)*time.Millisecond {
 			break
 		}
-		time.Sleep(minDuration(time.Duration(idleMs)*time.Millisecond, endTime.Sub(now)))
+		time.Sleep(min(time.Duration(idleMs)*time.Millisecond, endTime.Sub(now)))
 	}
 	return nil
 }
@@ -778,13 +778,6 @@ func (t *ProcessTerminal) clearProgressIntervalLocked() bool {
 	t.progressInterval = nil
 	t.progressDone = nil
 	return true
-}
-
-func minDuration(a, b time.Duration) time.Duration {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // ---- regex helpers ----

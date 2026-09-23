@@ -190,7 +190,7 @@ type latexLayout struct {
 }
 
 func padLayoutLine(line string, width int, centered bool) string {
-	padding := maxInt(0, width-VisibleWidth(line))
+	padding := max(0, width-VisibleWidth(line))
 	left := 0
 	if centered {
 		left = padding / 2
@@ -204,11 +204,11 @@ func joinLayouts(layouts []latexLayout) latexLayout {
 	}
 	baseline := 0
 	for _, layout := range layouts {
-		baseline = maxInt(baseline, layout.baseline)
+		baseline = max(baseline, layout.baseline)
 	}
 	below := 0
 	for _, layout := range layouts {
-		below = maxInt(below, len(layout.lines)-layout.baseline-1)
+		below = max(below, len(layout.lines)-layout.baseline-1)
 	}
 	var lines []string
 	for row := 0; row <= baseline+below; row++ {
@@ -275,7 +275,7 @@ func renderLayout(source string, nodes []*latexLayoutNode) latexLayout {
 			case "fraction":
 				numerator := renderLayout(node.numerator, nodes)
 				denominator := renderLayout(node.denominator, nodes)
-				contentWidth := maxInt(maxInt(numerator.width, denominator.width), 1)
+				contentWidth := max(max(numerator.width, denominator.width), 1)
 				width := contentWidth + 2
 				var lines []string
 				for _, line := range numerator.lines {
@@ -290,10 +290,10 @@ func renderLayout(source string, nodes []*latexLayoutNode) latexLayout {
 			case "operator":
 				contentWidth := VisibleWidth(node.operator)
 				if node.hasLower {
-					contentWidth = maxInt(contentWidth, VisibleWidth(node.lower))
+					contentWidth = max(contentWidth, VisibleWidth(node.lower))
 				}
 				if node.hasUpper {
-					contentWidth = maxInt(contentWidth, VisibleWidth(node.upper))
+					contentWidth = max(contentWidth, VisibleWidth(node.upper))
 				}
 				var lines []string
 				if node.hasUpper {
@@ -321,10 +321,10 @@ func renderLayout(source string, nodes []*latexLayoutNode) latexLayout {
 				}
 				width := 0
 				if upper != nil {
-					width = maxInt(width, upper.width)
+					width = max(width, upper.width)
 				}
 				if lower != nil {
-					width = maxInt(width, lower.width)
+					width = max(width, lower.width)
 				}
 				var lines []string
 				if upper != nil {
@@ -347,7 +347,7 @@ func renderLayout(source string, nodes []*latexLayoutNode) latexLayout {
 			default:
 				width := 0
 				for _, line := range node.lines {
-					width = maxInt(width, VisibleWidth(line))
+					width = max(width, VisibleWidth(line))
 				}
 				lines := make([]string, 0, len(node.lines))
 				for _, line := range node.lines {
@@ -382,7 +382,7 @@ func renderLayout(source string, nodes []*latexLayoutNode) latexLayout {
 
 	width := 0
 	for _, line := range renderedLines {
-		width = maxInt(width, VisibleWidth(line))
+		width = max(width, VisibleWidth(line))
 	}
 	return latexLayout{lines: renderedLines, width: width, baseline: firstBaseline}
 }
@@ -1032,7 +1032,7 @@ func (p *latexParser) parseEnvironment() string {
 				var joined []string
 				for index := 0; index < (len(cells)+1)/2; index++ {
 					start := index * 2
-					end := minInt(index*2+2, len(cells))
+					end := min(index*2+2, len(cells))
 					if start < len(cells) {
 						joined = append(joined, strings.Join(cells[start:end], ""))
 					}
@@ -1089,7 +1089,7 @@ func (p *latexParser) renderCases(body string) string {
 		if len(row) > 0 {
 			value = latexTrailingCommaRegex.ReplaceAllString(row[0], "")
 		}
-		valueWidth = maxInt(valueWidth, VisibleWidth(value))
+		valueWidth = max(valueWidth, VisibleWidth(value))
 	}
 
 	var contents []string
@@ -1110,7 +1110,7 @@ func (p *latexParser) renderCases(body string) string {
 		if latexCasesConditionRegex.MatchString(condition) {
 			conditionPrefix = " "
 		}
-		contents = append(contents, value+strings.Repeat(latexProtectedSpace, maxInt(0, valueWidth-VisibleWidth(value)))+conditionPrefix+condition)
+		contents = append(contents, value+strings.Repeat(latexProtectedSpace, max(0, valueWidth-VisibleWidth(value)))+conditionPrefix+condition)
 	}
 	if len(contents) <= 1 {
 		if len(contents) == 0 {
@@ -1173,7 +1173,7 @@ func (p *latexParser) renderMatrix(environment string, body string) string {
 
 	columnCount := 0
 	for _, row := range matrix {
-		columnCount = maxInt(columnCount, len(row))
+		columnCount = max(columnCount, len(row))
 	}
 	columnWidths := make([]int, columnCount)
 	for column := 0; column < columnCount; column++ {
@@ -1182,7 +1182,7 @@ func (p *latexParser) renderMatrix(environment string, body string) string {
 			if column < len(row) {
 				cell = row[column]
 			}
-			columnWidths[column] = maxInt(columnWidths[column], VisibleWidth(cell))
+			columnWidths[column] = max(columnWidths[column], VisibleWidth(cell))
 		}
 	}
 
@@ -1194,7 +1194,7 @@ func (p *latexParser) renderMatrix(environment string, body string) string {
 			if column < len(row) {
 				cell = row[column]
 			}
-			cells = append(cells, cell+strings.Repeat(latexProtectedSpace, maxInt(0, columnWidths[column]-VisibleWidth(cell))))
+			cells = append(cells, cell+strings.Repeat(latexProtectedSpace, max(0, columnWidths[column]-VisibleWidth(cell))))
 		}
 		rows = append(rows, strings.Join(cells, " │ "))
 	}
