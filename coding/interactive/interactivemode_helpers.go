@@ -421,8 +421,13 @@ func newTrustCrashWiring(app *App) *TrustCrashWiring {
 // path — fd runs with --hidden, and the in-process listing applies only a
 // prefix filter — so `.pi` is offered after `~/` without typing the dot.
 func ResolveAutocompleteFdPath() string {
-	if path, err := exec.LookPath("fd"); err == nil {
-		return path
+	// Upstream looks for "fd" only. Debian and Ubuntu ship the same binary as
+	// "fdfind", so the port accepts either rather than leaving @-file completion
+	// silently unavailable on those systems.
+	for _, name := range []string{"fd", "fdfind"} {
+		if path, err := exec.LookPath(name); err == nil {
+			return path
+		}
 	}
 	return ""
 }
