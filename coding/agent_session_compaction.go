@@ -133,7 +133,7 @@ func maxTokensOf(model *ai.Model) int64 {
 // (upstream's setAutoCompactionEnabled writes there), otherwise the session
 // toggle gates the session-level settings.
 func (s *AgentSession) compactionSettings() (CompactionSettings, bool) {
-	if s.control != nil && s.control.Settings != nil {
+	if s.control.Settings != nil {
 		resolved, err := s.control.Settings.GetCompactionSettings(s.Model())
 		if err == nil {
 			return CompactionSettings{
@@ -146,10 +146,7 @@ func (s *AgentSession) compactionSettings() (CompactionSettings, bool) {
 	if settings.ReserveTokens == 0 && settings.KeepRecentTokens == 0 {
 		settings = DefaultCompactionSettings
 	}
-	if s.control != nil {
-		return settings, settings.Enabled && s.AutoCompactionEnabled()
-	}
-	return settings, settings.Enabled
+	return settings, settings.Enabled && s.AutoCompactionEnabled()
 }
 
 // RunAutoCompaction executes threshold or overflow compaction. It reports
@@ -183,7 +180,7 @@ func (s *AgentSession) RunAutoCompaction(ctx context.Context, reason CompactionR
 		Retry: s.retrySettings(), SessionID: s.Sessions.GetSessionID(),
 		Callbacks: s.summarizationRetryCallbacksForCompaction(reason),
 	}
-	if s.control != nil && s.control.ModelRuntime != nil {
+	if s.control.ModelRuntime != nil {
 		resolution, err := s.control.ModelRuntime.GetAuthForModel(model, nil)
 		if err == nil && resolution != nil {
 			options.APIKey = resolution.Auth.APIKey
@@ -277,9 +274,6 @@ func (s *AgentSession) AbortCompaction() {
 // AbortBranchSummary cancels an in-flight branch summarization (upstream
 // abortBranchSummary; D132).
 func (s *AgentSession) AbortBranchSummary() {
-	if s.control == nil {
-		return
-	}
 	s.control.stateMu.Lock()
 	cancel := s.control.branchSummaryCancel
 	s.control.stateMu.Unlock()

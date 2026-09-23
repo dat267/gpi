@@ -16,7 +16,7 @@ import (
 // templates and theme files are not loaded by the port at boot, so they are not
 // re-read here either.
 func (s *AgentSession) Reload() {
-	if s.control != nil && s.control.Settings != nil {
+	if s.control.Settings != nil {
 		s.control.Settings.Reload()
 	}
 	s.SyncQueueModesFromSettings()
@@ -31,7 +31,7 @@ func (s *AgentSession) Reload() {
 func (s *AgentSession) reloadResources() {
 	trusted := false
 	skillPaths := []string(nil)
-	if s.control != nil && s.control.Settings != nil {
+	if s.control.Settings != nil {
 		trusted = s.control.Settings.IsProjectTrusted()
 		skillPaths = s.control.Settings.GetSkillPaths()
 	}

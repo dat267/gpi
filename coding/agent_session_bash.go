@@ -41,13 +41,13 @@ func (s *AgentSession) ExecuteBash(ctx context.Context, command string, onChunk 
 
 	// Apply the configured command prefix (for example alias support).
 	resolvedCommand := command
-	if s.control != nil && s.control.Settings != nil {
+	if s.control.Settings != nil {
 		if prefix := s.control.Settings.GetShellCommandPrefix(); prefix != nil && *prefix != "" {
 			resolvedCommand = *prefix + "\n" + command
 		}
 	}
 	shellPath := ""
-	if s.control != nil && s.control.Settings != nil {
+	if s.control.Settings != nil {
 		if path := s.control.Settings.GetShellPath(); path != nil {
 			shellPath = *path
 		}

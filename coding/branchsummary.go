@@ -417,7 +417,7 @@ func (s *AgentSession) NavigateTree(ctx context.Context, targetID string, option
 	if options.Summarize && len(collection.Entries) > 0 {
 		model := s.Model()
 		request := SummarizationRequestAuth{Model: model}
-		if s.control != nil && s.control.ModelRuntime != nil {
+		if s.control.ModelRuntime != nil {
 			resolution, err := s.control.ModelRuntime.GetAuthForModel(model, nil)
 			if err != nil {
 				return nil, err
@@ -434,7 +434,7 @@ func (s *AgentSession) NavigateTree(ctx context.Context, targetID string, option
 			}
 		}
 		reserveTokens := 16384
-		if s.control != nil && s.control.Settings != nil {
+		if s.control.Settings != nil {
 			reserveTokens = int(s.control.Settings.GetBranchSummarySettings().ReserveTokens)
 		}
 		result, err := GenerateBranchSummary(collection.Entries, GenerateBranchSummaryOptions{
@@ -547,9 +547,6 @@ func (s *AgentSession) compactionStreamFn() StreamFnFn {
 // taken from the transcript's current system message (port of
 // _restoreToolsFromTranscript).
 func (s *AgentSession) RestoreToolsFromTranscript() {
-	if s.control == nil {
-		return
-	}
 	current := s.Sessions.CurrentSystemMessage()
 	if current == nil {
 		return

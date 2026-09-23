@@ -293,9 +293,10 @@ func TestPostRunQueuedContinuation(t *testing.T) {
 
 func TestRetryWithNoPolicy(t *testing.T) {
 	// Without control settings and without a configured policy there is nothing
-	// to retry.
+	// to retry. A session always carries its collaborator block, so "no
+	// settings" is an empty block, not a missing one.
 	session := retrySession(t, nil, erroringStreamFn(1, "overloaded"))
-	session.control = nil
+	session.control = &AgentSessionControl{}
 	if session.RetryEnabled() {
 		t.Fatal("no policy means disabled")
 	}

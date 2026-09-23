@@ -100,9 +100,6 @@ func (s *AgentSession) Model() *ai.Model { return s.Agent.State().Model }
 // ModelRuntime returns the model runtime backing the session (nil when the
 // session was created without one).
 func (s *AgentSession) ModelRuntime() *ModelRuntime {
-	if s.control == nil {
-		return nil
-	}
 	return s.control.ModelRuntime
 }
 
@@ -165,9 +162,6 @@ func (s *AgentSession) compactionInFlight() bool {
 
 // branchSummaryInFlight reports whether a branch summarization is running.
 func (s *AgentSession) branchSummaryInFlight() bool {
-	if s.control == nil {
-		return false
-	}
 	s.control.stateMu.Lock()
 	defer s.control.stateMu.Unlock()
 	return s.control.branchSummaryCancel != nil
@@ -216,7 +210,7 @@ func (s *AgentSession) SetFollowUpMode(mode QueueMode) { s.Agent.SetFollowUpMode
 
 // SyncQueueModesFromSettings applies the settings-backed queue modes.
 func (s *AgentSession) SyncQueueModesFromSettings() {
-	if s.control == nil || s.control.Settings == nil {
+	if s.control.Settings == nil {
 		return
 	}
 	s.Agent.SetSteeringMode(s.control.Settings.GetSteeringMode())
@@ -270,19 +264,17 @@ func (s *AgentSession) SetSessionName(name string) {
 
 // ScopedModels returns the model cycle scope.
 func (s *AgentSession) ScopedModels() []ScopedModel {
-	if s.control == nil {
+	s.control.stateMu.Lock()
+	models := append([]ScopedModel{}, s.control.scopedModels...)
+	s.control.stateMu.Unlock()
+	if len(models) == 0 {
 		return nil
 	}
-	s.control.stateMu.Lock()
-	defer s.control.stateMu.Unlock()
-	return append([]ScopedModel{}, s.control.scopedModels...)
+	return models
 }
 
 // SetScopedModels replaces the model cycle scope.
 func (s *AgentSession) SetScopedModels(models []ScopedModel) {
-	if s.control == nil {
-		return
-	}
 	s.control.stateMu.Lock()
 	s.control.scopedModels = append([]ScopedModel{}, models...)
 	s.control.stateMu.Unlock()
@@ -290,7 +282,7 @@ func (s *AgentSession) SetScopedModels(models []ScopedModel) {
 
 // PromptTemplates returns the file-based prompt templates.
 func (s *AgentSession) PromptTemplates() []PromptTemplate {
-	if s.control == nil {
+	if len(s.control.PromptTemplates) == 0 {
 		return nil
 	}
 	return append([]PromptTemplate{}, s.control.PromptTemplates...)
@@ -328,9 +320,6 @@ func (s *AgentSession) SkillDiagnostics() []ResourceDiagnostic {
 
 // AutoCompactionEnabled reports the auto-compaction toggle.
 func (s *AgentSession) AutoCompactionEnabled() bool {
-	if s.control == nil {
-		return false
-	}
 	s.control.stateMu.Lock()
 	defer s.control.stateMu.Unlock()
 	return s.control.autoCompaction
@@ -338,9 +327,6 @@ func (s *AgentSession) AutoCompactionEnabled() bool {
 
 // SetAutoCompactionEnabled toggles auto-compaction.
 func (s *AgentSession) SetAutoCompactionEnabled(enabled bool) {
-	if s.control == nil {
-		return
-	}
 	s.control.stateMu.Lock()
 	s.control.autoCompaction = enabled
 	s.control.stateMu.Unlock()
@@ -348,9 +334,6 @@ func (s *AgentSession) SetAutoCompactionEnabled(enabled bool) {
 
 // AutoRetryEnabled reports the auto-retry toggle.
 func (s *AgentSession) AutoRetryEnabled() bool {
-	if s.control == nil {
-		return false
-	}
 	s.control.stateMu.Lock()
 	defer s.control.stateMu.Unlock()
 	return s.control.autoRetry
@@ -358,9 +341,6 @@ func (s *AgentSession) AutoRetryEnabled() bool {
 
 // SetAutoRetryEnabled toggles auto-retry.
 func (s *AgentSession) SetAutoRetryEnabled(enabled bool) {
-	if s.control == nil {
-		return
-	}
 	s.control.stateMu.Lock()
 	s.control.autoRetry = enabled
 	s.control.stateMu.Unlock()
@@ -378,7 +358,7 @@ func (s *AgentSession) GetActiveToolNames() []string {
 
 // GetAllTools lists every configured tool with its metadata.
 func (s *AgentSession) GetAllTools() []ToolInfo {
-	if s.control == nil {
+	if len(s.control.Tools) == 0 {
 		return nil
 	}
 	names := make([]string, 0, len(s.control.Tools))
@@ -402,9 +382,6 @@ func (s *AgentSession) GetAllTools() []ToolInfo {
 
 // GetToolDefinition returns a registered tool by name.
 func (s *AgentSession) GetToolDefinition(name string) *agent.AgentTool {
-	if s.control == nil {
-		return nil
-	}
 	entry, ok := s.control.Tools[name]
 	if !ok {
 		return nil
@@ -415,9 +392,6 @@ func (s *AgentSession) GetToolDefinition(name string) *agent.AgentTool {
 // SetActiveToolsByName enables the named registry tools (unknown names are
 // ignored) and rebuilds the system prompt.
 func (s *AgentSession) SetActiveToolsByName(names []string) {
-	if s.control == nil {
-		return
-	}
 	tools := make([]agent.AgentTool, 0, len(names))
 	validNames := make([]string, 0, len(names))
 	for _, name := range names {
@@ -445,13 +419,13 @@ func (s *AgentSession) RebuildSystemPrompt(toolNames []string) {
 // SetModel switches the session model (auth-checked) and applies the thinking
 // level for the new model.
 func (s *AgentSession) SetModel(ctx context.Context, model *ai.Model, options ModelMutationOptions) error {
-	if s.control != nil && s.control.ModelRuntime != nil && !s.control.ModelRuntime.HasConfiguredAuth(model.Provider) {
+	if s.control.ModelRuntime != nil && !s.control.ModelRuntime.HasConfiguredAuth(model.Provider) {
 		return fmt.Errorf("No API key for %s/%s", model.Provider, model.ID)
 	}
 	previous := s.Model()
 	s.Agent.SetModel(model)
 	s.Sessions.AppendModelChange(model.Provider, model.ID)
-	if options.Persist && s.control != nil && s.control.Settings != nil {
+	if options.Persist && s.control.Settings != nil {
 		s.control.Settings.SetDefaultModelAndProvider(model.Provider, model.ID)
 		s.addPersistedDefaultToNonEmptyScope(model)
 	}
@@ -497,7 +471,7 @@ func (s *AgentSession) cycleScopedModel(ctx context.Context, direction string, o
 
 func (s *AgentSession) cycleAvailableModel(ctx context.Context, direction string, options ModelMutationOptions) (*ModelCycleResult, error) {
 	var models []*ai.Model
-	if s.control != nil && s.control.ModelRuntime != nil {
+	if s.control.ModelRuntime != nil {
 		models = s.control.ModelRuntime.GetAvailableSnapshot()
 	}
 	if len(models) <= 1 {
@@ -520,13 +494,13 @@ func (s *AgentSession) cycleAvailableModel(ctx context.Context, direction string
 }
 
 func (s *AgentSession) applyModelCycle(ctx context.Context, model *ai.Model, explicitLevel ai.ThinkingLevel, options ModelMutationOptions, isScoped bool) (*ModelCycleResult, error) {
-	if s.control != nil && s.control.ModelRuntime != nil && !s.control.ModelRuntime.HasConfiguredAuth(model.Provider) {
+	if s.control.ModelRuntime != nil && !s.control.ModelRuntime.HasConfiguredAuth(model.Provider) {
 		return nil, fmt.Errorf("No API key for %s/%s", model.Provider, model.ID)
 	}
 	previous := s.Model()
 	s.Agent.SetModel(model)
 	s.Sessions.AppendModelChange(model.Provider, model.ID)
-	if options.Persist && s.control != nil && s.control.Settings != nil {
+	if options.Persist && s.control.Settings != nil {
 		s.control.Settings.SetDefaultModelAndProvider(model.Provider, model.ID)
 		s.addPersistedDefaultToNonEmptyScope(model)
 	}
@@ -537,7 +511,7 @@ func (s *AgentSession) applyModelCycle(ctx context.Context, model *ai.Model, exp
 
 func (s *AgentSession) availableModelKeys() map[string]bool {
 	keys := map[string]bool{}
-	if s.control != nil && s.control.ModelRuntime != nil {
+	if s.control.ModelRuntime != nil {
 		for _, model := range s.control.ModelRuntime.GetAvailableSnapshot() {
 			keys[model.Provider+"\x00"+model.ID] = true
 		}
@@ -548,7 +522,7 @@ func (s *AgentSession) availableModelKeys() map[string]bool {
 // addPersistedDefaultToNonEmptyScope keeps a persisted default inside a
 // non-empty model scope.
 func (s *AgentSession) addPersistedDefaultToNonEmptyScope(model *ai.Model) {
-	if s.control == nil || s.control.Settings == nil {
+	if s.control.Settings == nil {
 		return
 	}
 	s.control.stateMu.Lock()
@@ -602,7 +576,7 @@ func (s *AgentSession) SetThinkingLevel(level ai.ThinkingLevel, optionList ...Mo
 	changed := effective != previous
 	s.Agent.SetThinkingLevel(effective)
 
-	if options.Persist && s.control != nil && s.control.Settings != nil {
+	if options.Persist && s.control.Settings != nil {
 		s.control.Settings.SetDefaultThinkingLevel(level)
 	}
 	if changed {
@@ -660,12 +634,12 @@ func (s *AgentSession) getThinkingLevelForModelSwitch(target *ai.Model, explicit
 	if explicit != "" {
 		return explicit
 	}
-	if target != nil && s.control != nil && s.control.Settings != nil {
+	if target != nil && s.control.Settings != nil {
 		if perModel := s.control.Settings.GetModelThinkingLevel(target.Provider, target.ID); perModel != nil {
 			return *perModel
 		}
 	}
-	if s.control != nil && s.control.Settings != nil {
+	if s.control.Settings != nil {
 		if global := s.control.Settings.GetDefaultThinkingLevel(); global != nil {
 			return *global
 		}
@@ -825,11 +799,9 @@ func (s *AgentSession) Dispose() {
 		// Cleanup is best-effort; the remaining dispose steps still run.
 		_ = err
 	}
-	if s.control != nil {
-		s.control.stateMu.Lock()
-		s.control.disposed = true
-		s.control.stateMu.Unlock()
-	}
+	s.control.stateMu.Lock()
+	s.control.disposed = true
+	s.control.stateMu.Unlock()
 	s.listenerMu.Lock()
 	s.listeners = nil
 	s.listenerMu.Unlock()
@@ -840,7 +812,7 @@ func (s *AgentSession) SessionManager() *SessionManager { return s.Sessions }
 
 // IsUsingSubscription reports whether a provider is subscription-backed.
 func (s *AgentSession) IsUsingSubscription(providerID string) bool {
-	if s.control == nil || s.control.ModelRuntime == nil {
+	if s.control.ModelRuntime == nil {
 		return false
 	}
 	return s.control.ModelRuntime.IsUsingSubscription(providerID)

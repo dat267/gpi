@@ -36,7 +36,7 @@ func (s *AgentSession) IsRetryableError(message *ai.AssistantMessage) bool {
 
 // retrySettings resolves the retry policy from settings or the session config.
 func (s *AgentSession) retrySettings() *ai.RetryPolicy {
-	if s.control != nil && s.control.Settings != nil {
+	if s.control.Settings != nil {
 		resolved := s.control.Settings.GetRetrySettings()
 		return &ai.RetryPolicy{
 			Enabled: resolved.Enabled, MaxRetries: resolved.MaxRetries,
@@ -202,7 +202,7 @@ func (s *AgentSession) takeLastAssistantMessage() *ai.AssistantMessage {
 
 // SetAutoRetryEnabled toggles the persisted retry setting.
 func (s *AgentSession) SetRetryEnabled(enabled bool) {
-	if s.control != nil && s.control.Settings != nil {
+	if s.control.Settings != nil {
 		s.control.Settings.SetRetryEnabled(enabled)
 		return
 	}

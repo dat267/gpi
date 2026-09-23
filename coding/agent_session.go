@@ -219,6 +219,12 @@ type SessionConfig struct {
 	// paths); Reload re-resolves them against the current trust state and
 	// re-reads the discovered files when they are nil.
 	PromptSources *PromptFileSources
+	// Control holds the session's collaborators (model runtime, settings
+	// manager, tool registry, toggles). NewAgentSession always installs one:
+	// the config's block when present, otherwise an empty block. A session is
+	// never half-built, so its methods do not guard against a missing block;
+	// the fields inside it stay optional.
+	Control       *AgentSessionControl
 	Tools         []agent.AgentTool
 	Sessions      *SessionManager
 	Settings      SessionSettings
@@ -279,11 +285,22 @@ func NewAgentSession(config *SessionConfig) (*AgentSession, error) {
 		return nil, err
 	}
 
+	// The block is taken by pointer (it holds a mutex); a session without one
+	// gets an empty block so it is never half-built.
+	control := config.Control
+	if control == nil {
+		control = &AgentSessionControl{}
+	}
+	if control.Tools == nil {
+		control.Tools = map[string]AgentToolDefinition{}
+	}
+
 	s := &AgentSession{
 		Agent:    a,
 		Sessions: sessionManager,
 		Settings: settings,
 		Cwd:      config.Cwd,
+		control:  control,
 		streamFn: config.StreamFn,
 		SystemPromptOptions: &BuildSystemPromptOptions{
 			CustomPrompt: config.SystemPrompt, AppendSystemPrompt: config.AppendSystemPrompt, Cwd: config.Cwd,
@@ -566,7 +583,7 @@ func (s *AgentSession) runManualCompaction(ctx context.Context, customInstructio
 		StreamFn: s.compactionStreamFn(), Retry: s.retrySettings(),
 		SessionID: s.Sessions.GetSessionID(),
 	}
-	if s.control != nil && s.control.ModelRuntime != nil {
+	if s.control.ModelRuntime != nil {
 		resolution, err := s.control.ModelRuntime.GetAuthForModel(model, nil)
 		if err == nil && resolution != nil {
 			options.APIKey = resolution.Auth.APIKey

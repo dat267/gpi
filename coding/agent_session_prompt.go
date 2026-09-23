@@ -94,7 +94,7 @@ func (s *AgentSession) GetCacheWarmingStatus() *CacheWarmingStatus {
 
 // SetCacheWarmingMode persists the warming mode and reconciles the warmer.
 func (s *AgentSession) SetCacheWarmingMode(mode CacheWarmingMode) {
-	if s.control != nil && s.control.Settings != nil {
+	if s.control.Settings != nil {
 		s.control.Settings.SetCacheWarmingMode(mode)
 	}
 	if s.CacheWarmer != nil {
@@ -202,7 +202,7 @@ func (s *AgentSession) queueFollowUp(text string, images []ai.ImageContent) {
 
 // validateModelAuth checks that the selected model's provider has usable auth.
 func (s *AgentSession) validateModelAuth(ctx context.Context) error {
-	if s.control == nil || s.control.ModelRuntime == nil {
+	if s.control.ModelRuntime == nil {
 		return nil
 	}
 	runtime := s.control.ModelRuntime

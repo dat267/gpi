@@ -247,6 +247,12 @@ and a 121 ms frame after a transcript rebuild.
 
 ## Conventions and gotchas
 
+- **A session always has its collaborators.** `SessionConfig.Control` carries
+  the model runtime, settings manager, tool registry and toggles;
+  `NewAgentSession` installs it (or an empty block), so no session method guards
+  against a half-built session. The fields inside the block stay optional
+  (`ModelRuntime` nil means no auth/catalog, `Settings` nil means no live
+  settings), and an empty block means auto-compaction and auto-retry are off.
 - **Locking (hard-won).** `tui.Container` methods lock `Container.mu`
   (session-event goroutines mutate the chat/document containers while the
   render timer renders them; upstream is single-threaded). Locks always nest

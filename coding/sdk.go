@@ -364,13 +364,17 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 		PromptSourcePaths:  promptOverrides.SourcePaths,
 		AgentDir:           agentDir,
 		PromptSources:      &promptSources,
-		ConvertToLlm:       convertToLlmWithBlockImages,
-		SessionID:          sessionID,
-		SteeringMode:       settingsManager.GetSteeringMode(),
-		FollowUpMode:       settingsManager.GetFollowUpMode(),
-		Transport:          ai.Transport(settingsManager.GetTransport()),
-		ThinkingBudgets:    thinkingBudgetsOf(settingsManager.GetThinkingBudgets()),
-		MaxRetryDelayMS:    &maxRetryDelay,
+		Control: &AgentSessionControl{
+			ModelRuntime: modelRuntime, Settings: settingsManager,
+			Tools: map[string]AgentToolDefinition{}, autoCompaction: true, autoRetry: true,
+		},
+		ConvertToLlm:    convertToLlmWithBlockImages,
+		SessionID:       sessionID,
+		SteeringMode:    settingsManager.GetSteeringMode(),
+		FollowUpMode:    settingsManager.GetFollowUpMode(),
+		Transport:       ai.Transport(settingsManager.GetTransport()),
+		ThinkingBudgets: thinkingBudgetsOf(settingsManager.GetThinkingBudgets()),
+		MaxRetryDelayMS: &maxRetryDelay,
 	})
 	if err != nil {
 		return nil, err
@@ -391,10 +395,6 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 	}
 
 	session.streamFn = streamFn
-	session.control = &AgentSessionControl{
-		ModelRuntime: modelRuntime, Settings: settingsManager,
-		Tools: map[string]AgentToolDefinition{}, autoCompaction: true, autoRetry: true,
-	}
 	for name, tool := range toolByName {
 		session.control.Tools[name] = AgentToolDefinition{Tool: tool}
 	}
