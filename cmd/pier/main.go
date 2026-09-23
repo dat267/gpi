@@ -32,9 +32,24 @@ func executableName() string {
 	return name
 }
 
+// errAlreadyReported marks a failure that has already been written to stderr as
+// a diagnostic, so main only has to set the exit status.
+var errAlreadyReported = errors.New("already reported")
+
 func main() {
 	appName := executableName()
 	args := coding.ParseArgs(os.Args[1:])
+
+	// Parse diagnostics are reported before anything they would invalidate: an
+	// unusable flag value should not be followed by a run that ignores it, and
+	// upstream reports them straight after parsing, ahead of --version. An error
+	// among them is fatal.
+	for _, diagnostic := range args.Diagnostics {
+		fmt.Fprintln(os.Stderr, coding.FormatCLIDiagnostic(diagnostic))
+	}
+	if coding.HasErrorDiagnostics(args.Diagnostics) {
+		os.Exit(1)
+	}
 
 	if args.Help {
 		fmt.Print(coding.PrintHelpNamed(appName))
@@ -50,7 +65,9 @@ func main() {
 	}
 
 	if err := run(appName, args); err != nil {
-		fmt.Fprintln(os.Stderr, appName+": "+err.Error())
+		if !errors.Is(err, errAlreadyReported) {
+			fmt.Fprintln(os.Stderr, appName+": "+err.Error())
+		}
 		os.Exit(1)
 	}
 }
@@ -67,9 +84,19 @@ func run(appName string, args *coding.Args) error {
 	}
 	agentDir := coding.GetAgentDir()
 
-	settings := coding.NewSettingsManagerFromFiles(cwd, agentDir, coding.SettingsManagerCreateOptions{})
+	settings := coding.NewSettingsManagerFromFiles(cwd, agentDir, coding.SettingsManagerCreateOptions{
+		// --approve / --no-approve settle project trust for this run without
+		// consulting or updating the trust store (upstream's
+		// projectTrustOverride, which resolveProjectTrusted honours before any
+		// other rule).
+		ProjectTrusted: args.ProjectTrustOverride,
+	})
 
-	// Theme: initialize before any TUI (the -r picker runs before the app).
+	// Theme: --use-theme overrides the configured theme for this run only, and
+	// has to be applied before any TUI because the -r picker runs before the app.
+	if args.UseTheme != nil {
+		settings.ApplyOverrides(&coding.Settings{Theme: args.UseTheme})
+	}
 	themeName := "dark"
 	if setting := settings.GetTheme(); setting != nil && *setting != "" {
 		themeName = *setting
@@ -104,6 +131,16 @@ func run(appName string, args *coding.Args) error {
 			options.Persist = &persist
 		}
 		sessions = coding.NewSessionManager(cwd, options)
+	}
+
+	// --name labels the session, recorded as a session_info entry — the same
+	// entry the /name command writes.
+	name, err := sessionNameFor(args)
+	if err != nil {
+		return err
+	}
+	if name != nil {
+		sessions.AppendSessionInfo(*name)
 	}
 
 	// Model runtime backed by auth.json. Upstream refreshes the catalogs at
@@ -148,6 +185,39 @@ func run(appName string, args *coding.Args) error {
 		thinking = *args.Thinking
 	}
 
+	// --models sets the model cycle scope, overriding the settings' enabled
+	// models (upstream `parsed.models ?? settingsManager.getEnabledModels()`).
+	// A pattern that matches nothing is reported rather than silently ignored.
+	scopedModels, scopeDiagnostics, err := scopedModelsFor(args, settings, runtime, ctx)
+	if err != nil {
+		return err
+	}
+	startupDiagnostics := make([]interactive.StartupDiagnostic, 0, len(scopeDiagnostics))
+	for _, diagnostic := range scopeDiagnostics {
+		startupDiagnostics = append(startupDiagnostics, interactive.StartupDiagnostic{
+			Type:    diagnostic.Type,
+			Message: diagnostic.Message,
+		})
+	}
+
+	// @file arguments are read into the session's first message, so a file and
+	// the question about it arrive as one prompt.
+	initialPrompt, err := initialPromptFor(args, cwd)
+	if err != nil {
+		return err
+	}
+	if len(initialPrompt.Images) > 0 {
+		// The interactive mode has no image-input path, so an @file image cannot
+		// be attached the way upstream attaches it. Say so rather than let the
+		// model be asked about an image it never received (D153).
+		fmt.Fprintln(os.Stderr, coding.FormatCLIDiagnostic(coding.CLIDiagnostic{
+			Type: "warning",
+			Message: fmt.Sprintf(
+				"%d image(s) from @file arguments were ignored: this build cannot send image content",
+				len(initialPrompt.Images)),
+		}))
+	}
+
 	// Tool flags reach the session through the same projection the tests
 	// exercise: --tools/--exclude-tools pass through and --no-tools /
 	// --no-builtin-tools map onto the noTools option.
@@ -168,9 +238,32 @@ func run(appName string, args *coding.Args) error {
 		Tools:        tools.Tools,
 		ExcludeTools: tools.ExcludeTools,
 		NoTools:      tools.NoTools,
+		// Model cycle scope (--models, or the settings' enabled models).
+		ScopedModels: scopedModels,
 	})
 	if err != nil {
 		return err
+	}
+
+	// --api-key pins the credential for this run. It needs a model to attach to,
+	// and upstream reports that requirement rather than ignoring the key (the
+	// model may come from the cycle scope, so it is read back rather than
+	// guessed at).
+	if args.APIKey != nil {
+		provider := ""
+		if sessionModel := created.Session.Model(); sessionModel != nil {
+			provider = sessionModel.Provider
+		}
+		if provider == "" {
+			fmt.Fprintln(os.Stderr, coding.FormatCLIDiagnostic(coding.CLIDiagnostic{
+				Type:    "error",
+				Message: "--api-key requires a model to be specified via --model, --provider/--model, or --models",
+			}))
+			return errAlreadyReported
+		}
+		if err := runtime.SetRuntimeAPIKey(provider, *args.APIKey, ctx); err != nil {
+			return err
+		}
 	}
 
 	tuiMode := settings.GetTuiMode()
@@ -179,20 +272,27 @@ func run(appName string, args *coding.Args) error {
 	}
 
 	app := interactive.NewApp(interactive.AppOptions{
-		Cwd:             cwd,
-		AgentDir:        agentDir,
-		TuiMode:         tuiMode,
-		Version:         coding.Version,
-		AppName:         appName,
-		QuietStartup:    settings.GetQuietStartup(),
-		Verbose:         args.Verbose,
-		Settings:        settings,
-		Session:         created.Session,
-		Runtime:         runtime,
-		SessionMgr:      sessions,
-		Offline:         args.Offline,
-		InitialMessages: args.Messages,
-		Exit:            os.Exit,
+		Cwd:          cwd,
+		AgentDir:     agentDir,
+		TuiMode:      tuiMode,
+		Version:      coding.Version,
+		AppName:      appName,
+		QuietStartup: settings.GetQuietStartup(),
+		Verbose:      args.Verbose,
+		Settings:     settings,
+		Session:      created.Session,
+		Runtime:      runtime,
+		SessionMgr:   sessions,
+		Offline:      args.Offline,
+		// The first message carries any @file text ahead of the first positional
+		// message; the rest stay queued behind it.
+		InitialMessage:      initialPrompt.Message,
+		InitialMessages:     initialPrompt.Rest,
+		InitialThemeSetting: args.UseTheme,
+		// Model-scope warnings ("No models match pattern ...") are shown at
+		// startup, the way upstream passes its startup diagnostics in.
+		StartupDiagnostics: startupDiagnostics,
+		Exit:               os.Exit,
 		RegisterSignal: func(sig os.Signal, handler func()) func() {
 			channel := make(chan os.Signal, 1)
 			signal.Notify(channel, sig)
@@ -215,6 +315,60 @@ func run(appName string, args *coding.Args) error {
 	})
 	app.Run(ctx)
 	return nil
+}
+
+// sessionNameFor normalizes a --name value: blank input is an error, not a
+// silently unnamed session (upstream normalizeSessionName plus its
+// "--name requires a non-empty value" check).
+func sessionNameFor(args *coding.Args) (*string, error) {
+	if args.Name == nil {
+		return nil, nil
+	}
+	name := coding.NormalizeSessionName(*args.Name)
+	if name == nil {
+		return nil, errors.New("--name requires a non-empty value")
+	}
+	return name, nil
+}
+
+// scopedModelsFor resolves the models that --models puts in the cycle scope,
+// falling back to the settings' enabled models when the flag is absent. Its
+// diagnostics report patterns that matched nothing (or carried an unusable
+// thinking level) without failing the run.
+func scopedModelsFor(args *coding.Args, settings *coding.SettingsManager, runtime coding.ModelRuntimeSource, ctx context.Context) ([]coding.ScopedModel, []coding.ModelScopeDiagnostic, error) {
+	patterns := args.Models
+	if len(patterns) == 0 {
+		patterns = settings.GetEnabledModels()
+	}
+	if len(patterns) == 0 {
+		return nil, nil, nil
+	}
+	result, err := coding.ResolveModelScopeWithDiagnostics(patterns, runtime, ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return result.ScopedModels, result.Diagnostics, nil
+}
+
+// initialPromptFor reads any @file arguments and composes the session's first
+// message from them and the first positional message.
+func initialPromptFor(args *coding.Args, cwd string) (coding.InitialPrompt, error) {
+	var fileText string
+	var fileImages []ai.ImageContent
+	if len(args.FileArgs) > 0 {
+		// Upstream leaves resizing to the session, which resizes the images
+		// once the request model is known.
+		autoResize := false
+		processed, err := coding.ProcessFileArguments(args.FileArgs, &coding.ProcessFileOptions{
+			AutoResizeImages: &autoResize,
+			Cwd:              cwd,
+		})
+		if err != nil {
+			return coding.InitialPrompt{}, err
+		}
+		fileText, fileImages = processed.Text, processed.Images
+	}
+	return coding.BuildInitialPrompt(args.Messages, fileText, fileImages), nil
 }
 
 // resolvedSession is upstream main.ts's ResolvedSession (kind + payload).

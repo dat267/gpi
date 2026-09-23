@@ -456,6 +456,23 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   refresh outcome, waiter count and canceled flag). Two races were fixed on the
   way: publishing must not overwrite an entry that appeared after the load, and
   a waiter slot is only claimed once the entry is confirmed published.
+- D153 — **`--use-theme`, `--name`, `--approve`/`--no-approve`, `--models`,
+  `--api-key`, `@file` arguments and the CLI's parse diagnostics are wired**
+  (`cmd/pier/main.go`, with the pure parts in `coding/clidiagnostics.go` and
+  `coding/cliinitial.go`). All seven were parsed, documented in `--help`, and
+  read by nothing: an unknown single-dash option, a bad `--thinking` value or a
+  blank `--name` was accepted silently, `pier @notes.txt "explain"` sent no
+  file at all, and `--use-theme` left the configured theme in place. Diagnostics
+  are now reported right after parsing — before `--version`, as upstream does —
+  and an error among them exits 1. `@file` text is folded into the session's
+  first message ahead of the first positional message, and the remaining
+  messages stay queued, matching upstream `buildInitialMessage`. **One
+  deliberate gap**: upstream attaches `@file` **images** to that first message;
+  this build's interactive mode has no image-input path at all, so the images
+  are dropped and a warning is printed rather than letting the model be asked
+  about an image it never received. `--extensions`/`--no-extensions` remain out
+  of scope (extension mechanics, D41); note that an unknown `--flag` is still
+  swallowed into `UnknownFlags` for extensions rather than reported.
 - D152 — the Unix socket **publish is portable** (`server/unix.go`,
   `server/publish_linux.go`, `server/publish_other.go`). Upstream publishes a
   bound socket with a hard link, which is atomic and refuses to overwrite — so a

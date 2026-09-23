@@ -74,6 +74,9 @@ type AppOptions struct {
 	// InitialMessage/InitialMessages are sent after startup.
 	InitialMessage  string
 	InitialMessages []string
+	// StartupDiagnostics are reported before the first render (upstream's
+	// startupDiagnostics, e.g. a --models pattern that matched nothing).
+	StartupDiagnostics []StartupDiagnostic
 
 	// Process seams (D122).
 	Exit                func(code int)
@@ -528,6 +531,7 @@ func (a *App) Run(ctx context.Context) {
 	}, RunOptions{
 		Offline:             a.options.Offline,
 		Hyperlinks:          a.options.Hyperlinks,
+		StartupDiagnostics:  a.options.StartupDiagnostics,
 		InitialMessage:      a.options.InitialMessage,
 		InitialMessages:     a.options.InitialMessages,
 		ModelDefaultMessage: modelDefault.Message,
