@@ -95,6 +95,10 @@ func (c *scriptedComponent) Invalidate() {}
 
 // TestMainScreenAgainstUpstreamGolden replays the upstream write streams.
 func TestMainScreenAgainstUpstreamGolden(t *testing.T) {
+	// The renderer suppresses the full repaint on a height change under Termux
+	// (see TestMainScreenTermuxHeightChange). This test asserts upstream's
+	// stream, so the host's Termux-ness must not leak into it.
+	t.Setenv("TERMUX_VERSION", "")
 	golden := loadMainScreenGolden(t)
 	data, err := os.ReadFile("testdata/mainscreen_corpus.json")
 	if err != nil {
@@ -267,4 +271,51 @@ func TestMainScreenCapacity(t *testing.T) {
 	if got := screen.CaptureRenderState(); len(got.PreviousLines) != 1 {
 		t.Fatalf("restore = %d lines", len(got.PreviousLines))
 	}
+}
+
+// A height change normally forces a full repaint to keep the viewport aligned.
+// Under Termux the software keyboard toggles the height on every show/hide, and
+// a repaint per toggle storms the scrollback, so the port skips it there. That
+// divergence is deliberate (README, tui main-screen renderer); the golden test
+// neutralizes TERMUX_VERSION so it still asserts upstream's stream.
+func TestMainScreenTermuxHeightChange(t *testing.T) {
+	render := func(t *testing.T) []string {
+		t.Helper()
+		terminal := &recordingTerminal{width: 20, height: 6}
+		screen := NewMainScreen(terminal, false, t.TempDir())
+		component := &scriptedComponent{}
+		screen.AddChild(component)
+
+		steps := []mainScreenStep{
+			{Lines: []string{"a", "b", "c", "d"}},
+			{Lines: []string{"a", "b", "c", "d"}, Rows: intPtr(3)},
+		}
+		var writes []string
+		for _, step := range steps {
+			component.lines = step.Lines
+			if step.Rows != nil {
+				terminal.height = *step.Rows
+			}
+			terminal.resetWrites()
+			screen.RenderNow(step.Force)
+			writes = append(writes, terminal.takeWrites())
+		}
+		return writes
+	}
+
+	t.Run("under Termux the repaint is skipped", func(t *testing.T) {
+		t.Setenv("TERMUX_VERSION", "0.118")
+		writes := render(t)
+		if clear := "\x1b[2J\x1b[H\x1b[3J"; strings.Contains(writes[1], clear) {
+			t.Errorf("height change repainted under Termux: %q", writes[1])
+		}
+	})
+
+	t.Run("elsewhere the repaint happens", func(t *testing.T) {
+		t.Setenv("TERMUX_VERSION", "")
+		writes := render(t)
+		if clear := "\x1b[2J\x1b[H\x1b[3J"; !strings.Contains(writes[1], clear) {
+			t.Errorf("height change did not repaint: %q", writes[1])
+		}
+	})
 }
