@@ -330,6 +330,12 @@ func buildSessionPath(entries []SessionEntry, leafID *string, byID map[string]*S
 
 // getSessionContextSettings resolves thinking level and model from the path.
 func getSessionContextSettings(path []SessionEntry) (thinkingLevel string, model *SessionModelRef) {
+	return getSessionContextSettingsFromPointers(materializePointers(path))
+}
+
+// getSessionContextSettingsFromPointers resolves thinking level and model from
+// a path of pointers.
+func getSessionContextSettingsFromPointers(path []*SessionEntry) (thinkingLevel string, model *SessionModelRef) {
 	// Later entries win, so resolve both by scanning from the end and stopping
 	// at the first hit for each. Decoding every message entry to look for the
 	// last assistant (as the forward scan did) made a projection of a large
@@ -338,7 +344,7 @@ func getSessionContextSettings(path []SessionEntry) (thinkingLevel string, model
 	thinkingLevel = "off"
 	foundThinking := false
 	for i := len(path) - 1; i >= 0; i-- {
-		entry := &path[i]
+		entry := path[i]
 		if !foundThinking && entry.Type == "thinking_level_change" {
 			thinkingLevel = entry.ThinkingLevel
 			foundThinking = true
@@ -448,65 +454,128 @@ func SessionEntryToContextMessages(entry *SessionEntry) []ai.Message {
 // BuildContextEntries builds the active, compaction-aware session entry
 // list following the leaf path (port of buildContextEntries).
 func BuildContextEntries(entries []SessionEntry, leafID *string, byID map[string]*SessionEntry) []SessionEntry {
-	return applyCompactionWindow(buildSessionPath(entries, leafID, byID))
+	return buildContextEntries(entries, leafID, byID, nil)
+}
+
+// buildContextEntries is BuildContextEntries reading entries through the
+// session's message cache (nil is the reference path).
+func buildContextEntries(entries []SessionEntry, leafID *string, byID map[string]*SessionEntry, cache *messageCache) []SessionEntry {
+	return compactionWindowFromValues(buildSessionPath(entries, leafID, byID), cache)
 }
 
 // applyCompactionWindow drops the entries a compaction replaced, keeping the
 // summary and the window after firstKeptEntryId (the tail of
 // BuildContextEntries, reusable on an already-resolved path).
 func applyCompactionWindow(path []SessionEntry) []SessionEntry {
-	var compaction *SessionEntry
+	return compactionWindowFromValues(path, nil)
+}
+
+// compactionWindowFromValues is the window applied to a value path. Without a
+// compaction the path is the window and is returned as it is.
+func compactionWindowFromValues(path []SessionEntry, cache *messageCache) []SessionEntry {
 	for i := range path {
 		if path[i].Type == "compaction" {
-			compaction = &path[i]
+			return compactionWindowFromPointers(materializePointers(path), cache)
 		}
 	}
-	if compaction == nil {
-		return path
+	return path
+}
+
+// compactionWindowFromPointers applies the last compaction on the branch to a
+// path of pointers and materializes only the entries the window keeps. A
+// projection of a large compacted session used to copy every entry on the path
+// (and, before that, the whole entry tree); the pointer walk makes the
+// resolution proportional to what it hands out, not to the session size.
+func compactionWindowFromPointers(path []*SessionEntry, cache *messageCache) []SessionEntry {
+	var kept []SessionEntry
+	walkCompactionWindow(path, cache, func(entry *SessionEntry) {
+		kept = append(kept, *entry)
+	})
+	if kept == nil {
+		return nil
 	}
+	return kept
+}
+
+// walkCompactionWindow visits the entries the window keeps, in order, without
+// materializing them. The message count a ContextSignature needs comes from
+// here, so a signature of a large session never copies its path.
+func walkCompactionWindow(path []*SessionEntry, cache *messageCache, visit func(*SessionEntry)) {
 	compactionIdx := -1
 	for i := range path {
-		if path[i].ID == compaction.ID {
+		if path[i].Type == "compaction" {
 			compactionIdx = i
-			break
 		}
 	}
 	if compactionIdx < 0 {
-		return path
+		for _, entry := range path {
+			visit(entry)
+		}
+		return
 	}
-
-	contextEntries := []SessionEntry{*compaction}
+	compaction := path[compactionIdx]
+	visit(compaction)
 	foundFirstKept := false
 	for i := 0; i < compactionIdx; i++ {
 		entry := path[i]
 		if entry.ID == compaction.FirstKeptEntryID {
 			foundFirstKept = true
 		}
-		if foundFirstKept {
-			var msgRole string
-			if entry.Type == "message" && len(entry.Message) > 0 {
-				json.Unmarshal(entry.Message, &msgRole)
-			}
-			if !(entry.Type == "message" && msgRole == "system") {
-				contextEntries = append(contextEntries, entry)
-			}
+		if foundFirstKept && !(entry.Type == "message" && projectedRole(entry, cache) == "system") {
+			visit(entry)
 		}
 	}
-	contextEntries = append(contextEntries, path[compactionIdx+1:]...)
-	return contextEntries
+	for _, entry := range path[compactionIdx+1:] {
+		visit(entry)
+	}
+}
+
+// materializePointers views a value path as pointers for the reference
+// (BuildSessionContext / BuildContextEntries) callers.
+func materializePointers(entries []SessionEntry) []*SessionEntry {
+	pointers := make([]*SessionEntry, len(entries))
+	for i := range entries {
+		pointers[i] = &entries[i]
+	}
+	return pointers
+}
+
+// materializeEntries copies a pointer path into the entries a caller hands out.
+func materializeEntries(pointers []*SessionEntry) []SessionEntry {
+	if pointers == nil {
+		return nil
+	}
+	entries := make([]SessionEntry, 0, len(pointers))
+	for _, entry := range pointers {
+		entries = append(entries, *entry)
+	}
+	return entries
 }
 
 // BuildSessionContext resolves the LLM context from the entry tree
 // (port of buildSessionContext).
 func BuildSessionContext(entries []SessionEntry, leafID *string, byID map[string]*SessionEntry) SessionContext {
+	return buildSessionContext(entries, leafID, byID, nil)
+}
+
+// buildSessionContext is BuildSessionContext reading entries through the
+// session's message cache (nil is the reference path). The cache is what keeps
+// a resolution after an append from decoding the rest of the session.
+func buildSessionContext(entries []SessionEntry, leafID *string, byID map[string]*SessionEntry, cache *messageCache) SessionContext {
 	// One path walk: the settings scan and the compaction window both work on
 	// the resolved path instead of walking the tree again.
-	path := buildSessionPath(entries, leafID, byID)
-	thinkingLevel, model := getSessionContextSettings(path)
-	contextEntries := applyCompactionWindow(path)
+	return buildSessionContextFromPointers(materializePointers(buildSessionPath(entries, leafID, byID)), cache)
+}
+
+// buildSessionContextFromPointers is buildSessionContext for a path of
+// pointers: it resolves settings and the window without copying the path, and
+// copies only the entries the projection hands out.
+func buildSessionContextFromPointers(path []*SessionEntry, cache *messageCache) SessionContext {
+	thinkingLevel, model := getSessionContextSettingsFromPointers(path)
+	contextEntries := compactionWindowFromPointers(path, cache)
 	messages := make([]ai.Message, 0, len(contextEntries))
 	for i := range contextEntries {
-		messages = append(messages, SessionEntryToContextMessages(&contextEntries[i])...)
+		messages = append(messages, projectedMessages(&contextEntries[i], cache)...)
 	}
 	return SessionContext{Messages: messages, ThinkingLevel: thinkingLevel, Model: model, Entries: contextEntries}
 }

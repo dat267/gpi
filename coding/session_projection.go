@@ -46,26 +46,30 @@ func (m *SessionManager) Projection() SessionContext {
 		m.mu.Unlock()
 		return context
 	}
-	entries := m.getEntriesLocked()
-	leafID := ""
-	if m.leafID != nil {
-		leafID = *m.leafID
-	}
+	// Resolve the branch by pointer under the lock. This used to copy every
+	// entry into a fresh slice and build a fresh id map on every append, which
+	// a 19k-entry session paid in full (11 ms of entry copy plus the map).
+	// Only the entries the compaction window keeps are copied now, so the cost
+	// tracks what the projection hands out, not the session size. Entries are
+	// immutable after they are appended, so the pointers stay valid after the
+	// lock is released.
+	path := m.branchPointersLocked("")
 	m.mu.Unlock()
 
-	// Project outside the lock: decoding a large session takes hundreds of
+	// Project outside the lock: decoding a large session takes tens of
 	// milliseconds, and holding m.mu for it parks every other reader (the
 	// footer reads the session per frame).
-	byID := make(map[string]*SessionEntry, len(entries))
-	for i := range entries {
-		byID[entries[i].ID] = &entries[i]
-	}
-	context := BuildSessionContext(entries, &leafID, byID)
+	context := buildSessionContextFromPointers(path, &m.messages)
 	context.Messages = context.Messages[:len(context.Messages):len(context.Messages)]
 	context.Entries = context.Entries[:len(context.Entries):len(context.Entries)]
 
 	m.mu.Lock()
-	m.projection = projectionCache{valid: true, version: version, context: context}
+	// Only cache the resolution when the branch is still the one that was read;
+	// a session swap during the projection must not be recorded under a version
+	// the new session can reuse.
+	if m.projectionVersionLocked() == version {
+		m.projection = projectionCache{valid: true, version: version, context: context}
+	}
 	m.mu.Unlock()
 	return context
 }
@@ -105,19 +109,20 @@ type ContextSignature struct {
 // ContextSignature returns the current context signature cheaply.
 func (m *SessionManager) ContextSignature() ContextSignature {
 	m.mu.Lock()
-	branch := m.branchLocked("")
+	branch := m.branchPointersLocked("")
 	m.mu.Unlock()
 	return contextSignatureFrom(branch)
 }
 
-// contextSignatureFrom resolves the signature from an already-resolved path.
-func contextSignatureFrom(path []SessionEntry) ContextSignature {
+// contextSignatureFrom resolves the signature from an already-resolved path of
+// pointers, walking the compaction window without materializing it.
+func contextSignatureFrom(path []*SessionEntry) ContextSignature {
 	count := 0
-	for _, entry := range applyCompactionWindow(path) {
+	walkCompactionWindow(path, nil, func(entry *SessionEntry) {
 		if contextEntryYieldsMessage(entry) {
 			count++
 		}
-	}
+	})
 	provider, modelID := contextModelRef(path)
 	return ContextSignature{Provider: provider, ModelID: modelID, MessageCount: count}
 }
@@ -126,7 +131,7 @@ func contextSignatureFrom(path []SessionEntry) ContextSignature {
 // message (sessionEntryToContextMessages; a message entry that fails to
 // unmarshal is still counted, which only makes the conservative comparison in
 // cacheContextIsCurrent slightly more permissive).
-func contextEntryYieldsMessage(entry SessionEntry) bool {
+func contextEntryYieldsMessage(entry *SessionEntry) bool {
 	switch entry.Type {
 	case "message", "custom_message", "compaction":
 		return true
@@ -139,7 +144,7 @@ func contextEntryYieldsMessage(entry SessionEntry) bool {
 // contextModelRef returns the model the context uses. getSessionContextSettings
 // scans the path forward and lets later entries win, so the answer is the last
 // model_change entry or assistant message.
-func contextModelRef(path []SessionEntry) (provider string, modelID string) {
+func contextModelRef(path []*SessionEntry) (provider string, modelID string) {
 	for i := len(path) - 1; i >= 0; i-- {
 		entry := path[i]
 		switch entry.Type {

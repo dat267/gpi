@@ -194,6 +194,26 @@ cost was invisible at the call site. Measured on the 45 MB / 19.4k-entry session
 cold `Projection` 37 ms, cached 0, `AppendCompaction` 0 ms with a warm
 projection (247 ms originally, 56 ms before the cache).
 
+A resolution now walks the branch **by pointer** under the session lock
+(`branchPointersLocked`) and copies only the entries the compaction window
+keeps, instead of copying the whole entry tree and rebuilding an id map on every
+append. Profiling the 45 MB / 19.4k-entry session's projection after an append
+(the version changes on every append, so this ran per request) put 11 ms in
+`getEntriesLocked`'s entry copy, 17 ms in `buildSessionPath`'s value walk, 1 ms
+in the window, and **8 µs in decoding every message**: the session has 17
+compactions, so the decoded window was 3 entries. Decoding was never the cost;
+the copies were. With the pointer walk the projection is 3.3 ms cold and 2.3 ms
+after an append, and `coding/session_messagecache.go` memoizes each message
+entry's decoded messages and role (entries are append-only, so a memo never
+needs invalidation) for the uncompacted case, where the window is the whole
+path. `TestCompactedProjectionCostsTheWindowNotTheSession` pins the shape: a
+2001-entry session compacted to an 8-entry window resolves in 9.5 KB of
+allocation, where the tree copy measured ~800 KB. `BuildSessionContext` and
+`BuildContextEntries` stay as the value-based reference (the manager's
+resolution is compared against them by `TestProjectionCacheMatchesTheReference`),
+and `applyCompactionWindow` became a wrapper over `walkCompactionWindow`, which
+lets `ContextSignature` count the window without materializing it.
+
 **Large-session rendering.** `RenderSessionItems` (`transcript.go`) renders a
 session eagerly below 400 items; above the threshold it collects the items into
 a collector container and attaches only the trailing window (120 components),

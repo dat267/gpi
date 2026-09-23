@@ -44,11 +44,20 @@ type SessionManager struct {
 	// projection is the cached session projection for the branch above; see
 	// session_projection.go.
 	projection projectionCache
+	// messages memoizes each entry's decoded messages and role, so a projection
+	// after an append only decodes the appended entries; see
+	// session_messagecache.go.
+	messages messageCache
 
-	branchCache      []SessionEntry
-	branchCacheLeaf  string
-	branchCacheCount int
-	branchCacheValid bool
+	// branchCache holds the current leaf's path twice: pointers for the
+	// internal readers (Projection, ContextSignature), which never copy the
+	// path, and values for callers that hand it out (GetBranch, the footer).
+	// Both are keyed by the branch version and built independently.
+	branchCacheVersion   projectionVersion
+	branchCachePtrs      []*SessionEntry
+	branchCacheValues    []SessionEntry
+	branchCacheHasValues bool
+	branchCacheValid     bool
 }
 
 // SessionManagerOptions are the constructor inputs.
@@ -128,6 +137,7 @@ func (m *SessionManager) NewSession(options *NewSessionOptions) string {
 	m.labelsByID = map[string]string{}
 	m.labelTimestamps = map[string]string{}
 	m.leafID = nil
+	m.messages.reset()
 	m.flushed = false
 
 	if m.persist {
@@ -534,22 +544,44 @@ func (m *SessionManager) GetBranch(fromID string) []SessionEntry {
 	return m.branchLocked(fromID)
 }
 
-// branchLocked is GetBranch for callers already holding m.mu.
+// branchLocked is GetBranch for callers already holding m.mu. The current
+// leaf's value path is cached as well, because callers hand it out.
 func (m *SessionManager) branchLocked(fromID string) []SessionEntry {
+	if fromID == "" {
+		if m.branchCacheValid && m.branchCacheHasValues && m.branchCacheVersion == m.projectionVersionLocked() {
+			return m.branchCacheValues
+		}
+		values := materializeEntries(m.branchPointersLocked(""))
+		// Drop the spare capacity so a caller's append cannot write into the
+		// shared cache's backing array.
+		values = values[:len(values):len(values)]
+		m.branchCacheValues = values
+		m.branchCacheHasValues = true
+		return values
+	}
+	return materializeEntries(m.branchPointersLocked(fromID))
+}
+
+// branchPointersLocked walks from an entry (or the leaf) to the root and
+// returns pointers into the manager's canonical entries. The leaf's path is
+// cached by branch version; the result is shared read-only, and entries are
+// immutable after they are appended, so a pointer stays valid for as long as
+// the caller needs the path.
+func (m *SessionManager) branchPointersLocked(fromID string) []*SessionEntry {
 	startID := fromID
 	if startID == "" {
 		if m.leafID == nil {
 			return nil
 		}
 		startID = *m.leafID
-		if m.branchCacheValid && m.branchCacheLeaf == startID && m.branchCacheCount == len(m.byID) {
-			return m.branchCache
+		if m.branchCacheValid && m.branchCacheVersion == m.projectionVersionLocked() {
+			return m.branchCachePtrs
 		}
 	}
-	var path []SessionEntry
+	var path []*SessionEntry
 	current := m.byID[startID]
 	for current != nil {
-		path = append(path, *current)
+		path = append(path, current)
 		if current.ParentID != nil {
 			current = m.byID[*current.ParentID]
 		} else {
@@ -563,10 +595,10 @@ func (m *SessionManager) branchLocked(fromID string) []SessionEntry {
 		// Drop the spare capacity so a caller's append cannot write into the
 		// shared cache's backing array.
 		path = path[:len(path):len(path)]
-		m.branchCache = path
-		m.branchCacheLeaf = startID
-		m.branchCacheCount = len(m.byID)
+		m.branchCachePtrs = path
+		m.branchCacheVersion = m.projectionVersionLocked()
 		m.branchCacheValid = true
+		m.branchCacheHasValues = false
 	}
 	return path
 }
@@ -582,22 +614,18 @@ func (m *SessionManager) BuildContextEntriesForLeaf() []SessionEntry {
 // buildContextEntriesForLeafLocked is BuildContextEntriesForLeaf for callers
 // already holding m.mu.
 func (m *SessionManager) buildContextEntriesForLeafLocked() []SessionEntry {
-	leafID := ""
-	if m.leafID != nil {
-		leafID = *m.leafID
-	}
-	return BuildContextEntries(m.getEntriesLocked(), &leafID, m.byID)
+	return compactionWindowFromPointers(m.branchPointersLocked(""), &m.messages)
 }
 
-// BuildSessionContext builds the LLM context from the current leaf.
-// buildSessionContextLocked is BuildSessionContext for callers already holding
-// m.mu.
+// BuildSessionContext builds the LLM context from the current leaf. The
+// projection is the cached entry point (session_projection.go); this remains
+// for callers that already hold the entries.
 func (m *SessionManager) buildSessionContextLocked() SessionContext {
 	leafID := ""
 	if m.leafID != nil {
 		leafID = *m.leafID
 	}
-	return BuildSessionContext(m.getEntriesLocked(), &leafID, m.byID)
+	return buildSessionContext(m.getEntriesLocked(), &leafID, m.byID, &m.messages)
 }
 
 // GetHeader returns the session header.
