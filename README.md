@@ -181,20 +181,34 @@ Deliberately out of scope, with divergences recorded in code: the extension mech
 ## Build & test
 
 ```bash
-go build ./...
-go test -race ./...
+make build   # bin/pier: pure Go (CGO_ENABLED=0), the flags the release workflow uses
+make check   # gofmt + go vet + go test
+make help    # the other targets (install, test-race, clean)
 ```
+
+Plain Go works too. The one wrinkle is that the module has no package at its
+root — the CLI is `./cmd/pier`, so `go install .` fails:
+
+```bash
+go build -o bin/pier ./cmd/pier
+go test ./...
+```
+
+CI runs `go test -race ./...`, but **the race detector cannot run on
+android/arm64** — Go rejects it outright (`-race is not supported on
+android/arm64`) — so `make test-race` only fails on Termux. That check is
+CI-only, and it is the only one that cannot be reproduced locally.
 
 ## Install the CLI
 
-The CLI builds to `bin/pier` (the binary derives its display name from its own
-file name, so a symlink named `pi` would show `pi`).
-
 ```bash
-cd /home/dat/repos/pier
-mkdir -p bin
-go build -o bin/pier ./cmd/pier
-install -m755 bin/pier ~/.local/bin/pier
+make install                 # into $(go env GOBIN), or $(go env GOPATH)/bin
+VERSION=1.2.3 make install   # stamps --version and the changelog comparison
 ```
+
+`make install` prints where it landed and warns if that directory is not on
+`PATH`. It is a thin wrapper over `go install ./cmd/pier`, which you can run
+directly if you prefer. The binary derives its display name from its own file
+name, so a symlink named `pi` would show `pi`.
 
 Then run `pier`. `pier --help` lists the flags; `pier --version` prints the version. The CLI supports the interactive mode, resume (`-c` continues the newest session; `-r` opens the interactive session picker; `--session` accepts a file path, a session id, an id prefix, or matches globally across projects; `--session-id` opens a matching session or creates a new one with that id; `--fork` forks a session into a new one in the current cwd), model selection (`-m`, `-p`), `--offline`, `--tui-mode` and initial prompts. The print/json/rpc modes, package manager, extensions and migrations are not wired.
