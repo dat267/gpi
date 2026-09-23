@@ -577,9 +577,12 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
     entry (blank is an error). **`--approve`/`--no-approve`** settle project trust
     for the run. **`--export`** and **`--list-models`** are implemented and exit
     before the TUI.
-  `--extensions`/`--no-extensions` remain out of scope (extension mechanics,
-  D41); an unknown `--flag` is still swallowed into `UnknownFlags` for
-  extensions rather than reported.
+  **`--extensions`/`--no-extensions`** are parsed into `Extensions`/`NoExtensions`
+  but load nothing, since extension mechanics stay out of scope (D41).
+  Upstream's unknown-flag split is matched exactly, and tested: an unknown
+  **long** flag is recorded in `UnknownFlags` for extensions to consume and is
+  not an error (upstream's `args.js` does the same), while an unknown **short**
+  flag is an `Unknown option: -z` error diagnostic.
 - D152 — the Unix socket **publish is portable** (`server/unix.go`,
   `server/publish_linux.go`, `server/publish_other.go`). Upstream publishes a
   bound socket with a hard link, which is atomic and refuses to overwrite — so a
