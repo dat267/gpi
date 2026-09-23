@@ -199,7 +199,16 @@ how it was reported ("running bash freezes the TUI"). The check now compares
 cheap `SessionManager.ContextSignature` values (branch-cache lookup + entry
 scan) and the projection snapshots the entries and projects outside the lock;
 see `TestCacheContextIsCurrentDoesNotProjectTheSession` (37 MB → 0 allocated per
-call) and `TestBuildSessionContextDoesNotHoldTheSessionLock`.
+call) and `TestBuildSessionContextDoesNotHoldTheSessionLock`. The remaining
+frame cost was the bash preview: counting a command's output (for the
+"… (N earlier lines" hint) went through `tui.WrapTextWithAnsi` per line, ~1 ms
+and ~8000 allocations per 2000-line output, and a rebuilt transcript (compaction,
+`/reload`, resume) starts with every attached bash component cold, so the first
+frame after a rebuild stacked that into a 100+ ms frame (caught by a SIGQUIT
+dump inside `bashPreviewComponent.Render` → `visualLineCount`). Plain ASCII
+lines now count in one allocation-free pass (`plainWrappedLineCount`), pinned to
+the generic wrapper by `TestPlainWrappedLineCountMatchesTheGenericWrapper` and
+capped by `TestBashPreviewCountIsAllocationFree`.
 
 ## Conventions and gotchas
 

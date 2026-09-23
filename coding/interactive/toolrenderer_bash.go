@@ -146,12 +146,99 @@ func (c *bashPreviewComponent) Render(width int) []string {
 // wrappedLineCount is how many visual lines one logical line wraps to, matching
 // tui.Text.Render (tabs become three spaces; a blank line still occupies one).
 func wrappedLineCount(line string, contentWidth int) int {
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+	if count, ok := plainWrappedLineCount(line, contentWidth); ok {
+		return count
+	}
 	wrapped := tui.WrapTextWithAnsi(strings.ReplaceAll(line, "\t", "   "), contentWidth)
 	if len(wrapped) == 0 {
 		return 1
 	}
 	return len(wrapped)
 }
+
+// plainWrappedLineCount counts the visual lines of a plain ASCII line (no
+// escape sequences, control bytes, or wide runes) without allocating, mirroring
+// tui.wrapSingleLine's greedy word wrap with a tab counting as three spaces. It
+// reports ok=false when the line needs the generic ANSI-aware path.
+//
+// The preview counts every line of a command's output, and a long output is
+// counted again whenever the preview cache is cold (a rebuilt transcript) or
+// the trailing line grows: the generic path allocated ~4 objects per line,
+// which cost ~1 ms per 2000-line output and stacked up across the transcript
+// into visible frame time.
+func plainWrappedLineCount(line string, width int) (int, bool) {
+	emitted := 0
+	lineWidth := 0
+	wordWidth := 0
+	spaceWidth := 0
+	place := func(isSpace bool, tokenWidth int) {
+		if tokenWidth > width && !isSpace {
+			// breakLongWord: full-width pieces, then the remainder.
+			if lineWidth > 0 {
+				emitted++
+				lineWidth = 0
+			}
+			pieces := (tokenWidth + width - 1) / width
+			emitted += pieces - 1
+			lineWidth = tokenWidth - (pieces-1)*width
+			return
+		}
+		if lineWidth+tokenWidth > width && lineWidth > 0 {
+			emitted++
+			if isSpace {
+				// A wrapped whitespace run is dropped, not carried over.
+				lineWidth = 0
+			} else {
+				lineWidth = tokenWidth
+			}
+			return
+		}
+		lineWidth += tokenWidth
+	}
+	for index := 0; index < len(line); index++ {
+		char := line[index]
+		if char >= 0x80 || char == 0x1b || char == '\r' || char == '\n' || char == 0x7f || (char < 0x20 && char != '\t') {
+			return 0, false
+		}
+		if char == ' ' || char == '\t' {
+			if wordWidth > 0 {
+				place(false, wordWidth)
+				wordWidth = 0
+			}
+			if char == '\t' {
+				spaceWidth += 3
+			} else {
+				spaceWidth++
+			}
+			continue
+		}
+		if spaceWidth > 0 {
+			place(true, spaceWidth)
+			spaceWidth = 0
+		}
+		wordWidth++
+	}
+	if wordWidth > 0 {
+		place(false, wordWidth)
+	} else if spaceWidth > 0 {
+		place(true, spaceWidth)
+	}
+	if lineWidth > 0 {
+		emitted++
+	}
+	if emitted == 0 {
+		// An empty line still occupies one visual line.
+		emitted = 1
+	}
+	return emitted, true
+}
+
+// plainIsSpaceByte reports the bytes tui.wrapSingleLine treats as whitespace
+// once tabs were expanded to three spaces.
+func plainIsSpaceByte(char byte) bool { return char == ' ' || char == '\t' }
 
 // visualLineCount returns the number of visual lines the whole output wraps
 // to. Wrapping is per logical line, so only the lines appended since the last
@@ -171,8 +258,13 @@ func (c *bashPreviewComponent) visualLineCount(width int) int {
 	rest := c.output[consumed:]
 	if lastNewline := strings.LastIndexByte(rest, '\n'); lastNewline >= 0 {
 		complete := rest[:lastNewline+1]
-		for _, line := range strings.Split(complete[:len(complete)-1], "\n") {
-			state.totalVisual += wrappedLineCount(line, contentWidth)
+		body := complete[:len(complete)-1]
+		for _, line := range strings.Split(body, "\n") {
+			if count, ok := plainWrappedLineCount(line, contentWidth); ok {
+				state.totalVisual += count
+			} else {
+				state.totalVisual += wrappedLineCount(line, contentWidth)
+			}
 		}
 		consumed += len(complete)
 		// Slice the output rather than concatenating: the counted prefix can be
