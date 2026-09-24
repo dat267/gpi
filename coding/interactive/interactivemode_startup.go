@@ -63,8 +63,6 @@ type StartupWiring struct {
 	ShowStatus  func(message string)
 	// Version is the running version.
 	Version string
-	// ReportInstall sends the install telemetry ping.
-	ReportInstall func(version string) error
 	// TmuxShow queries a tmux option (test seam).
 	TmuxShow func(option string) (string, bool)
 	// RequestRender requests a render.
@@ -272,7 +270,6 @@ func (w *StartupWiring) GetChangelogForDisplay() string {
 		if w.Settings != nil {
 			w.Settings.SetLastChangelogVersion(w.Version)
 		}
-		w.ReportInstallTelemetry(w.Version)
 		return ""
 	}
 	newEntries := coding.GetNewChangelogEntries(entries, lastVersion)
@@ -282,7 +279,6 @@ func (w *StartupWiring) GetChangelogForDisplay() string {
 	if w.Settings != nil {
 		w.Settings.SetLastChangelogVersion(w.Version)
 	}
-	w.ReportInstallTelemetry(w.Version)
 	parts := make([]string, 0, len(newEntries))
 	for _, entry := range newEntries {
 		parts = append(parts, coding.NormalizeChangelogLinks(entry.Content, changelogEntryVersion(entry)))
@@ -292,21 +288,6 @@ func (w *StartupWiring) GetChangelogForDisplay() string {
 
 func changelogEntryVersion(entry coding.ChangelogEntry) string {
 	return itoa(entry.Major) + "." + itoa(entry.Minor) + "." + itoa(entry.Patch)
-}
-
-// ReportInstallTelemetry sends the install ping when enabled.
-func (w *StartupWiring) ReportInstallTelemetry(version string) {
-	report := w.ReportInstall
-	settings := w.Settings
-	if report == nil || settings == nil {
-		return
-	}
-	if !coding.IsInstallTelemetryEnabled(settings) {
-		return
-	}
-	// Capture the collaborator before spawning: the goroutine must not read
-	// mutable wiring fields (D123).
-	go func() { _ = report(version) }()
 }
 
 // GetMarkdownThemeWithSettings applies the code-block indent setting.

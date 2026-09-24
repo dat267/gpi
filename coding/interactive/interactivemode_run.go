@@ -86,8 +86,6 @@ type RunWiring struct {
 	CheckTmux func() string
 	// TakeCrash returns the unnotified crash record.
 	TakeCrash func() *coding.CrashRecord
-	// MaybeSaveTrust saves the implicit project trust after a reload.
-	MaybeSaveTrust func() bool
 	// Prompt sends a prompt to the session.
 	Prompt func(ctx context.Context, text string) error
 	// Events applies session events. Only the run loop calls it.

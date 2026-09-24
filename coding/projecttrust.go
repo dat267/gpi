@@ -31,9 +31,6 @@ type ResolveProjectTrustedOptions struct {
 	DefaultProjectTrust string
 	// ProjectTrustContext selects a trust option.
 	ProjectTrustContext ProjectTrustContext
-	// OnExtensionError reports extension project-trust errors (unused until
-	// extensions are in scope).
-	OnExtensionError func(message string)
 }
 
 // ProjectTrustContext is the UI surface used by the trust prompt.

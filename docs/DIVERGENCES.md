@@ -36,7 +36,11 @@ only as the code comment that introduced them. The range is **D1–D160**.
   extensions), and
   the package-update card is gone: its only caller upstream asks the package
   manager about the extension packages it installed, which this port has no
-  equivalent of. The `pi config` resource-manager TUI went for the same reason:
+  equivalent of. The install-telemetry ping is not sent either: the port has no
+  telemetry backend, so the fresh-install version recording stays (it drives the
+  changelog) while the reporting seam went with the endpoint, and the extension
+  selector's tools-expanded hook went with the extension UI. The `pi config`
+  resource-manager TUI went for the same reason:
   it exists to enable and disable package resources, and with no package manager
   there is nothing for it to list — it was 1,315 lines reachable only from its own
   golden test.  The update card is reachable: the release check runs at startup off the UI

@@ -178,9 +178,8 @@ func TestStartupChangelog(t *testing.T) {
 	}
 	wiring.Session.(*startupTestSession).messages = nil
 
-	// A fresh install records the version and reports telemetry.
-	reported := &messageRecorder{}
-	wiring.ReportInstall = func(version string) error { reported.add(version); return nil }
+	// A fresh install records the version (the install telemetry ping is not sent:
+	// the port has no telemetry backend).
 	if got := wiring.GetChangelogForDisplay(); got != "" {
 		t.Fatalf("fresh changelog = %q", got)
 	}
@@ -190,7 +189,6 @@ func TestStartupChangelog(t *testing.T) {
 
 	// With an older last version the new entries render with normalized links.
 	settings.SetLastChangelogVersion("1.2.2")
-	wiring.ReportInstall = nil
 	got := wiring.GetChangelogForDisplay()
 	if !strings.Contains(got, "New thing") || strings.Contains(got, "Old thing") {
 		t.Fatalf("changelog = %q", got)

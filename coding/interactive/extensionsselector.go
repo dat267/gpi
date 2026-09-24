@@ -9,25 +9,23 @@ import (
 
 // ExtensionSelectorOptions configure the selector.
 type ExtensionSelectorOptions struct {
-	Tui                   tui.TUI
-	TimeoutMS             int
-	OnToggleToolsExpanded func()
-	Description           string
+	Tui         tui.TUI
+	TimeoutMS   int
+	Description string
 }
 
 // ExtensionSelectorComponent renders a list of string options.
 type ExtensionSelectorComponent struct {
 	*tui.Container
 
-	options               []string
-	selectedIndex         int
-	listContainer         *tui.Container
-	onSelectCallback      func(option string)
-	onCancelCallback      func()
-	titleText             *tui.Text
-	baseTitle             string
-	countdown             *CountdownTimer
-	onToggleToolsExpanded func()
+	options          []string
+	selectedIndex    int
+	listContainer    *tui.Container
+	onSelectCallback func(option string)
+	onCancelCallback func()
+	titleText        *tui.Text
+	baseTitle        string
+	countdown        *CountdownTimer
 }
 
 // NewExtensionSelectorComponent creates the selector.
@@ -44,7 +42,6 @@ func NewExtensionSelectorComponent(title string, options []string, onSelect func
 	if len(opts) > 0 {
 		optionsValue = opts[0]
 	}
-	component.onToggleToolsExpanded = optionsValue.OnToggleToolsExpanded
 
 	component.AddChild(NewDynamicBorder(nil))
 	component.AddChild(tui.NewSpacer(1))
@@ -100,9 +97,6 @@ func (c *ExtensionSelectorComponent) HandleInput(keyData string) {
 	kb := tui.GetKeybindings()
 	switch {
 	case kb.Matches(keyData, "app.tools.expand"):
-		if c.onToggleToolsExpanded != nil {
-			c.onToggleToolsExpanded()
-		}
 	case kb.Matches(keyData, "tui.select.up") || keyData == "k":
 		if c.selectedIndex > 0 {
 			c.selectedIndex--
