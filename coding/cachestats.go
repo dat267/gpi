@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 
 	"github.com/dat267/pier/ai"
 )
@@ -171,10 +172,14 @@ type cacheScanState struct {
 	entryIndex int
 }
 
-// cacheCandidate is one entry the scan can count against, as the scan sees it.
+// cacheCandidate is one entry's contribution to the session-wide accounting, as
+// the facts decode sees it: the entries the cache-miss scan may count against,
+// plus the counts, usage and tool calls the session statistics and the usage
+// cost breakdown need. One record per entry, so those queries are folds instead
+// of walks over raw JSON.
 type cacheCandidate struct {
 	// reset marks a compaction or branch summary: the context legitimately
-	// changed, so the scan's prev restarts here.
+	// changed, so the scan's prev restarts here (and its usage still counts).
 	reset bool
 	// prev is the scan state before this entry, and assistant the message as the
 	// scan reads it (usage, provider, model, timestamp — the fields
@@ -182,73 +187,123 @@ type cacheCandidate struct {
 	// available, through that same helper, so this cannot drift from the scan.
 	prev      *previousRequest
 	assistant *ai.AssistantMessage
+	// role is the message role; usage is a message's or summary's usage (nil when
+	// the entry reports none); toolCalls counts an assistant message's toolCall
+	// blocks.
+	role          string
+	usage         *ai.Usage
+	responseModel *string
+	toolCalls     int
 	// entryID resolves the entry later, for the memoized message the transcript
 	// keys its notices by.
 	entryID string
 	index   int
 }
 
-// consume advances the state by one entry.
+// consume advances the state by one entry, recording what the session-wide
+// accounting needs from it.
 func (s *cacheScanState) consume(entry *SessionEntry) {
 	index := s.entryIndex
 	s.entryIndex++
-	if entry.Type == "compaction" || entry.Type == "branch_summary" {
+	record := cacheCandidate{index: index, entryID: entry.ID}
+
+	switch entry.Type {
+	case "compaction", "branch_summary":
 		// The context legitimately changed; the next turn's prompt is new
 		// content, not re-billed content. Model switches are NOT exempt: they
 		// re-bill the full prompt and should be counted.
 		s.prev = nil
-		s.candidates = append(s.candidates, cacheCandidate{reset: true})
+		record.reset = true
+		record.usage = entry.Usage
+		s.candidates = append(s.candidates, record)
+		return
+	case "message":
+	default:
 		return
 	}
-	if entry.Type != "message" {
-		return
+
+	facts := scanMessageFacts(entry.Message)
+	record.role = facts.Role
+	record.usage = facts.Usage
+	record.responseModel = facts.ResponseModel
+	if facts.Role == "assistant" {
+		assistant := facts.assistantMessage()
+		record.assistant = &assistant
+		record.toolCalls = facts.toolCalls
+		// Only the fields detection reads are kept: the content stays in the entry.
+		record.prev = s.prev
+		if next := newPreviousRequest(assistant.Usage, assistant.Provider, assistant.Model, assistant.Timestamp,
+			s.prev != nil && s.prev.reportedCache); next != nil {
+			s.prev = next
+		}
 	}
-	assistant := scanAssistantFacts(entry.Message)
-	next := newPreviousRequest(assistant.Usage, assistant.Provider, assistant.Model, assistant.Timestamp,
-		s.prev != nil && s.prev.reportedCache)
-	if next == nil {
-		return
-	}
-	// Only the fields detection reads are kept: the content stays in the entry.
-	s.candidates = append(s.candidates, cacheCandidate{
-		prev:      s.prev,
-		assistant: &assistant,
-		entryID:   entry.ID,
-		index:     index,
-	})
-	s.prev = next
+	s.candidates = append(s.candidates, record)
 }
 
-// scanAssistantFacts reads the fields the cache scan compares: usage, provider,
-// model and timestamp.
-func scanAssistantFacts(raw json.RawMessage) ai.AssistantMessage {
-	var assistant struct {
-		Role      string   `json:"role"`
-		Provider  string   `json:"provider"`
-		Model     string   `json:"model"`
-		Timestamp int64    `json:"timestamp"`
-		Usage     ai.Usage `json:"usage"`
+// messageFacts are the fields the session-wide accounting reads from one
+// message. Decoding the whole message (thinking, tool arguments, text) made
+// seeding a 45 MB session's state cost 500 ms; reading the content array only
+// for its block types keeps the scan cheap while still counting tool calls
+// exactly.
+type messageFacts struct {
+	Role          string    `json:"role"`
+	Provider      string    `json:"provider"`
+	Model         string    `json:"model"`
+	ResponseModel *string   `json:"responseModel"`
+	Timestamp     int64     `json:"timestamp"`
+	Usage         *ai.Usage `json:"usage"`
+	// content stays raw: a user message keeps a string there, and decoding it as
+	// a block list would fail the whole decode. Only an assistant message's
+	// content is read, for its toolCall blocks.
+	Content   json.RawMessage `json:"content"`
+	toolCalls int
+}
+
+type blockType struct {
+	Type string `json:"type"`
+}
+
+func scanMessageFacts(raw json.RawMessage) messageFacts {
+	var facts messageFacts
+	if json.Unmarshal(raw, &facts) != nil {
+		return messageFacts{}
 	}
-	if json.Unmarshal(raw, &assistant) != nil || assistant.Role != "assistant" {
-		return ai.AssistantMessage{}
+	if facts.Role == "assistant" && len(facts.Content) > 0 {
+		var blocks []blockType
+		if json.Unmarshal(facts.Content, &blocks) == nil {
+			for _, block := range blocks {
+				if block.Type == "toolCall" {
+					facts.toolCalls++
+				}
+			}
+		}
 	}
-	return ai.AssistantMessage{
-		Provider:  ai.ProviderId(assistant.Provider),
-		Model:     assistant.Model,
-		Timestamp: assistant.Timestamp,
-		Usage:     assistant.Usage,
+	return facts
+}
+
+// assistantMessage is the facts as the cache scan reads a message: usage,
+// provider, model and timestamp.
+func (f messageFacts) assistantMessage() ai.AssistantMessage {
+	message := ai.AssistantMessage{
+		Provider:  ai.ProviderId(f.Provider),
+		Model:     f.Model,
+		Timestamp: f.Timestamp,
 	}
+	if f.Usage != nil {
+		message.Usage = *f.Usage
+	}
+	return message
 }
 
 // scanAssistantRequest builds the scan state an assistant message contributes.
 // It shares the facts decode with consume, so the running prev and the recorded
 // candidates cannot disagree.
 func scanAssistantRequest(raw json.RawMessage, reportedCache bool) *previousRequest {
-	assistant := scanAssistantFacts(raw)
-	if assistant.Usage == (ai.Usage{}) && assistant.Provider == "" && assistant.Model == "" {
+	facts := scanMessageFacts(raw)
+	if facts.Usage == nil || (*facts.Usage == ai.Usage{} && facts.Provider == "" && facts.Model == "") {
 		return nil
 	}
-	return newPreviousRequest(assistant.Usage, assistant.Provider, assistant.Model, assistant.Timestamp, reportedCache)
+	return newPreviousRequest(*facts.Usage, facts.Provider, facts.Model, facts.Timestamp, reportedCache)
 }
 
 // reset drops the state, for a fresh session or a load that reseeds it.
@@ -262,7 +317,7 @@ func (s *cacheScanState) reset() {
 // session (message_end fires before persistence), from the running scan state.
 // It replaces DetectCacheMiss(GetEntries(), message, models) on the notice path,
 // which copied the entry tree and decoded every message entry per assistant
-// message. CollectCacheMisses keeps the full scan for transcript rebuilds.
+// message.
 func (m *SessionManager) CacheMissFor(message *ai.AssistantMessage, models ModelPriceSource) (CacheMiss, bool) {
 	m.mu.Lock()
 	prev := m.cacheScan.prev
@@ -305,6 +360,114 @@ func scanCacheEntries(entries []SessionEntry, models ModelPriceSource, cache *me
 		}
 	}
 	return result
+}
+
+// reset drops the state, for a fresh session or a load that reseeds it.
+// SessionStats aggregates the session's entries from the recorded candidates:
+// the counts, tool calls and token totals, without walking (and decoding) the
+// session. The context usage stays with the caller, from the live agent state.
+func (m *SessionManager) SessionStats() *SessionStats {
+	m.mu.Lock()
+	candidates := append([]cacheCandidate{}, m.cacheScan.candidates...)
+	sessionFile := m.sessionFile
+	sessionID := m.sessionID
+	m.mu.Unlock()
+
+	stats := &SessionStats{SessionFile: sessionFile, SessionID: sessionID}
+	var totals ai.Usage
+	addUsage := func(usage *ai.Usage) {
+		if usage == nil {
+			return
+		}
+		totals.Input += usage.Input
+		totals.Output += usage.Output
+		totals.CacheRead += usage.CacheRead
+		totals.CacheWrite += usage.CacheWrite
+		totals.Cost.Total += usage.Cost.Total
+	}
+	for i := range candidates {
+		candidate := &candidates[i]
+		if candidate.reset || candidate.role == "" {
+			addUsage(candidate.usage)
+			continue
+		}
+		stats.TotalMessages++
+		switch candidate.role {
+		case "user":
+			stats.UserMessages++
+		case "toolResult":
+			stats.ToolResults++
+			addUsage(candidate.usage)
+		case "assistant":
+			stats.AssistantMessages++
+			stats.ToolCalls += candidate.toolCalls
+			addUsage(candidate.usage)
+		}
+	}
+	stats.Tokens.Input = totals.Input
+	stats.Tokens.Output = totals.Output
+	stats.Tokens.CacheRead = totals.CacheRead
+	stats.Tokens.CacheWrite = totals.CacheWrite
+	stats.Tokens.Total = totals.Input + totals.Output + totals.CacheRead + totals.CacheWrite
+	stats.Cost = totals.Cost.Total
+	return stats
+}
+
+// UsageCostBreakdown is GetUsageCostBreakdown over this session, folded from the
+// recorded candidates with the insertion order the reference path produces.
+func (m *SessionManager) UsageCostBreakdown() []UsageCostBreakdownEntry {
+	m.mu.Lock()
+	candidates := append([]cacheCandidate{}, m.cacheScan.candidates...)
+	m.mu.Unlock()
+
+	totalsByKey := map[string]UsageTotals{}
+	var order []string
+	add := func(key string, usage *ai.Usage) {
+		if key == "" || usage == nil {
+			return
+		}
+		totals, ok := totalsByKey[key]
+		if !ok {
+			totals = CreateUsageTotals()
+			order = append(order, key)
+		}
+		AddUsageToTotals(&totals, *usage)
+		totalsByKey[key] = totals
+	}
+	for i := range candidates {
+		candidate := &candidates[i]
+		switch {
+		case candidate.reset, candidate.role == "toolResult":
+			add("Tools/summaries", candidate.usage)
+		case candidate.role == "assistant":
+			model := candidate.assistant.Model
+			if candidate.responseModel != nil {
+				model = *candidate.responseModel
+			}
+			add(string(candidate.assistant.Provider)+"/"+model, candidate.usage)
+		}
+	}
+
+	out := make([]UsageCostBreakdownEntry, 0, len(order))
+	for _, key := range order {
+		totals := totalsByKey[key]
+		out = append(out, UsageCostBreakdownEntry{
+			Key:    key,
+			Cost:   totals.Cost,
+			Tokens: totals.Input + totals.Output + totals.CacheRead + totals.CacheWrite,
+		})
+	}
+	filtered := out[:0]
+	for _, entry := range out {
+		if entry.Cost > 0 || entry.Tokens > 0 {
+			filtered = append(filtered, entry)
+		}
+	}
+	// Upstream sorts descending by cost; equal costs keep insertion order.
+	sort.SliceStable(filtered, func(left, right int) bool {
+		return filtered[left].Cost > filtered[right].Cost
+	})
+	return filtered
 }
 
 // ComputeCacheWaste returns cumulative cache waste across a session: prompt

@@ -45,13 +45,6 @@ func GetUsageCostBreakdown(entries []SessionEntry) []UsageCostBreakdownEntry {
 	return usageCostBreakdown(entries, nil)
 }
 
-// UsageCostBreakdown is GetUsageCostBreakdown over this session, reading through
-// the message memo: the /session panel used to unmarshal every message it walked
-// past (387ms of the panel's ~1.5s on a 19k-entry session).
-func (m *SessionManager) UsageCostBreakdown() []UsageCostBreakdownEntry {
-	return usageCostBreakdown(m.GetEntries(), &m.messages)
-}
-
 func usageCostBreakdown(entries []SessionEntry, cache *messageCache) []UsageCostBreakdownEntry {
 	totalsByKey := map[string]UsageTotals{}
 	var order []string

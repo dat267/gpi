@@ -1,7 +1,6 @@
 package coding
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/dat267/pier/ai"
@@ -75,61 +74,4 @@ func cacheRoleIsMemoized(cache *messageCache, id string) bool {
 	defer cache.mu.Unlock()
 	cached := cache.byID[id]
 	return cached != nil && cached.haveRole
-}
-
-// The whole-session scans behind /session used to re-parse every message on the
-// UI thread: on a 19k-entry session that measured 633ms for the stats, 458ms for
-// the cache-waste scan and 387ms for the cost breakdown — about 1.5s of JSON
-// work to open a panel, which is what froze the TUI. They now read through the
-// session's message memo, so a repeat scan decodes nothing, and the numbers are
-// unchanged.
-func TestSessionScansReuseTheMessageCache(t *testing.T) {
-	manager := NewSessionManager(t.TempDir(), &SessionManagerOptions{Persist: boolPtr(false)})
-	manager.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "hello"}})
-	manager.AppendMessage(&ai.AssistantMessage{
-		Provider: "anthropic", Model: "sonnet", Usage: ai.Usage{Input: 100, Output: 20, CacheRead: 900},
-		StopReason: ai.StopStop,
-	})
-	manager.AppendMessage(&ai.ToolResultMessage{
-		ToolCallID: "call-1", ToolName: "bash",
-		Usage: &ai.Usage{Input: 10, Output: 2},
-	})
-	manager.AppendMessage(&ai.AssistantMessage{
-		Provider: "anthropic", Model: "sonnet", Usage: ai.Usage{Input: 50, Output: 5},
-		StopReason: ai.StopStop,
-	})
-
-	decodes := 0
-	manager.messages.decode = func(entry *SessionEntry) []ai.Message {
-		decodes++
-		return SessionEntryToContextMessages(entry)
-	}
-
-	wantBreakdown := GetUsageCostBreakdown(manager.GetEntries())
-	wantWaste := ComputeCacheWaste(manager.GetEntries(), nil)
-	wantMisses := CollectCacheMisses(manager.GetEntries(), nil)
-
-	// The first pass fills the memo; later ones must not decode anything.
-	first := manager.UsageCostBreakdown()
-	afterFirst := decodes
-	if afterFirst == 0 {
-		t.Fatal("the scan did not read through the message cache")
-	}
-	if got := manager.UsageCostBreakdown(); !reflect.DeepEqual(got, first) {
-		t.Errorf("breakdown = %+v, then %+v", first, got)
-	}
-	if got := manager.ComputeCacheWaste(nil); !reflect.DeepEqual(got, wantWaste) {
-		t.Errorf("cache waste = %+v, want %+v", got, wantWaste)
-	}
-	if got := manager.CollectCacheMisses(nil); !reflect.DeepEqual(got, wantMisses) {
-		t.Errorf("misses = %+v, want %+v", got, wantMisses)
-	}
-	if decodes != afterFirst {
-		t.Errorf("a repeat scan decoded %d more entries", decodes-afterFirst)
-	}
-
-	// The cached path and the uncached reference path agree.
-	if !reflect.DeepEqual(first, wantBreakdown) {
-		t.Errorf("cached breakdown = %+v, want %+v", first, wantBreakdown)
-	}
 }

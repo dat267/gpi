@@ -331,23 +331,34 @@ code comments at the point of divergence; this file is the log. The range is
     component tree; with no UI to post to (headless wiring) it still computes
     inline, as upstream does. The same session now echoes the keystroke after
     0.038s and the panel appears 0.69s later in the background.
-  - **the cache-waste accounting is folded, not re-walked.** The manager already
+  - **the session-wide accounting is folded, not re-walked.** The manager already
     read every entry's `role`/`usage`/`provider`/`model`/`timestamp` as entries
     arrived, to seed the running scan state that makes a live cache-miss notice
-    O(1). That same pass now records the candidates, and
-    `CollectCacheMisses`/`ComputeCacheWaste` account them with
-    `detectCacheMissFor` — the identical helper, so the folded numbers cannot
-    drift from the full scan — decoding a message only for the misses that are
+    O(1). That same pass now records what the statistics, the usage cost
+    breakdown and the cache-miss scan need, and they account those records with
+    `detectCacheMissFor`/the same aggregation the reference functions use — so the
+    folded numbers cannot drift — decoding a message only for the misses that are
     actually counted (the transcript keys its notices by the memoized message
     pointer). The rebuild's scan went from 563ms to 30ms on that session, and the
     full scan is still there for callers without a session.
   Known gap this left in place: upstream's breakdown also buckets
   `type === "usage"` entries (cache-warming usage) as `provider/model`, and the
   port's breakdown has no such case, so those tokens are unattributed.
-  Remaining cost: the panel's own background work is still ~0.63s on that
-  session (the statistics' message decode and the usage breakdown still walk the
-  session), which no longer blocks anything but delays the panel. Folding the
-  breakdown the same way would bring it to tens of milliseconds.
+  Everything the panel needs is folded, so the panel itself is fast too: the same
+  pass records each message's `role`, `usage`, `provider`, `model`,
+  `responseModel`, `timestamp` and — for an assistant message only — the block
+  types of its content array, which is what makes the tool-call count exact: the
+  role and the array are read, the payloads are skipped, so the pass stays a scan
+  rather than a decode. The statistics and the usage cost breakdown are then
+  folds over those records. On that session the panel's scans went from 629ms to
+  31ms, and the panel is visible 0.080s after the keystroke, against 0.857s for
+  the freeze it replaced. `content` stays raw JSON in the facts because a user
+  message keeps a string there — decoding it as a block list failed the whole
+  record.
+  Costs this moved rather than removed: reading the content array raises a load
+  of that session from 507ms to 610ms (before the TUI exists at startup, but on
+  the UI loop for `/reload` and a session switch), and the reference entry-list
+  functions stay for callers without a session.
 - D158 — **the session picker has a stacked layout for narrow terminals**.
   Upstream renders the resume selector — `/resume` in the app and `pier -r`
   (`components/session-selector.ts`) — as a single-line header (title on the

@@ -673,61 +673,11 @@ type SessionStats struct {
 	ContextUsage *ContextUsage
 }
 
-// GetSessionStats aggregates the session entries (port of getSessionStats).
+// GetSessionStats aggregates the session entries (port of getSessionStats). The
+// counts, tool calls and token totals come folded from the session manager; only
+// the context usage needs the live agent state, which the port reads here.
 func (s *AgentSession) GetSessionStats() *SessionStats {
-	stats := &SessionStats{
-		SessionFile: s.Sessions.GetSessionFile(),
-		SessionID:   s.Sessions.GetSessionID(),
-	}
-	var totals ai.Usage
-	addUsage := func(u *ai.Usage) {
-		if u == nil {
-			return
-		}
-		totals.Input += u.Input
-		totals.Output += u.Output
-		totals.CacheRead += u.CacheRead
-		totals.CacheWrite += u.CacheWrite
-		totals.Cost.Total += u.Cost.Total
-	}
-	entries := s.Sessions.GetEntries()
-	for index := range entries {
-		entry := &entries[index]
-		if (entry.Type == "branch_summary" || entry.Type == "compaction") && entry.Usage != nil {
-			addUsage(entry.Usage)
-		}
-		if entry.Type != "message" {
-			continue
-		}
-		stats.TotalMessages++
-		// Through the session's message memo: re-parsing every message here cost
-		// 633ms of the /session panel's ~1.5s on a 19k-entry session.
-		messages := projectedMessages(entry, &s.Sessions.messages)
-		if len(messages) == 0 {
-			continue
-		}
-		switch m := messages[0].(type) {
-		case *ai.UserMessage:
-			stats.UserMessages++
-		case *ai.ToolResultMessage:
-			stats.ToolResults++
-			addUsage(m.Usage)
-		case *ai.AssistantMessage:
-			stats.AssistantMessages++
-			for _, block := range m.Content {
-				if _, ok := block.(ai.ToolCall); ok {
-					stats.ToolCalls++
-				}
-			}
-			addUsage(&m.Usage)
-		}
-	}
-	stats.Tokens.Input = totals.Input
-	stats.Tokens.Output = totals.Output
-	stats.Tokens.CacheRead = totals.CacheRead
-	stats.Tokens.CacheWrite = totals.CacheWrite
-	stats.Tokens.Total = totals.Input + totals.Output + totals.CacheRead + totals.CacheWrite
-	stats.Cost = totals.Cost.Total
+	stats := s.Sessions.SessionStats()
 
 	// Context usage from the current context.
 	model := s.Agent.State().Model

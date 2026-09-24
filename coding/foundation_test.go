@@ -2,6 +2,7 @@ package coding
 
 import (
 	ctxpkg "context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -598,7 +599,96 @@ func TestManagerCacheMissScanDoesNotDecodeTheSession(t *testing.T) {
 	if len(misses) != 1 {
 		t.Fatalf("misses = %+v", misses)
 	}
+	// The panel's other scans must not decode anything either: the statistics and
+	// the usage breakdown read the same recorded facts.
+	_ = manager.ComputeCacheWaste(nil)
+	_ = manager.UsageCostBreakdown()
+	stats := manager.SessionStats()
+	if stats.ToolCalls != 0 || stats.UserMessages != 20 {
+		t.Errorf("stats = %+v", stats)
+	}
 	if decodes > len(misses) {
-		t.Errorf("the scan decoded %d entries to report %d misses", decodes, len(misses))
+		t.Errorf("the scans decoded %d entries to report %d misses", decodes, len(misses))
 	}
 }
+
+// The session statistics are folded from the facts read as entries arrive,
+// including the tool-call count, which is the one statistic that needs the
+// message bodies — so it is read from the content array in that same pass. These
+// numbers must match what decoding every message would give.
+func TestManagerSessionStatsMatchesDecoding(t *testing.T) {
+	manager := NewSessionManager(t.TempDir(), &SessionManagerOptions{Persist: boolPtr(false)})
+	manager.AppendMessage(&ai.SystemMessage{Content: ai.StringOrBlocks{Text: "you are a tool"}})
+	manager.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "run it"}})
+	manager.AppendMessage(&ai.AssistantMessage{
+		Provider: "anthropic", Model: "sonnet",
+		Content: ai.ContentList{
+			ai.TextContent{Text: `the JSON looks like {"type":"toolCall"} but is not one`},
+			ai.ToolCall{ID: "t1", Name: "bash", Arguments: json.RawMessage(`{}`)},
+			ai.ToolCall{ID: "t2", Name: "read", Arguments: json.RawMessage(`{}`)},
+		},
+		Usage:      ai.Usage{Input: 100, Output: 20, TotalTokens: 120, Cost: ai.UsageCost{Total: 0.5}},
+		StopReason: ai.StopToolUse,
+	})
+	manager.AppendMessage(&ai.ToolResultMessage{
+		ToolCallID: "t1", ToolName: "bash",
+		Content: ai.UserContentList{ai.TextContent{Text: "ok"}},
+		Usage:   &ai.Usage{Input: 10, Output: 2},
+	})
+	manager.AppendMessage(&ai.ToolResultMessage{
+		ToolCallID: "t2", ToolName: "read",
+		Content: ai.UserContentList{ai.TextContent{Text: "ok"}},
+	})
+	manager.AppendCompaction("summary", "", 10, nil, false, &ai.Usage{Input: 7, Output: 3, Cost: ai.UsageCost{Total: 0.1}})
+
+	stats := manager.SessionStats()
+	if stats.TotalMessages != 5 {
+		t.Errorf("totalMessages = %d, want 5 (each message entry, the compaction is not one)", stats.TotalMessages)
+	}
+	if stats.UserMessages != 1 || stats.AssistantMessages != 1 || stats.ToolResults != 2 {
+		t.Errorf("counts = user %d, assistant %d, results %d", stats.UserMessages, stats.AssistantMessages, stats.ToolResults)
+	}
+	// Two real toolCall blocks; the text block that merely mentions the word is
+	// not a tool call.
+	if stats.ToolCalls != 2 {
+		t.Errorf("toolCalls = %d, want 2 (the text block is not a call)", stats.ToolCalls)
+	}
+	if stats.Tokens.Input != 117 || stats.Tokens.Output != 25 || stats.Tokens.Total != 142 {
+		t.Errorf("tokens = %+v", stats.Tokens)
+	}
+	if stats.Cost != 0.6 {
+		t.Errorf("cost = %v", stats.Cost)
+	}
+}
+
+// The folded usage breakdown must equal the reference walk over the entries.
+func TestManagerUsageBreakdownMatchesTheReference(t *testing.T) {
+	manager := NewSessionManager(t.TempDir(), &SessionManagerOptions{Persist: boolPtr(false)})
+	manager.AppendMessage(&ai.AssistantMessage{
+		Provider: "anthropic", Model: "sonnet", ResponseModel: stringPtr("sonnet-4"),
+		Content: ai.ContentList{ai.TextContent{Text: "a"}},
+		Usage:   ai.Usage{Input: 100, Output: 10, Cost: ai.UsageCost{Total: 0.5}}, StopReason: ai.StopStop,
+	})
+	manager.AppendMessage(&ai.ToolResultMessage{
+		ToolCallID: "t", ToolName: "bash", Content: ai.UserContentList{ai.TextContent{Text: "ok"}},
+		Usage: &ai.Usage{Input: 10, Output: 1, Cost: ai.UsageCost{Total: 0.05}},
+	})
+	manager.AppendMessage(&ai.AssistantMessage{
+		Provider: "openai", Model: "gpt", Content: ai.ContentList{ai.TextContent{Text: "b"}},
+		Usage: ai.Usage{Input: 50, Output: 5, Cost: ai.UsageCost{Total: 0.2}}, StopReason: ai.StopStop,
+	})
+	manager.AppendCompaction("summary", "", 10, nil, false, &ai.Usage{Input: 5, Output: 1, Cost: ai.UsageCost{Total: 0.01}})
+
+	want := GetUsageCostBreakdown(manager.GetEntries())
+	got := manager.UsageCostBreakdown()
+	if len(got) != len(want) {
+		t.Fatalf("breakdown = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("entry %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func stringPtr(value string) *string { return &value }

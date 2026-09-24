@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -15,9 +14,11 @@ import (
 
 // commandTestSession implements CommandSession.
 type commandTestSession struct {
-	streaming   bool
-	compacting  bool
-	stats       *coding.SessionStats
+	streaming  bool
+	compacting bool
+	stats      *coding.SessionStats
+	// statsBlock, when set, holds GetSessionStats (test seam: the panel's work).
+	statsBlock  chan struct{}
 	lastText    string
 	name        string
 	exported    []string
@@ -27,9 +28,14 @@ type commandTestSession struct {
 	runtime     *coding.ModelRuntime
 }
 
-func (s *commandTestSession) GetSessionStats() *coding.SessionStats { return s.stats }
-func (s *commandTestSession) GetLastAssistantText() string          { return s.lastText }
-func (s *commandTestSession) SetSessionName(name string)            { s.name = name }
+func (s *commandTestSession) GetSessionStats() *coding.SessionStats {
+	if s.statsBlock != nil {
+		<-s.statsBlock
+	}
+	return s.stats
+}
+func (s *commandTestSession) GetLastAssistantText() string { return s.lastText }
+func (s *commandTestSession) SetSessionName(name string)   { s.name = name }
 func (s *commandTestSession) ExportToJsonl(outputPath string) (string, error) {
 	if s.exportErr != nil {
 		return "", s.exportErr
@@ -354,12 +360,12 @@ func TestCommandStop(t *testing.T) {
 }
 
 // /session computes its numbers from whole-session scans. On a 19k-entry
-// session the cold scan is 0.87s of JSON work, and computing it inline froze
-// rendering and input for that long (upstream computes it inline; this port does
-// not, D159). The scans are too slow for dispatch to wait on, so the panel is
-// built off the UI loop and posted back to it.
+// session the cold scan was hundreds of milliseconds of JSON work, and computing
+// it inline froze rendering and input for that long (upstream computes it
+// inline; this port does not, D159). It is too slow for dispatch to wait on, so
+// the panel is built off the UI loop and posted back to it.
 func TestSessionCommandRunsTheScansOffTheUILoop(t *testing.T) {
-	wiring, _, _ := newCommandTestWiring(t)
+	wiring, session, _ := newCommandTestWiring(t)
 	screen := tui.NewMainScreen(&fakeRendererTerminal{width: 80, height: 24}, false, "")
 	screen.DisableAutoRender()
 	wiring.UI = screen
@@ -367,15 +373,8 @@ func TestSessionCommandRunsTheScansOffTheUILoop(t *testing.T) {
 		wiring.SessionInfo.AppendMessage(ai.Message(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "hello"}}))
 	}
 
-	// The scan cannot finish: its first decode blocks until released.
-	started := make(chan struct{})
-	unblock := make(chan struct{})
-	var once sync.Once
-	wiring.SessionInfo.SetMessageDecodeForTest(func(entry *coding.SessionEntry) []ai.Message {
-		once.Do(func() { close(started) })
-		<-unblock
-		return coding.SessionEntryToContextMessages(entry)
-	})
+	// The panel's work cannot finish until this is closed.
+	session.statsBlock = make(chan struct{})
 
 	panelOnScreen := func() bool {
 		screen.RenderNow(true)
@@ -390,24 +389,15 @@ func TestSessionCommandRunsTheScansOffTheUILoop(t *testing.T) {
 	select {
 	case <-dispatched:
 	case <-time.After(5 * time.Second):
-		close(unblock)
-		t.Fatal("HandleSessionCommand never returned: the session scans are running on the UI loop")
+		t.Fatal("HandleSessionCommand never returned: the panel is being computed on the UI loop")
 	}
 
-	// The scan is in flight over there, and nothing has been rendered yet.
-	waitForCondition(t, func() bool {
-		select {
-		case <-started:
-			return true
-		default:
-			return false
-		}
-	})
+	// The panel's work is in flight over there and nothing has rendered yet.
 	if panelOnScreen() {
-		t.Fatal("the panel appeared before the scans finished")
+		t.Fatal("the panel appeared before its work finished")
 	}
 
-	// Release the decode and play the loop: the posted panel lands.
-	close(unblock)
+	// Release it and play the loop: the posted panel lands.
+	close(session.statsBlock)
 	waitForCondition(t, panelOnScreen)
 }
