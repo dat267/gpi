@@ -412,7 +412,7 @@ snapshot under and deliver outside.
 ## Divergences
 
 Numbered D-rows live in code comments at the point of divergence and are
-summarized in the README scoreboard. The range is **D1–D156**. Representative:
+summarized in the README scoreboard. The range is **D1–D157**. Representative:
 
 - D41 — extension mechanics are out of scope (extension discovery in the
   resource loader, the extension runner, package/tools managers); seams are
@@ -699,6 +699,17 @@ summarized in the README scoreboard. The range is **D1–D156**. Representative:
 - D137 — model-selector callbacks run outside the state mutex.
 - D138 — terminal input is delivered outside the terminal lock.
 - D139 — stdin-buffer callbacks are emitted outside the buffer lock.
+- D157 — **path completion treats a trailing `.` or `..` as a directory, not as
+  part of the name to split on**. `getFileSuggestions` expands `~` first and then
+  splits the result into directory + file prefix, and both `path.join` upstream
+  and `filepath.Join` here *clean* the path — so expanding `~/.` collapses the
+  `.`, `filepath.Dir` walks up to home's parent and `filepath.Base` hands back
+  home's own name. Typing `~/.` and pressing Tab listed `/home` and offered
+  `~/dat/` as the single suggestion, which the editor then applied. **Fixed**: the
+  raw prefix is split before expanding, a trailing `.` keeps its role as the
+  filter (a shell completes `~/.` with dotfiles only) while `..` clears the
+  filter and stays in the suggestion. Upstream has the same bug, so the fix is a
+  divergence, guarded by TestFileCompletionUnderHomeFiltersInsideHome.
 - D156 — **the login flow runs off the UI loop** (the fifth deadlock, and the
   first found by reading rather than by driving the binary in a PTY).
   `ShowLoginDialog`/`ShowApiKeyLoginDialog` called `LoginProvider` inline, and

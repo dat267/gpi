@@ -69,6 +69,66 @@ func autocompleteTestCommands() []CommandEntry {
 	}
 }
 
+// TestFileCompletionUnderHomeFiltersInsideHome covers `~/.` + Tab. The last
+// segment has to be filtered inside the home directory: expanding the prefix
+// first ate the "." (filepath.Join cleans the path), which left Dir/Base looking
+// at home's *parent* — so `~/.` listed /home and offered `~/dat/`.
+func TestFileCompletionUnderHomeFiltersInsideHome(t *testing.T) {
+	home := t.TempDir()
+	for _, name := range []string{".bashrc", ".config", "dat", "notes.txt"} {
+		full := filepath.Join(home, name)
+		if name == ".config" || name == "dat" {
+			if err := os.MkdirAll(full, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err := os.WriteFile(full, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", home)
+
+	provider := NewCombinedAutocompleteProvider(nil, home, "")
+	suggestions := provider.GetSuggestions(context.Background(), []string{"~/."}, 0, len("~/."), true)
+	if suggestions == nil {
+		t.Fatal("no suggestions for ~/.")
+	}
+	var got []string
+	for _, item := range suggestions.Items {
+		got = append(got, item.Value)
+	}
+	if strings.Join(got, " ") != "~/.config/ ~/.bashrc" {
+		t.Fatalf("~/.	 suggested %q; want the home directory's dotfiles", got)
+	}
+	if suggestions.Prefix != "~/." {
+		t.Fatalf("prefix = %q", suggestions.Prefix)
+	}
+
+	// A trailing ".." names a directory too, and unlike "." it is not a name
+	// prefix: the filter is empty and the ".." has to stay in the suggestion —
+	// dropping it would point at `~/<name>`, which is home, not home's parent.
+	parent := filepath.Dir(home)
+	parentSuggestions := provider.GetSuggestions(context.Background(), []string{"~/.."}, 0, len("~/.."), true)
+	if parentSuggestions == nil {
+		t.Fatal("no suggestions for ~/..")
+	}
+	got = got[:0]
+	for _, item := range parentSuggestions.Items {
+		got = append(got, item.Value)
+		if !strings.HasPrefix(item.Value, "~/../") {
+			t.Fatalf("~/..\t suggested %q; the parent has to stay in the path", item.Value)
+		}
+		entry := strings.TrimSuffix(strings.TrimPrefix(item.Value, "~/../"), "/")
+		if _, err := os.Stat(filepath.Join(parent, entry)); err != nil {
+			t.Fatalf("~/..\t suggested %q, which does not exist in the parent", item.Value)
+		}
+	}
+	if want := "~/../" + filepath.Base(home) + "/"; strings.Join(got, " ") != want {
+		t.Fatalf("~/..\t suggested %q; want %q", got, want)
+	}
+}
+
 // TestAutocompleteAgainstUpstreamGolden replays the upstream provider corpus.
 func TestAutocompleteAgainstUpstreamGolden(t *testing.T) {
 	fdPath, err := exec.LookPath("fd")

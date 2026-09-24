@@ -585,6 +585,16 @@ func (p *CombinedAutocompleteProvider) getFileSuggestions(prefix string) []Autoc
 	isRootPrefix := rawPrefix == "" || rawPrefix == "./" || rawPrefix == "../" || rawPrefix == "~" ||
 		rawPrefix == "~/" || rawPrefix == "/" || (parsed.isAtPrefix && rawPrefix == "")
 
+	// The last segment, for the directory/prefix split and for the "." and ".."
+	// tails below (computed from the raw prefix: see the default branch). A
+	// trailing "." or ".." names a directory, so it belongs to the search path;
+	// ".." is not a name prefix, so it also clears the filter and has to stay in
+	// the suggestion (dropping it would point at the wrong directory). A lone "."
+	// stays the filter, the way a shell completes `~/.` with dotfiles only.
+	rawFile := filepath.Base(rawPrefix)
+	directoryTail := rawFile == "." || rawFile == ".."
+	parentTail := rawFile == ".."
+
 	var searchDir string
 	var searchPrefix string
 	switch {
@@ -603,14 +613,30 @@ func (p *CombinedAutocompleteProvider) getFileSuggestions(prefix string) []Autoc
 		}
 		searchPrefix = ""
 	default:
-		dir := filepath.Dir(expandedPrefix)
-		file := filepath.Base(expandedPrefix)
-		if strings.HasPrefix(rawPrefix, "~") || strings.HasPrefix(expandedPrefix, "/") {
+		// Split the raw prefix, then expand the directory: expanding first eats a
+		// trailing "." (filepath.Join cleans the path), which leaves Dir/Base
+		// looking at the *parent* of the directory the user meant — `~/.` listed
+		// /home and offered `~/dat/` (the home directory's own name). Upstream has
+		// the same bug (path.join cleans too), so this is a deliberate divergence
+		// (D157).
+		dir := filepath.Dir(rawPrefix)
+		// A trailing "." or ".." names a directory rather than a prefix to filter
+		// by, so it becomes part of the search path and the filter starts empty.
+		if strings.HasPrefix(dir, "~") {
+			dir = p.expandHomePath(dir)
+		}
+		if directoryTail {
+			dir = filepath.Join(dir, rawFile)
+		}
+		if strings.HasPrefix(dir, "~") || strings.HasPrefix(dir, "/") {
 			searchDir = dir
 		} else {
 			searchDir = filepath.Join(p.basePath, dir)
 		}
-		searchPrefix = file
+		searchPrefix = rawFile
+		if parentTail {
+			searchPrefix = ""
+		}
 	}
 
 	entries, err := os.ReadDir(searchDir)
@@ -635,6 +661,8 @@ func (p *CombinedAutocompleteProvider) getFileSuggestions(prefix string) []Autoc
 		displayPrefix := rawPrefix
 		var relativePath string
 		switch {
+		case parentTail:
+			relativePath = displayPrefix + "/" + name
 		case strings.HasSuffix(displayPrefix, "/"):
 			relativePath = displayPrefix + name
 		case strings.Contains(displayPrefix, "/") || strings.Contains(displayPrefix, "\\"):
