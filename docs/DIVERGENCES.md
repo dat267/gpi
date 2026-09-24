@@ -361,12 +361,18 @@ code comments at the point of divergence; this file is the log. The range is
     overrides are re-applied (`--use-theme`), and the settings-derived UI state
     is re-applied (`applySettingsDependentUI`, upstream's `applyRuntimeSettings`
     from `rebindCurrentSession`).
-  Gaps this leaves: there is no per-cwd trust cache inside a run, so a project
-  re-resolved after a switch re-reads the store (it never re-prompts, so the
-  answer can only differ if the store changed); the pre-boot theme discovery
-  still resolves against the process cwd, which the `-r` picker needs before the
-  session exists; and per-cwd extension services and a rebuilt model runtime have
-  no counterpart (D41).
+  The trust answer is remembered per project for the run (upstream's
+  `projectTrustByCwd`), seeded with the boot answer and filled by each switch, so
+  a project resolved once is neither re-read nor re-asked. Theme sources follow
+  the same boundary: a project's `.pi/themes` is discovered only for a trusted
+  project, and the sources are installed again once trust is decided, because the
+  install that the `-r` picker needs happens before any project resource is
+  readable.
+  What remains is D41's: there are no per-cwd extension services, and the model
+  runtime is one process-wide instance, so a resumed session from another
+  directory does not pick up that project's `models.json` (upstream rebuilds the
+  services per cwd). Everything else about the project does follow: settings,
+  skills, prompt templates, context files, system prompt, themes and trust.
 - D159 — **the port's session-wide accounting is non-blocking**. Upstream
   computes the `/session` panel (`handleSessionCommand`: the session statistics,
   the cache-waste totals and the usage cost breakdown) inline on its UI loop, and
@@ -396,9 +402,6 @@ code comments at the point of divergence; this file is the log. The range is
     actually counted (the transcript keys its notices by the memoized message
     pointer). The rebuild's scan went from 563ms to 30ms on that session, and the
     full scan is still there for callers without a session.
-  Known gap this left in place: upstream's breakdown also buckets
-  `type === "usage"` entries (cache-warming usage) as `provider/model`, and the
-  port's breakdown has no such case, so those tokens are unattributed.
   Everything the panel needs is folded, so the panel itself is fast too: the same
   pass records each message's `role`, `usage`, `provider`, `model`,
   `responseModel`, `timestamp` and — for an assistant message only — the block
@@ -414,6 +417,12 @@ code comments at the point of divergence; this file is the log. The range is
   of that session from 507ms to 610ms (before the TUI exists at startup, but on
   the UI loop for `/reload` and a session switch), and the reference entry-list
   functions stay for callers without a session.
+  The three gaps this D-row recorded are closed: the fold attributes
+  `type === "usage"` entries (cache-warming spend) to their `provider/model`, as
+  upstream's breakdown and statistics both do; the synthetic context messages
+  are stamped from `entry.timestamp` instead of projection time; and a
+  compaction's recorded system message is read back and emitted before its
+  summary.
 - D158 — **the session picker has a stacked layout for narrow terminals**.
   Upstream renders the resume selector — `/resume` in the app and `pier -r`
   (`components/session-selector.ts`) — as a single-line header (title on the
