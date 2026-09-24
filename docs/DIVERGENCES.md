@@ -247,8 +247,13 @@ code comments at the point of divergence; this file is the log. The range is
     entry (blank is an error). **`--approve`/`--no-approve`** settle project trust
     for the run. **`--export`** and **`--list-models`** are implemented and exit
     before the TUI.
-  **`--extensions`/`--no-extensions`** are parsed into `Extensions`/`NoExtensions`
-  but load nothing, since extension mechanics stay out of scope (D41).
+  **`-e`/`--extension`** is parsed into `Extensions` and reported as ignored
+  ("this build loads no extensions"), because extension mechanics stay out of
+  scope (D41) and silently accepting a path that does nothing is worse than
+  saying so; a missing value is an error like the neighbouring flags.
+  **`-ne`/`--no-extensions`** is parsed into `NoExtensions` and says nothing: it
+  asks for fewer extensions, and there are none. Neither is in `--help` any more,
+  and the tool descriptions no longer mention extension tools.
   Upstream's unknown-flag split is matched exactly, and tested: an unknown
   **long** flag is recorded in `UnknownFlags` for extensions to consume and is
   not an error (upstream's `args.js` does the same), while an unknown **short**

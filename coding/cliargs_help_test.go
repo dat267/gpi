@@ -21,10 +21,53 @@ func TestHelpDoesNotAdvertiseSubcommands(t *testing.T) {
 			t.Errorf("help mentions %q", ghost)
 		}
 	}
+	// Nothing in the help claims an extension or package facility (D41).
+	if strings.Contains(strings.ToLower(help), "extension") {
+		t.Errorf("help mentions extensions:\n%s", help)
+	}
 	// The parts that are real stay.
 	for _, kept := range []string{"Usage:", "--offline", "--list-models", "Built-in Tool Names:"} {
 		if !strings.Contains(help, kept) {
 			t.Errorf("help lost %q:\n%s", kept, help)
+		}
+	}
+}
+
+// -e/--extension and -ne/--no-extensions stay parsed — an -e path must not become
+// the first message to the model — but this build loads no extensions, so -e says
+// so instead of silently doing nothing. --no-extensions asks for less of
+// something that does not exist, so it stays quiet.
+func TestExtensionFlagsAreReported(t *testing.T) {
+	parsed := ParseArgs([]string{"-e", "my-extension.ts"})
+	if len(parsed.Extensions) != 1 || parsed.Extensions[0] != "my-extension.ts" {
+		t.Fatalf("extensions = %v", parsed.Extensions)
+	}
+	if len(parsed.Messages) != 0 {
+		t.Errorf("the extension path became a message: %v", parsed.Messages)
+	}
+	warnings := 0
+	for _, diagnostic := range parsed.Diagnostics {
+		if diagnostic.Type == "warning" {
+			warnings++
+		}
+	}
+	if warnings != 1 {
+		t.Errorf("diagnostics = %+v, want one warning", parsed.Diagnostics)
+	}
+	// A missing value is an error, like the neighbouring flags.
+	missing := ParseArgs([]string{"--extension"})
+	if !HasErrorDiagnostics(missing.Diagnostics) {
+		t.Errorf("--extension without a value must be an error: %+v", missing.Diagnostics)
+	}
+	// --no-extensions is accepted without complaint.
+	quiet := ParseArgs([]string{"-ne"})
+	if len(quiet.Diagnostics) != 0 || !quiet.NoExtensions {
+		t.Errorf("--no-extensions = %+v, %v", quiet.Diagnostics, quiet.NoExtensions)
+	}
+	// Neither flag is advertised any more.
+	for _, ghost := range []string{"--extension, -e", "--no-extensions, -ne"} {
+		if strings.Contains(PrintHelp(), ghost) {
+			t.Errorf("help still lists %q", ghost)
 		}
 	}
 }

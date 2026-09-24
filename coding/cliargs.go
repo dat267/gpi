@@ -214,8 +214,17 @@ func ParseArgs(args []string) *Args {
 		case arg == "--extension" || arg == "-e":
 			if value, ok := next(); ok {
 				result.Extensions = append(result.Extensions, value)
+				result.Diagnostics = append(result.Diagnostics, CLIDiagnostic{
+					Type:    "warning",
+					Message: "Ignoring " + arg + " " + value + ": this build loads no extensions.",
+				})
+			} else {
+				result.Diagnostics = append(result.Diagnostics, CLIDiagnostic{Type: "error", Message: "--extension requires a value"})
 			}
 		case arg == "--no-extensions" || arg == "-ne":
+			// Accepted and ignored: it asks for fewer extensions, and this build
+			// loads none. The flag stays known so it is never mistaken for a
+			// message.
 			result.NoExtensions = true
 		case arg == "--skill":
 			if value, ok := next(); ok {
@@ -342,7 +351,13 @@ func validThinkingLevelStrings() []string {
 // manager and no extension mechanics, D41 — the one-time resource-manager TUI
 // went with them). A word the parser does not know is not an error either; it
 // becomes the first message to the model, so the table was advertising commands
-// that silently turn into prompts. The option lines are otherwise upstream's.
+// that silently turn into prompts.
+//
+// The extension flag lines are gone for the same reason: -e/--extension loads
+// nothing here, and --no-extensions asks for less of something that does not
+// exist. Both stay parsed (an -e path must not become a message) and -e reports
+// that it is ignored. The remaining option lines are upstream's, minus the
+// extension claims in the tool descriptions.
 func PrintHelp() string { return PrintHelpNamed(AppName) }
 
 // PrintHelpNamed renders the help text with the invoked binary name.
@@ -383,15 +398,13 @@ func helpOptionLines() []string {
 		"  --name, -n <name>              Set session display name",
 		"  --models <patterns>            Comma-separated model patterns for Ctrl+P cycling",
 		"                                 Supports globs (anthropic/*, *sonnet*) and fuzzy matching",
-		"  --no-tools, -nt                Disable all tools by default (built-in and extension)",
-		"  --no-builtin-tools, -nbt       Disable built-in tools by default but keep extension/custom tools enabled",
+		"  --no-tools, -nt                Disable all tools by default",
+		"  --no-builtin-tools, -nbt       Disable built-in tools by default but keep custom tools enabled",
 		"  --tools, -t <tools>            Comma-separated allowlist of tool names to enable",
-		"                                 Applies to built-in, extension, and custom tools",
+		"                                 Applies to built-in and custom tools",
 		"  --exclude-tools, -xt <tools>   Comma-separated denylist of tool names to disable",
-		"                                 Applies to built-in, extension, and custom tools",
+		"                                 Applies to built-in and custom tools",
 		"  --thinking <level>             Set thinking level: " + strings.Join(validThinkingLevelStrings(), ", "),
-		"  --extension, -e <path>         Load an extension file (can be used multiple times)",
-		"  --no-extensions, -ne           Disable extension discovery (explicit -e paths still work)",
 		"  --skill <path>                 Load a skill file or directory (can be used multiple times)",
 		"  --no-skills, -ns               Disable skills discovery and loading",
 		"  --prompt-template <path>       Load a prompt template file or directory (can be used multiple times)",
