@@ -616,7 +616,11 @@ func (m *Markdown) renderToken(token *MdToken, width int, nextTokenType string, 
 }
 
 func (m *Markdown) renderInlineTokens(tokens []*MdToken, styleContext *inlineStyleContext) string {
-	result := ""
+	// A strings.Builder, not `result += ...`: this loop's iteration count scales
+	// with the text, so appending to a string copied the whole accumulation each
+	// time and made rendering one large message quadratic (measured: a 1 MB
+	// message allocated 24 GB and took 6.3 s; 100 KB took 113 ms).
+	var builder strings.Builder
 	resolved := styleContext
 	if resolved == nil {
 		defaultContext := m.getDefaultInlineStyleContext()
@@ -642,70 +646,71 @@ func (m *Markdown) renderInlineTokens(tokens []*MdToken, styleContext *inlineSty
 					rendered = latex
 				}
 			}
-			result += applyTextWithNewlines(rendered)
+			builder.WriteString(applyTextWithNewlines(rendered))
 
 		case "escape":
 			if m.Options.PreserveBackslashEscapes {
-				result += applyTextWithNewlines(token.Raw)
+				builder.WriteString(applyTextWithNewlines(token.Raw))
 			} else {
-				result += applyTextWithNewlines(token.Text)
+				builder.WriteString(applyTextWithNewlines(token.Text))
 			}
 
 		case "text":
 			if len(token.Tokens) > 0 {
-				result += m.renderInlineTokens(token.Tokens, resolved)
+				builder.WriteString(m.renderInlineTokens(token.Tokens, resolved))
 			} else {
-				result += applyTextWithNewlines(token.Text)
+				builder.WriteString(applyTextWithNewlines(token.Text))
 			}
 
 		case "paragraph":
-			result += m.renderInlineTokens(token.Tokens, resolved)
+			builder.WriteString(m.renderInlineTokens(token.Tokens, resolved))
 
 		case "strong":
 			boldContent := m.renderInlineTokens(token.Tokens, resolved)
-			result += m.Theme.Bold(boldContent) + stylePrefix
+			builder.WriteString(m.Theme.Bold(boldContent) + stylePrefix)
 
 		case "em":
 			italicContent := m.renderInlineTokens(token.Tokens, resolved)
-			result += m.Theme.Italic(italicContent) + stylePrefix
+			builder.WriteString(m.Theme.Italic(italicContent) + stylePrefix)
 
 		case "codespan":
-			result += m.Theme.Code(token.Text) + stylePrefix
+			builder.WriteString(m.Theme.Code(token.Text) + stylePrefix)
 
 		case "link":
 			linkText := m.renderInlineTokens(token.Tokens, resolved)
 			styledLink := m.Theme.Link(m.Theme.Underline(linkText))
 			if GetTerminalCapabilities().Hyperlinks {
-				result += Hyperlink(styledLink, token.Href) + stylePrefix
+				builder.WriteString(Hyperlink(styledLink, token.Href) + stylePrefix)
 			} else {
 				hrefForComparison := token.Href
 				if strings.HasPrefix(hrefForComparison, "mailto:") {
 					hrefForComparison = hrefForComparison[len("mailto:"):]
 				}
 				if token.Text == token.Href || token.Text == hrefForComparison {
-					result += styledLink + stylePrefix
+					builder.WriteString(styledLink + stylePrefix)
 				} else {
-					result += styledLink + m.Theme.LinkURL(" ("+token.Href+")") + stylePrefix
+					builder.WriteString(styledLink + m.Theme.LinkURL(" ("+token.Href+")") + stylePrefix)
 				}
 			}
 
 		case "br":
-			result += "\n"
+			builder.WriteString("\n")
 
 		case "del":
 			delContent := m.renderInlineTokens(token.Tokens, resolved)
-			result += m.Theme.Strikethrough(delContent) + stylePrefix
+			builder.WriteString(m.Theme.Strikethrough(delContent) + stylePrefix)
 
 		case "html":
-			result += applyTextWithNewlines(token.Raw)
+			builder.WriteString(applyTextWithNewlines(token.Raw))
 
 		default:
 			if token.Text != "" {
-				result += applyTextWithNewlines(token.Text)
+				builder.WriteString(applyTextWithNewlines(token.Text))
 			}
 		}
 	}
 
+	result := builder.String()
 	for stylePrefix != "" && strings.HasSuffix(result, stylePrefix) {
 		result = result[:len(result)-len(stylePrefix)]
 	}

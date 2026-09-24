@@ -340,6 +340,15 @@ and a 121 ms frame after a transcript rebuild.
   this caused (editor submit, model selector, terminal↔screen scroll, stdin
   buffer exit). A re-entrancy/lock-order audit is worth re-running after any
   new locking code.
+- **Render cost scales with content.** The loop is one goroutine, so a
+  value-shaped loop on it is a freeze rather than a slowdown. `renderInlineTokens`
+  accumulated a rendered message into a string with `result += ...` while looping
+  once per token, so every append copied the whole accumulation: one 1 MB message
+  allocated 46 GB and took 11.5 s on the loop (100 KB: 113 ms, which is what a
+  captured "render" phase of 126 ms was). Use `strings.Builder` whenever the
+  iteration count scales with the input, and read a GC-dominated CPU profile on
+  the render path as this class — `TestMarkdownRenderScalesWithInputSize` bounds
+  the allocation volume so a regression cannot come back unnoticed.
 - **PTY watchdogs.** `coding/interactive/ptywatch_test.go` drives the real
   binary through the D136–D139 flows (editor submit, model selector,
   fullscreen scroll, exit) inside a pty, then sends `SIGQUIT` and fails when
