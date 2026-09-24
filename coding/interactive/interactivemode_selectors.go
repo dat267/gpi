@@ -159,6 +159,16 @@ type SelectorWiring struct {
 	// FlushCompactionQueue drains queued compaction messages after a navigation
 	// (upstream flushCompactionQueue({willRetry:false})).
 	FlushCompactionQueue func()
+	// ClearStatusIndicator tears the branch-summary indicator down when the
+	// navigation finishes, however it finishes.
+	ClearStatusIndicator func(kind StatusIndicatorKind)
+	// AddChatSpacer separates the chat from the summary indicator the way
+	// upstream's Spacer(1) does.
+	AddChatSpacer func()
+	// EditorEscapeHandler/SetEditorEscapeHandler save and restore the editor's
+	// escape handler, so escape aborts a running branch summary.
+	EditorEscapeHandler    func() func()
+	SetEditorEscapeHandler func(handler func())
 }
 
 func (w *SelectorWiring) showStatus(message string) {
@@ -432,8 +442,19 @@ func (w *SelectorWiring) handleTreeSelection(ctx context.Context, done func(), e
 	}
 
 	showingSummaryIndicator := false
+	restoreEscapeHandler := func() {}
 	if wantsSummary {
-		w.Session.AbortBranchSummary()
+		// Escape aborts the summary while it runs, and a spacer plus the indicator
+		// say so; all of it is torn down below however the navigation ends
+		// (upstream interactive-mode.ts, handleTreeSelection's try/finally).
+		if w.EditorEscapeHandler != nil && w.SetEditorEscapeHandler != nil {
+			previous := w.EditorEscapeHandler()
+			w.SetEditorEscapeHandler(func() { w.Session.AbortBranchSummary() })
+			restoreEscapeHandler = func() { w.SetEditorEscapeHandler(previous) }
+		}
+		if w.AddChatSpacer != nil {
+			w.AddChatSpacer()
+		}
 		if w.ShowStatusIndicator != nil {
 			w.ShowStatusIndicator(StatusBranchSummary)
 		}
@@ -442,7 +463,12 @@ func (w *SelectorWiring) handleTreeSelection(ctx context.Context, done func(), e
 			w.Slot.UI.RequestRender(false)
 		}
 	}
-	_ = showingSummaryIndicator
+	defer func() {
+		if showingSummaryIndicator && w.ClearStatusIndicator != nil {
+			w.ClearStatusIndicator(StatusBranchSummary)
+		}
+		restoreEscapeHandler()
+	}()
 
 	result, err := w.Session.NavigateTree(ctx, entryID, coding.NavigateTreeOptions{
 		Summarize: wantsSummary, CustomInstructions: customInstructions,
@@ -507,7 +533,21 @@ func newSelectorWiring(app *App) *SelectorWiring {
 		ShowError:               func(message string) { app.showError(message) },
 		UpdateEditorBorderColor: func() { app.updateEditorBorderColor() },
 		TerminalRows:            func() int { return app.UI.GetTerminal().Rows() },
-		ShowStatusIndicator:     func(kind StatusIndicatorKind) {},
+		ShowStatusIndicator: func(kind StatusIndicatorKind) {
+			// The tree navigation is the only caller: it summarizes a branch and
+			// reports that through the branch-summary indicator.
+			if kind == StatusBranchSummary {
+				app.UIState.ShowStatusIndicator(NewBranchSummaryStatusIndicator(app.UI))
+			}
+		},
+		ClearStatusIndicator: func(kind StatusIndicatorKind) {
+			app.UIState.ClearStatusIndicator(kind, true)
+		},
+		AddChatSpacer: func() { app.Chat.AddChild(tui.NewSpacer(1)) },
+		EditorEscapeHandler: func() func() {
+			return app.DefaultEditor.OnEscape
+		},
+		SetEditorEscapeHandler: func(handler func()) { app.DefaultEditor.OnEscape = handler },
 		RestoreQueuedMessagesToEditor: func() {
 			text := app.DefaultEditor.GetText()
 			app.Queue.RestoreQueuedMessagesToEditor(true, text, text != "")
