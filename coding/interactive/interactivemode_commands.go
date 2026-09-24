@@ -399,7 +399,40 @@ func jsonQuote(value string) string {
 }
 
 // HandleSessionCommand renders the session info panel.
+//
+// The panel's numbers come from whole-session scans, and on a large session the
+// cold scan is hundreds of milliseconds of JSON work (0.87s on a 19k-entry
+// session). Upstream computes the panel inline, which here meant the UI loop
+// could not render or route input until it finished. So the text is built off
+// the loop and posted back to it: dispatch returns immediately and the panel
+// lands on the next pump (D159). What it reads is session state behind mutexes
+// (SettingsManager, SessionManager, AgentState, Projection), never the
+// component tree.
 func (w *CommandWiring) HandleSessionCommand(now int64) {
+	if w.Chat == nil || w.UI == nil {
+		// No loop to post to (headless wiring): compute inline, as upstream does.
+		w.addSessionInfoPanel(w.SessionInfoPanel(now))
+		return
+	}
+	go func() {
+		text := w.SessionInfoPanel(now)
+		w.UI.Post(func() { w.addSessionInfoPanel(text) })
+	}()
+}
+
+// addSessionInfoPanel appends a formatted panel to the chat. Runs on the UI loop.
+func (w *CommandWiring) addSessionInfoPanel(text string) {
+	if w.Chat == nil {
+		return
+	}
+	w.Chat.AddChild(tui.NewSpacer(1))
+	w.Chat.AddChild(tui.NewText(text, 1, 0, nil))
+	w.requestRender()
+}
+
+// SessionInfoPanel formats the session info panel. It only reads mutex-guarded
+// session state, so it is safe to run off the UI loop.
+func (w *CommandWiring) SessionInfoPanel(now int64) string {
 	theme := ActiveTheme()
 	stats := w.Session.GetSessionStats()
 	sessionName := w.SessionInfo.GetSessionName()
@@ -482,9 +515,7 @@ func (w *CommandWiring) HandleSessionCommand(now int64) {
 		}
 	}
 
-	w.Chat.AddChild(tui.NewSpacer(1))
-	w.Chat.AddChild(tui.NewText(info.String(), 1, 0, nil))
-	w.requestRender()
+	return info.String()
 }
 
 // HandleHotkeysCommand renders the keyboard-shortcut table.

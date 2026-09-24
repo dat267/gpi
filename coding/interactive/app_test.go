@@ -30,12 +30,14 @@ func TestAppComposition(t *testing.T) {
 		t.Fatal("lifecycle not marked initialized")
 	}
 
-	// A slash command routes through the submit handler into the chat.
+	// A slash command routes through the submit handler into the chat. The
+	// session panel is built off the loop and posted back to it (D159), so the
+	// test plays the loop until it lands.
 	app.Submit.HandleSubmit(context.Background(), "/session")
-	rendered := renderAppChat(app)
-	if !strings.Contains(rendered, "Session") {
-		t.Fatalf("chat = %q", rendered)
-	}
+	waitForConditionWithin(t, func() bool {
+		app.UI.RenderNow(true)
+		return strings.Contains(renderAppChat(app), "Session")
+	}, 5*time.Second)
 
 	// The key wiring installs the editor escape/action handlers.
 	app.Key.SetupKeyHandlers(func() int64 { return time.Now().UnixMilli() })

@@ -611,6 +611,16 @@ func (m *SessionManager) branchPointersLocked(fromID string) []*SessionEntry {
 	return path
 }
 
+// SetMessageDecodeForTest replaces the entry-to-messages step of the session's
+// message memo (test seam, like WaitForPendingLoads). Tests use it to make a
+// scan's decode observable, e.g. to prove the scan is not running on the UI
+// loop.
+func (m *SessionManager) SetMessageDecodeForTest(decode func(*SessionEntry) []ai.Message) {
+	m.messages.mu.Lock()
+	m.messages.decode = decode
+	m.messages.mu.Unlock()
+}
+
 // BuildContextEntriesForLeaf builds the active compaction-aware entry list
 // from the current leaf.
 func (m *SessionManager) BuildContextEntriesForLeaf() []SessionEntry {

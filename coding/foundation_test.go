@@ -481,3 +481,124 @@ func TestTempFileID(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+// The manager's cache-waste accounting is folded from the scan state it keeps as
+// entries arrive, not re-walked. That walk ran on the transcript rebuild's UI
+// loop (startup, /reload, /tree, a session switch, compaction end) and cost 563ms
+// cold on a 19k-entry session. The fold must agree with the full scan exactly,
+// or the notices and the /session panel would report different numbers than the
+// live notice path.
+func TestManagerCacheWasteMatchesTheFullScan(t *testing.T) {
+	manager := NewSessionManager(t.TempDir(), &SessionManagerOptions{Persist: boolPtr(false)})
+	manager.AppendMessage(&ai.AssistantMessage{
+		Provider: "anthropic", Model: "sonnet", Timestamp: 1000,
+		Usage:      ai.Usage{Input: 1000, CacheRead: 0, CacheWrite: 10000, TotalTokens: 11000, Cost: ai.UsageCost{CacheRead: 0.001}},
+		StopReason: ai.StopStop,
+	})
+	manager.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "hello"}})
+	manager.AppendMessage(&ai.AssistantMessage{
+		Provider: "anthropic", Model: "sonnet", Timestamp: 2000,
+		Usage:      ai.Usage{Input: 10000, TotalTokens: 20000, Cost: ai.UsageCost{Input: 0.01}},
+		StopReason: ai.StopStop,
+	})
+	// A compaction resets the context, then a model switch counts again.
+	manager.AppendCompaction("summary", "", 100, nil, false, nil)
+	manager.AppendMessage(&ai.AssistantMessage{
+		Provider: "anthropic", Model: "sonnet", Timestamp: 3000,
+		Usage:      ai.Usage{Input: 10000, CacheRead: 0, CacheWrite: 12000, TotalTokens: 22000, Cost: ai.UsageCost{CacheRead: 0.002}},
+		StopReason: ai.StopStop,
+	})
+	manager.AppendMessage(&ai.AssistantMessage{
+		Provider: "anthropic", Model: "opus", Timestamp: 4000,
+		Usage:      ai.Usage{Input: 12000, TotalTokens: 24000, Cost: ai.UsageCost{Input: 0.02}},
+		StopReason: ai.StopStop,
+	})
+
+	prices := fixedPrices{"anthropic/sonnet": 0.1, "anthropic/opus": 0.2}
+	entries := manager.GetEntries()
+
+	wantTotals := ComputeCacheWaste(entries, prices)
+	gotTotals := manager.ComputeCacheWaste(prices)
+	if gotTotals != wantTotals {
+		t.Errorf("totals = %+v, want %+v", gotTotals, wantTotals)
+	}
+	if gotTotals.MissCount == 0 {
+		t.Fatal("the fixture must produce misses")
+	}
+
+	wantMisses := CollectCacheMisses(entries, prices)
+	gotMisses := manager.CollectCacheMisses(prices)
+	if len(gotMisses) != len(wantMisses) {
+		t.Fatalf("misses = %+v, want %+v", gotMisses, wantMisses)
+	}
+	for i := range wantMisses {
+		if gotMisses[i].EntryIndex != wantMisses[i].EntryIndex || gotMisses[i].Miss != wantMisses[i].Miss {
+			t.Errorf("miss %d = %+v, want %+v", i, gotMisses[i], wantMisses[i])
+		}
+	}
+}
+
+// The transcript keys its notices by the memoized message pointer, so the folded
+// misses must carry that shared message, not a fresh decode.
+func TestManagerCacheMissesCarryTheMemoizedMessage(t *testing.T) {
+	manager := NewSessionManager(t.TempDir(), &SessionManagerOptions{Persist: boolPtr(false)})
+	manager.AppendMessage(&ai.AssistantMessage{
+		Provider: "anthropic", Model: "sonnet", Timestamp: 1000,
+		Usage:      ai.Usage{Input: 1000, CacheWrite: 10000, TotalTokens: 11000, Cost: ai.UsageCost{CacheRead: 0.001}},
+		StopReason: ai.StopStop,
+	})
+	manager.AppendMessage(&ai.AssistantMessage{
+		Provider: "anthropic", Model: "sonnet", Timestamp: 2000,
+		Usage:      ai.Usage{Input: 10000, TotalTokens: 20000, Cost: ai.UsageCost{Input: 0.01}},
+		StopReason: ai.StopStop,
+	})
+
+	misses := manager.CollectCacheMisses(nil)
+	if len(misses) != 1 {
+		t.Fatalf("misses = %+v", misses)
+	}
+	entries := manager.GetEntries()
+	projected, _ := projectedMessages(&entries[misses[0].EntryIndex], &manager.messages)[0].(*ai.AssistantMessage)
+	if projected == nil || misses[0].Message != projected {
+		t.Errorf("the miss carries %p, want the memoized %p", misses[0].Message, projected)
+	}
+}
+
+// The transcript rebuild calls this on the UI loop, so the folded scan must not
+// decode the session: only the misses it counts may touch the message memo.
+func TestManagerCacheMissScanDoesNotDecodeTheSession(t *testing.T) {
+	manager := NewSessionManager(t.TempDir(), &SessionManagerOptions{Persist: boolPtr(false)})
+	// A cache hit, then a re-billed turn: one miss out of many entries.
+	manager.AppendMessage(&ai.AssistantMessage{
+		Provider: "anthropic", Model: "sonnet", Timestamp: 1000,
+		Usage:      ai.Usage{Input: 1000, CacheWrite: 10000, TotalTokens: 11000, Cost: ai.UsageCost{CacheRead: 0.001}},
+		StopReason: ai.StopStop,
+	})
+	for i := 0; i < 20; i++ {
+		manager.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "hello"}})
+		manager.AppendMessage(&ai.AssistantMessage{
+			Provider: "anthropic", Model: "sonnet", Timestamp: int64(2000 + i),
+			Usage:      ai.Usage{Input: 400, CacheRead: 12000, TotalTokens: 12400, Cost: ai.UsageCost{CacheRead: 0.002}},
+			StopReason: ai.StopStop,
+		})
+	}
+	manager.AppendMessage(&ai.AssistantMessage{
+		Provider: "anthropic", Model: "sonnet", Timestamp: 9999,
+		Usage:      ai.Usage{Input: 12000, TotalTokens: 24000, Cost: ai.UsageCost{Input: 0.02}},
+		StopReason: ai.StopStop,
+	})
+
+	decodes := 0
+	manager.SetMessageDecodeForTest(func(entry *SessionEntry) []ai.Message {
+		decodes++
+		return SessionEntryToContextMessages(entry)
+	})
+
+	misses := manager.CollectCacheMisses(nil)
+	if len(misses) != 1 {
+		t.Fatalf("misses = %+v", misses)
+	}
+	if decodes > len(misses) {
+		t.Errorf("the scan decoded %d entries to report %d misses", decodes, len(misses))
+	}
+}

@@ -4,7 +4,7 @@ Numbered **D-rows**: every place this port knowingly differs from upstream —
 usually because upstream relies on a JS or Node behaviour that has no direct Go
 equivalent, or because a defect upstream is fixed here. D-row numbers live in
 code comments at the point of divergence; this file is the log. The range is
-**D1–D158**.
+**D1–D159**.
 
 - D41 — extension mechanics are out of scope (extension discovery in the
   resource loader, the extension runner, package/tools managers); seams are
@@ -312,6 +312,42 @@ code comments at the point of divergence; this file is the log. The range is
 - D137 — model-selector callbacks run outside the state mutex.
 - D138 — terminal input is delivered outside the terminal lock.
 - D139 — stdin-buffer callbacks are emitted outside the buffer lock.
+- D159 — **the port's session-wide accounting is non-blocking**. Upstream
+  computes the `/session` panel (`handleSessionCommand`: the session statistics,
+  the cache-waste totals and the usage cost breakdown) inline on its UI loop, and
+  re-walks `sessionManager.getEntries()` for the transcript rebuild's cache-miss
+  notices. Both are fine upstream because entries hold parsed objects; this port
+  stores raw JSON, so each scan re-parsed the session, and the UI loop is one
+  goroutine ("dispatch, then render and route input"), which turned a panel into
+  a freeze. Measured on a 19k-entry, 45 MB session: typing immediately after
+  `/session` became visible only after 0.857s, and the rebuild's cache-miss scan
+  cost 563ms cold — on `/reload`, a session switch, `/tree`, compaction end and
+  startup.
+  Two changes:
+  - **the panel is built off the UI loop and posted back to it.** Dispatch
+    returns at once, and the finished panel is appended on the next pump. What
+    the formatting reads is mutex-guarded session state (SettingsManager,
+    SessionManager, the agent's copied state, the projection), never the
+    component tree; with no UI to post to (headless wiring) it still computes
+    inline, as upstream does. The same session now echoes the keystroke after
+    0.038s and the panel appears 0.69s later in the background.
+  - **the cache-waste accounting is folded, not re-walked.** The manager already
+    read every entry's `role`/`usage`/`provider`/`model`/`timestamp` as entries
+    arrived, to seed the running scan state that makes a live cache-miss notice
+    O(1). That same pass now records the candidates, and
+    `CollectCacheMisses`/`ComputeCacheWaste` account them with
+    `detectCacheMissFor` — the identical helper, so the folded numbers cannot
+    drift from the full scan — decoding a message only for the misses that are
+    actually counted (the transcript keys its notices by the memoized message
+    pointer). The rebuild's scan went from 563ms to 30ms on that session, and the
+    full scan is still there for callers without a session.
+  Known gap this left in place: upstream's breakdown also buckets
+  `type === "usage"` entries (cache-warming usage) as `provider/model`, and the
+  port's breakdown has no such case, so those tokens are unattributed.
+  Remaining cost: the panel's own background work is still ~0.63s on that
+  session (the statistics' message decode and the usage breakdown still walk the
+  session), which no longer blocks anything but delays the panel. Folding the
+  breakdown the same way would bring it to tens of milliseconds.
 - D158 — **the session picker has a stacked layout for narrow terminals**.
   Upstream renders the resume selector — `/resume` in the app and `pier -r`
   (`components/session-selector.ts`) — as a single-line header (title on the

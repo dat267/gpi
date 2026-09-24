@@ -158,30 +158,70 @@ type CacheMissEntry struct {
 // load seeds it.
 type cacheScanState struct {
 	prev *previousRequest
+
+	// candidates are the entries the scan may count against, recorded in file
+	// order as the state walks the session. That walk already happened for prev,
+	// so the accounting CollectCacheMisses and ComputeCacheWaste need is a fold
+	// over this list rather than a second pass over the session — 563ms cold on
+	// a 19k-entry session, on the transcript rebuild's UI-loop path (startup,
+	// /reload, /tree, a session switch, compaction end).
+	candidates []cacheCandidate
+	// entryIndex counts every entry consumed, so a candidate reports the index
+	// the full scan would have (CacheMissEntry.EntryIndex).
+	entryIndex int
 }
 
-// consume advances the state by one entry. It mirrors the body of
-// scanCacheEntries, which still accounts the misses for the rebuild path.
+// cacheCandidate is one entry the scan can count against, as the scan sees it.
+type cacheCandidate struct {
+	// reset marks a compaction or branch summary: the context legitimately
+	// changed, so the scan's prev restarts here.
+	reset bool
+	// prev is the scan state before this entry, and assistant the message as the
+	// scan reads it (usage, provider, model, timestamp — the fields
+	// detectCacheMissFor uses). Detection runs later, when the price source is
+	// available, through that same helper, so this cannot drift from the scan.
+	prev      *previousRequest
+	assistant *ai.AssistantMessage
+	// entryID resolves the entry later, for the memoized message the transcript
+	// keys its notices by.
+	entryID string
+	index   int
+}
+
+// consume advances the state by one entry.
 func (s *cacheScanState) consume(entry *SessionEntry) {
+	index := s.entryIndex
+	s.entryIndex++
 	if entry.Type == "compaction" || entry.Type == "branch_summary" {
 		// The context legitimately changed; the next turn's prompt is new
 		// content, not re-billed content. Model switches are NOT exempt: they
 		// re-bill the full prompt and should be counted.
 		s.prev = nil
+		s.candidates = append(s.candidates, cacheCandidate{reset: true})
 		return
 	}
 	if entry.Type != "message" {
 		return
 	}
-	if next := scanAssistantRequest(entry.Message, s.prev != nil && s.prev.reportedCache); next != nil {
-		s.prev = next
+	assistant := scanAssistantFacts(entry.Message)
+	next := newPreviousRequest(assistant.Usage, assistant.Provider, assistant.Model, assistant.Timestamp,
+		s.prev != nil && s.prev.reportedCache)
+	if next == nil {
+		return
 	}
+	// Only the fields detection reads are kept: the content stays in the entry.
+	s.candidates = append(s.candidates, cacheCandidate{
+		prev:      s.prev,
+		assistant: &assistant,
+		entryID:   entry.ID,
+		index:     index,
+	})
+	s.prev = next
 }
 
-// scanAssistantRequest builds the scan state an assistant message contributes,
-// reading its role, usage, model and timestamp only. Decoding the whole message
-// (thinking, tool arguments) made seeding a 45 MB session's state cost 500 ms.
-func scanAssistantRequest(raw json.RawMessage, reportedCache bool) *previousRequest {
+// scanAssistantFacts reads the fields the cache scan compares: usage, provider,
+// model and timestamp.
+func scanAssistantFacts(raw json.RawMessage) ai.AssistantMessage {
 	var assistant struct {
 		Role      string   `json:"role"`
 		Provider  string   `json:"provider"`
@@ -190,8 +230,21 @@ func scanAssistantRequest(raw json.RawMessage, reportedCache bool) *previousRequ
 		Usage     ai.Usage `json:"usage"`
 	}
 	if json.Unmarshal(raw, &assistant) != nil || assistant.Role != "assistant" {
-		return nil
+		return ai.AssistantMessage{}
 	}
+	return ai.AssistantMessage{
+		Provider:  ai.ProviderId(assistant.Provider),
+		Model:     assistant.Model,
+		Timestamp: assistant.Timestamp,
+		Usage:     assistant.Usage,
+	}
+}
+
+// scanAssistantRequest builds the scan state an assistant message contributes.
+// It shares the facts decode with consume, so the running prev and the recorded
+// candidates cannot disagree.
+func scanAssistantRequest(raw json.RawMessage, reportedCache bool) *previousRequest {
+	assistant := scanAssistantFacts(raw)
 	if assistant.Usage == (ai.Usage{}) && assistant.Provider == "" && assistant.Model == "" {
 		return nil
 	}
@@ -199,7 +252,11 @@ func scanAssistantRequest(raw json.RawMessage, reportedCache bool) *previousRequ
 }
 
 // reset drops the state, for a fresh session or a load that reseeds it.
-func (s *cacheScanState) reset() { s.prev = nil }
+func (s *cacheScanState) reset() {
+	s.prev = nil
+	s.candidates = nil
+	s.entryIndex = 0
+}
 
 // CacheMissFor computes the cache miss for a message that is not yet in the
 // session (message_end fires before persistence), from the running scan state.
@@ -264,15 +321,65 @@ func CollectCacheMisses(entries []SessionEntry, models ModelPriceSource) []Cache
 	return scanCacheEntries(entries, models, nil).misses
 }
 
-// ComputeCacheWaste is ComputeCacheWaste over this session, reading through the
-// message memo so a repeat scan decodes nothing.
+// ComputeCacheWaste is ComputeCacheWaste over this session, accounted from the
+// scan state the manager keeps as entries arrive instead of walking (and
+// decoding) the session again.
 func (m *SessionManager) ComputeCacheWaste(models ModelPriceSource) CacheWasteTotals {
-	return scanCacheEntries(m.GetEntries(), models, &m.messages).totals
+	return m.cacheScanResult(models).totals
 }
 
 // CollectCacheMisses is CollectCacheMisses over this session.
 func (m *SessionManager) CollectCacheMisses(models ModelPriceSource) []CacheMissEntry {
-	return scanCacheEntries(m.GetEntries(), models, &m.messages).misses
+	return m.cacheScanResult(models).misses
+}
+
+// cacheScanResult accounts the recorded candidates, with the price source the
+// caller has.
+func (m *SessionManager) cacheScanResult(models ModelPriceSource) cacheScanResult {
+	m.mu.Lock()
+	candidates := append([]cacheCandidate{}, m.cacheScan.candidates...)
+	m.mu.Unlock()
+
+	result := cacheScanResult{}
+	for _, candidate := range candidates {
+		if candidate.reset {
+			result.prev = nil
+			continue
+		}
+		if candidate.assistant == nil {
+			continue
+		}
+		if miss, ok := detectCacheMissFor(candidate.prev, candidate.assistant, models); ok {
+			result.totals.MissedTokens += miss.MissedTokens
+			result.totals.MissedCost += miss.MissedCost
+			result.totals.MissCount++
+			// The transcript keys its notices by the memoized message pointer, so
+			// decode that one — only for the misses that were actually counted.
+			result.misses = append(result.misses, CacheMissEntry{
+				EntryIndex: candidate.index,
+				Message:    m.memoizedAssistant(candidate.entryID),
+				Miss:       miss,
+			})
+		}
+	}
+	return result
+}
+
+// memoizedAssistant returns an entry's assistant message through the session's
+// message memo (the shared read-only message), or nil.
+func (m *SessionManager) memoizedAssistant(entryID string) *ai.AssistantMessage {
+	m.mu.Lock()
+	entry := m.byID[entryID]
+	m.mu.Unlock()
+	if entry == nil {
+		return nil
+	}
+	messages := projectedMessages(entry, &m.messages)
+	if len(messages) == 0 {
+		return nil
+	}
+	assistant, _ := messages[0].(*ai.AssistantMessage)
+	return assistant
 }
 
 // assistantMessageOf returns the entry's assistant message, decoded through the

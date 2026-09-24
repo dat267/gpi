@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/dat267/pier/ai"
 	"github.com/dat267/pier/coding"
@@ -349,4 +351,63 @@ func TestCommandStop(t *testing.T) {
 	if strings.Join(calls, ",") != want {
 		t.Fatalf("calls = %v", calls)
 	}
+}
+
+// /session computes its numbers from whole-session scans. On a 19k-entry
+// session the cold scan is 0.87s of JSON work, and computing it inline froze
+// rendering and input for that long (upstream computes it inline; this port does
+// not, D159). The scans are too slow for dispatch to wait on, so the panel is
+// built off the UI loop and posted back to it.
+func TestSessionCommandRunsTheScansOffTheUILoop(t *testing.T) {
+	wiring, _, _ := newCommandTestWiring(t)
+	screen := tui.NewMainScreen(&fakeRendererTerminal{width: 80, height: 24}, false, "")
+	screen.DisableAutoRender()
+	wiring.UI = screen
+	for i := 0; i < 3; i++ {
+		wiring.SessionInfo.AppendMessage(ai.Message(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "hello"}}))
+	}
+
+	// The scan cannot finish: its first decode blocks until released.
+	started := make(chan struct{})
+	unblock := make(chan struct{})
+	var once sync.Once
+	wiring.SessionInfo.SetMessageDecodeForTest(func(entry *coding.SessionEntry) []ai.Message {
+		once.Do(func() { close(started) })
+		<-unblock
+		return coding.SessionEntryToContextMessages(entry)
+	})
+
+	panelOnScreen := func() bool {
+		screen.RenderNow(true)
+		return strings.Contains(coding.StripAnsi(strings.Join(wiring.Chat.Render(120), "\n")), "Session Info")
+	}
+
+	dispatched := make(chan struct{})
+	go func() {
+		defer close(dispatched)
+		wiring.HandleSessionCommand(1000)
+	}()
+	select {
+	case <-dispatched:
+	case <-time.After(5 * time.Second):
+		close(unblock)
+		t.Fatal("HandleSessionCommand never returned: the session scans are running on the UI loop")
+	}
+
+	// The scan is in flight over there, and nothing has been rendered yet.
+	waitForCondition(t, func() bool {
+		select {
+		case <-started:
+			return true
+		default:
+			return false
+		}
+	})
+	if panelOnScreen() {
+		t.Fatal("the panel appeared before the scans finished")
+	}
+
+	// Release the decode and play the loop: the posted panel lands.
+	close(unblock)
+	waitForCondition(t, panelOnScreen)
 }
