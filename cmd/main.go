@@ -114,13 +114,19 @@ func run(appName string, args *coding.Args) error {
 	}
 	agentDir := coding.GetAgentDir()
 
+	// Bootstrap settings: global settings only, because whether the project's may
+	// be read is exactly what is not decided yet (upstream's
+	// `SettingsManager.create(cwd, agentDir, { projectTrusted: false })`). The
+	// theme and the -r picker run off this manager.
+	projectUntrusted := false
 	settings := coding.NewSettingsManagerFromFiles(cwd, agentDir, coding.SettingsManagerCreateOptions{
-		// --approve / --no-approve settle project trust for this run without
-		// consulting or updating the trust store (upstream's
-		// projectTrustOverride, which resolveProjectTrusted honours before any
-		// other rule).
-		ProjectTrusted: args.ProjectTrustOverride,
+		ProjectTrusted: &projectUntrusted,
 	})
+	// The global settings' proxy seeds the HTTP environment before anything
+	// makes a request (upstream applyHttpProxySettings on the bootstrap manager).
+	if global := settings.GetGlobalSettings(); global != nil && global.HTTPProxy != nil {
+		coding.ApplyHTTPProxySettings(*global.HTTPProxy)
+	}
 
 	// Theme: --use-theme overrides the configured theme for this run only, and
 	// has to be applied before any TUI because the -r picker runs before the app.
@@ -209,6 +215,29 @@ func run(appName string, args *coding.Args) error {
 	// runtime exists, before the interactive mode).
 	if listingModels {
 		return listModels(runtime, settings, args, ctx)
+	}
+
+	// Project trust, now that the picker and the metadata commands are done and
+	// before any project resource is read: the override, the store's decision,
+	// the defaultProjectTrust setting, then the startup prompt. The answer builds
+	// the runtime settings manager, so an untrusted project's .pi settings,
+	// skills, prompts, themes and prompt files stay unread.
+	trusted, trustErr := resolveStartupProjectTrust(startupTrustOptions{
+		cwd:       cwd,
+		agentDir:  agentDir,
+		override:  args.ProjectTrustOverride,
+		bootstrap: settings,
+		hasUI:     true,
+		prompt:    startupTrustPrompt(settings),
+	})
+	if trustErr != nil {
+		return trustErr
+	}
+	settings = coding.NewSettingsManagerFromFiles(cwd, agentDir, coding.SettingsManagerCreateOptions{
+		ProjectTrusted: &trusted,
+	})
+	if args.UseTheme != nil {
+		settings.ApplyOverrides(&coding.Settings{Theme: args.UseTheme})
 	}
 
 	// Resolve the CLI model/thinking overrides.

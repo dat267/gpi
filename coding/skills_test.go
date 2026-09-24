@@ -91,3 +91,35 @@ func TestLoadSkillsResolvesTildePath(t *testing.T) {
 		t.Fatalf("scope = %q, want temporary", result.Skills[0].SourceInfo.Scope)
 	}
 }
+
+// The project's .pi/skills is read only when the project is trusted
+// (upstream's resource loader gates project paths on isProjectTrusted; the port
+// threads the same flag through LoadSkills). Without this the trust decision at
+// startup would decide nothing, and an untrusted checkout's skills would reach
+// the system prompt.
+func TestLoadSkillsSkipsUntrustedProject(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	agentDir := filepath.Join(home, ".pi", "agent")
+
+	cwd := t.TempDir()
+	writeSkill(t, filepath.Join(cwd, ConfigDirName, "skills"), "project-skill", "project")
+
+	untrusted := LoadSkills(LoadSkillsOptions{Cwd: cwd, AgentDir: agentDir, IncludeDefaults: true}, false)
+	for _, skill := range untrusted.Skills {
+		if skill.Name == "project-skill" {
+			t.Fatalf("an untrusted project's skill was loaded: %+v", untrusted.Skills)
+		}
+	}
+
+	trusted := LoadSkills(LoadSkillsOptions{Cwd: cwd, AgentDir: agentDir, IncludeDefaults: true}, true)
+	found := false
+	for _, skill := range trusted.Skills {
+		if skill.Name == "project-skill" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a trusted project's skill was not loaded: %+v", trusted.Skills)
+	}
+}
