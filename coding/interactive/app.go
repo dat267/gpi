@@ -529,10 +529,10 @@ func (a *App) Init(ctx context.Context) {
 	a.Autocomplete.SetupAutocompleteProvider()
 }
 
-// applySettingsDependentUI re-applies the settings-derived UI state (upstream
-// applyRuntimeSettings minus the terminal-capability and HTTP-dispatcher parts,
-// which have no port counterpart). It runs after /reload and after a session
-// switch re-points the settings manager at another project.
+// applySettingsDependentUI re-applies the settings-derived state (upstream
+// applyRuntimeSettings, minus the terminal-capability overrides that have no port
+// counterpart). It runs after /reload and after a session switch re-points the
+// settings manager at another project.
 func (a *App) applySettingsDependentUI() {
 	hidden := a.Settings.GetHideThinkingBlock()
 	pad := a.Settings.GetOutputPad()
@@ -623,6 +623,11 @@ func (a *App) LifecycleCheckShutdown() { a.Lifecycle.CheckShutdownRequested() }
 // receives RAW stdin chunks; the loop reassembles them through FeedInput on
 // the loop goroutine.
 func (a *App) newLoopTui(options InteractiveTuiOptions) tui.TUI {
+	// The global debug key runs the debug command (upstream sets
+	// `ui.onDebug = () => this.handleDebugCommand()` after creating the renderer).
+	if options.OnDebug == nil {
+		options.OnDebug = a.runDebugCommand
+	}
 	screen := CreateInteractiveTui(options)
 	if screen == nil {
 		return screen
@@ -648,6 +653,16 @@ func (a *App) newLoopTui(options InteractiveTuiOptions) tui.TUI {
 		},
 	)
 	return screen
+}
+
+// runDebugCommand writes the debug log, which is what /debug does and what the
+// renderer's global debug key runs (upstream wires ui.onDebug to
+// handleDebugCommand).
+func (a *App) runDebugCommand() {
+	if a.Commands == nil {
+		return
+	}
+	a.Commands.HandleDebugCommand(time.Now().UTC().Format("2006-01-02T15:04:05.000Z"))
 }
 
 // PostTerminalInput delivers a terminal sequence to the loop (test seam).

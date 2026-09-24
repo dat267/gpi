@@ -50,9 +50,6 @@ type LifecycleOptions struct {
 
 	// CreateTui builds a renderer for a mode (test seam).
 	CreateTui func(mode string) tui.TUI
-	// OnDebug is preserved across renderer swaps.
-	OnDebug func()
-
 	// Exit terminates the process (test seam).
 	Exit func(code int)
 	// WriteOut writes to stdout (resume command).

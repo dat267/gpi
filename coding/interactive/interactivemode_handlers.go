@@ -39,7 +39,6 @@ type KeyWiring struct {
 	OnThinkingCycle      func()
 	OnModelCycleForward  func()
 	OnModelCycleBackward func()
-	OnDebug              func()
 	OnModelSelect        func()
 	OnToolsExpand        func()
 	OnThinkingToggle     func()
@@ -657,10 +656,8 @@ func newSubmitWiring(app *App) *SubmitWiring {
 				})
 				return nil
 			},
-			HandleReloadCommand: func() error { app.Commands.HandleReloadCommand(); return nil },
-			HandleDebugCommand: func() {
-				app.Commands.HandleDebugCommand(time.Now().UTC().Format("2006-01-02T15:04:05.000Z"))
-			},
+			HandleReloadCommand:  func() error { app.Commands.HandleReloadCommand(); return nil },
+			HandleDebugCommand:   app.runDebugCommand,
 			HandleArminSaysHi:    func() { app.Commands.HandleArminSaysHi(app.UI, time.Now().UnixNano()) },
 			HandleDementedDelves: app.Commands.HandleDementedDelves,
 			ShowSessionSelector:  app.Sessions.ShowSessionSelector,

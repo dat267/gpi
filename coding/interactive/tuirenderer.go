@@ -20,7 +20,15 @@ type InteractiveTuiOptions struct {
 	Terminal               tui.Terminal
 	OnRightClickPaste      func()
 	FullscreenCopyOnSelect *bool
+	// OnDebug runs the debug command. Upstream's renderer matches the global
+	// debug key and calls ui.onDebug, which interactive-mode.ts points at
+	// handleDebugCommand, so shift+ctrl+d and /debug do the same thing.
+	OnDebug func()
 }
+
+// debugKeyPattern is the global debug key upstream matches in its renderer
+// ("shift+ctrl+d", tui.ts).
+const debugKeyPattern tui.KeyId = "shift+ctrl+d"
 
 // CopySelectionFn copies text to the clipboard, returning (ok, message).
 type CopySelectionFn func(text string) (bool, string)
@@ -80,7 +88,7 @@ func createInteractiveTui(options InteractiveTuiOptions) tui.TUI {
 			return theme.Bg("searchMatchBg", theme.Fg("searchMatchText", text))
 		}
 		copyOnSelect := options.FullscreenCopyOnSelect
-		return tui.NewAltScreen(terminal, options.ShowHardwareCursor, options.LogDirectory, tui.AltScreenOptions{
+		screen := tui.NewAltScreen(terminal, options.ShowHardwareCursor, options.LogDirectory, tui.AltScreenOptions{
 			SearchMatchStyle: func(text string) string {
 				return ActiveTheme().Underline(styleSearchMatch(text))
 			},
@@ -115,8 +123,24 @@ func createInteractiveTui(options InteractiveTuiOptions) tui.TUI {
 				return true, ok, message
 			},
 		})
+		installDebugKey(screen.Renderer, options.OnDebug)
+		return screen
 	}
-	return tui.NewMainScreen(terminal, options.ShowHardwareCursor, options.LogDirectory)
+	screen := tui.NewMainScreen(terminal, options.ShowHardwareCursor, options.LogDirectory)
+	installDebugKey(screen.Renderer, options.OnDebug)
+	return screen
+}
+
+// installDebugKey gives a renderer the global debug key (upstream's
+// `matchesKey(data, "shift+ctrl+d") && this.onDebug` in tui.ts) and the callback
+// that key runs. Both screens embed the renderer type that carries them, and the
+// reference wrapper hides them, so this happens on the concrete screen.
+func installDebugKey(renderer *tui.Renderer, onDebug func()) {
+	if renderer == nil {
+		return
+	}
+	renderer.MatchesDebugKey = func(data string) bool { return tui.MatchesKey(data, debugKeyPattern) }
+	renderer.OnDebug = onDebug
 }
 
 // CreateInteractiveTuiReference returns a stable handle that forwards to the
