@@ -155,17 +155,9 @@ func run(appName string, args *coding.Args) error {
 	installThemeCapabilities()
 	// Custom themes come from the agent's themes directory plus any theme paths
 	// the settings or --theme name. --no-themes drops the discovered set and
-	// keeps the named ones (upstream's noThemes).
-	interactive.SetCustomThemeSources(interactive.CustomThemeSources{
-		Dir:         filepath.Join(agentDir, "themes"),
-		Paths:       themePathsFor(args, settings, cwd),
-		NoDiscovery: args.NoThemes,
-	})
-	themeName := "dark"
-	if setting := settings.GetTheme(); setting != nil && *setting != "" {
-		themeName = *setting
-	}
-	interactive.InitTheme(themeName, false)
+	// keeps the named ones (upstream's noThemes). Project-local themes need the
+	// trust decision, so this happens again once it is made (applyThemeSources).
+	applyThemeSources(args, settings, agentDir, cwd, false)
 
 	// Session manager: resume the newest session or start a fresh one. A metadata
 	// command (--list-models) resolves no session and writes nothing, which is
@@ -262,6 +254,9 @@ func run(appName string, args *coding.Args) error {
 	if args.UseTheme != nil {
 		settings.ApplyOverrides(&coding.Settings{Theme: args.UseTheme})
 	}
+	// Now that the project's trust is known, its themes and its theme setting are
+	// readable (the pre-boot install could read neither).
+	applyThemeSources(args, settings, agentDir, runtimeCwd, trusted)
 
 	// Resolve the CLI model/thinking overrides.
 	var model *ai.Model
@@ -403,6 +398,7 @@ func run(appName string, args *coding.Args) error {
 		InitialMessages:      initialPrompt.Rest,
 		InitialThemeSetting:  args.UseTheme,
 		ProjectTrustOverride: args.ProjectTrustOverride,
+		InitialProjectTrust:  &trusted,
 		// A model restore or resolution fallback is surfaced at startup.
 		ModelFallbackMessage: created.ModelFallbackMessage,
 		// Model-scope warnings ("No models match pattern ...") are shown at
@@ -431,6 +427,28 @@ func run(appName string, args *coding.Args) error {
 	})
 	app.Run(ctx)
 	return nil
+}
+
+// applyThemeSources installs the theme discovery sources and loads the resulting
+// theme. Trust gates the project's own theme directory (<cwd>/.pi/themes, which
+// upstream's resource loader discovers next to the agent's), and the project's
+// theme setting is only readable once the project is trusted, so cmd calls this
+// once before the trust decision for the -r picker and again after it.
+func applyThemeSources(args *coding.Args, settings *coding.SettingsManager, agentDir, cwd string, trusted bool) {
+	paths := themePathsFor(args, settings, cwd)
+	if trusted && !args.NoThemes {
+		paths = append(paths, filepath.Join(cwd, coding.ConfigDirName, "themes"))
+	}
+	interactive.SetCustomThemeSources(interactive.CustomThemeSources{
+		Dir:         filepath.Join(agentDir, "themes"),
+		Paths:       paths,
+		NoDiscovery: args.NoThemes,
+	})
+	themeName := "dark"
+	if setting := settings.GetTheme(); setting != nil && *setting != "" {
+		themeName = *setting
+	}
+	interactive.InitTheme(themeName, false)
 }
 
 // themePathsFor resolves the theme files and directories named by the settings

@@ -173,6 +173,11 @@ func (a *App) rebindProjectSettings(cwd string) error {
 	if cwd == "" || cwd == a.Settings.Cwd() {
 		return nil
 	}
+	key := coding.CanonicalizePath(coding.ResolvePath(cwd, "", coding.PathInputOptions{}))
+	if known, ok := a.projectTrustByCwd[key]; ok {
+		a.applyProjectSettings(cwd, known)
+		return nil
+	}
 	trusted, err := coding.ResolveProjectTrusted(coding.ResolveProjectTrustedOptions{
 		Cwd:                 cwd,
 		TrustStore:          coding.NewProjectTrustStore(a.options.AgentDir),
@@ -186,6 +191,14 @@ func (a *App) rebindProjectSettings(cwd string) error {
 	if err != nil {
 		return err
 	}
+	a.projectTrustByCwd[key] = trusted
+	a.applyProjectSettings(cwd, trusted)
+	return nil
+}
+
+// applyProjectSettings points the settings manager at a project under a decided
+// trust and re-applies what follows from the swap.
+func (a *App) applyProjectSettings(cwd string, trusted bool) {
 	a.Settings.RebindProject(cwd, trusted)
 	// The run's own override is not part of the project scope, so re-apply it
 	// (upstream applies the CLI overrides to the runtime settings manager).
@@ -195,7 +208,6 @@ func (a *App) rebindProjectSettings(cwd string) error {
 	// Settings-derived UI state follows the manager (upstream rebindCurrentSession
 	// calls applyRuntimeSettings).
 	a.applySettingsDependentUI()
-	return nil
 }
 
 // forkAtEntry is the runtime's fork (upstream AgentSessionRuntime.fork), shared

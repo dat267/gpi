@@ -111,3 +111,42 @@ func TestSwitchWithinTheSameCwdKeepsTheTrustDecision(t *testing.T) {
 		t.Fatal("a same-cwd switch re-resolved trust from the store")
 	}
 }
+
+// A project's trust answer is remembered for the run (upstream main.ts's
+// projectTrustByCwd): a project resolved once is not re-read from the store, so
+// switching back and forth cannot change an answer the user already gave — a
+// store the session itself rewrote (say, /trust on another project) included.
+func TestSwitchReusesTheTrustDecisionPerProject(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+
+	first := makeTrustRequiringProject(t, "alpha-theme")
+	firstSession := makePersistedSession(t, first, "first")
+	if _, err := app.SwitchSession(context.Background(), firstSession.GetSessionFile(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if app.Settings.IsProjectTrusted() {
+		t.Fatal("an undecided project must be untrusted")
+	}
+
+	// A decision for that project appears after the fact...
+	if err := coding.NewProjectTrustStore(app.options.AgentDir).Set(first, boolRef(true)); err != nil {
+		t.Fatal(err)
+	}
+	// ...and a switch away and back must not pick it up: the answer is already
+	// remembered for the run.
+	elsewhere := makeTrustRequiringProject(t, "beta-theme")
+	elsewhereSession := makePersistedSession(t, elsewhere, "elsewhere")
+	if _, err := app.SwitchSession(context.Background(), elsewhereSession.GetSessionFile(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.SwitchSession(context.Background(), firstSession.GetSessionFile(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if app.Settings.IsProjectTrusted() {
+		t.Fatal("the remembered answer was re-resolved from the store")
+	}
+	if got := projectThemeOf(app.Settings); got != "" {
+		t.Errorf("project theme = %q, want the project still ignored", got)
+	}
+}

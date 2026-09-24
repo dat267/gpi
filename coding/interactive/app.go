@@ -68,6 +68,9 @@ type AppOptions struct {
 	// for the run without consulting or updating the trust store, which is what a
 	// session switch re-resolves against.
 	ProjectTrustOverride *bool
+	// InitialProjectTrust is the boot answer for Cwd's project, which seeds the
+	// per-project memory so a switch back to it reuses the decision.
+	InitialProjectTrust *bool
 	// Offline disables the startup catalog refresh.
 	Offline bool
 	// Hyperlinks enables OSC 8 links in the update cards.
@@ -97,6 +100,12 @@ type AppOptions struct {
 
 // App is the composed interactive mode.
 type App struct {
+	// projectTrustByCwd remembers each project's resolved trust for the run
+	// (upstream main.ts's projectTrustByCwd): a project resolved once is neither
+	// asked nor re-read, so a decision cannot change under the user's feet when
+	// the store changes mid-run.
+	projectTrustByCwd map[string]bool
+
 	// AutoTrustOnReloadCwd is the cwd /reload may implicitly trust
 	// (main.ts:706): captured at startup when the project has no
 	// trust-requiring resources, so a later reload can save trust for a
@@ -301,6 +310,10 @@ func NewApp(options AppOptions) *App {
 	// Upstream main.ts:706: capture at startup so a later /reload can save
 	// an implicitly-trusted project whose cwd gained trust-requiring
 	// resources during the session.
+	app.projectTrustByCwd = map[string]bool{}
+	if options.InitialProjectTrust != nil && options.Cwd != "" {
+		app.projectTrustByCwd[coding.CanonicalizePath(coding.ResolvePath(options.Cwd, "", coding.PathInputOptions{}))] = *options.InitialProjectTrust
+	}
 	app.AutoTrustOnReloadCwd = ""
 	if app.SessionMgr != nil && !coding.HasTrustRequiringProjectResources(app.SessionMgr.GetCwd()) {
 		app.AutoTrustOnReloadCwd = app.SessionMgr.GetCwd()
