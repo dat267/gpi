@@ -212,7 +212,7 @@ func TestCreateAgentSessionToolSelection(t *testing.T) {
 		[]byte(`{"defaultTools":["read","grep"]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	configured := NewSettingsManagerFromFiles(configuredDir, agentDirForSettings(), SettingsManagerCreateOptions{})
+	configured := NewSettingsManagerFromFiles(configuredDir, agentDirForSettings(t), SettingsManagerCreateOptions{})
 	session, err = CreateAgentSession(ctxpkg.Background(), &CreateAgentSessionOptions{
 		Cwd: configuredDir, ModelRuntime: runtime, SettingsManager: configured,
 	})
@@ -236,7 +236,7 @@ func TestCreateAgentSessionToolSelection(t *testing.T) {
 		[]byte(`{"defaultTools":[]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	empty := NewSettingsManagerFromFiles(emptyDir, agentDirForSettings(), SettingsManagerCreateOptions{})
+	empty := NewSettingsManagerFromFiles(emptyDir, agentDirForSettings(t), SettingsManagerCreateOptions{})
 	session, err = CreateAgentSession(ctxpkg.Background(), &CreateAgentSessionOptions{
 		Cwd: emptyDir, ModelRuntime: runtime, SettingsManager: empty,
 	})
@@ -346,7 +346,7 @@ func TestCreateAgentSessionRequestOptions(t *testing.T) {
 		0o600); err != nil {
 		t.Fatal(err)
 	}
-	settings := NewSettingsManagerFromFiles(settingsDir, agentDirForSettings(), SettingsManagerCreateOptions{})
+	settings := NewSettingsManagerFromFiles(settingsDir, agentDirForSettings(t), SettingsManagerCreateOptions{})
 
 	var captured *ai.SimpleStreamOptions
 	var prompts atomic.Int64
@@ -464,13 +464,10 @@ func TestCreateAgentSessionCacheWarmerStarts(t *testing.T) {
 	}
 }
 
-// agentDirForSettings gives the settings manager a clean global scope.
-func agentDirForSettings() string { return tempDir() }
-
-func tempDir() string {
-	dir, err := os.MkdirTemp("", "pi-agent-dir")
-	if err != nil {
-		panic(err)
-	}
-	return dir
+// agentDirForSettings gives the settings manager a clean global scope. It is the
+// test's own temp dir, so the suite stops leaving one empty /tmp/pi-agent-dir*
+// behind per call (492 of them had accumulated).
+func agentDirForSettings(t *testing.T) string {
+	t.Helper()
+	return t.TempDir()
 }
