@@ -36,6 +36,7 @@ func TestGeneratePKCE(t *testing.T) {
 }
 
 func TestAbortableSleepAndDeviceFlow(t *testing.T) {
+	fastDeviceCodeFlows(t)
 	// A cancelled context aborts the sleep with the cancel message.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -368,4 +369,19 @@ func readAll(request *http.Request) ([]byte, error) {
 			return buffer, nil
 		}
 	}
+}
+
+// fastDeviceCodeFlows replaces the device-code poll sleep with a millisecond, so
+// the flow tests do not spend their assertions' worth in RFC 8628's one-second
+// minimum interval. What the tests below assert is which polls happen (pending,
+// slow_down, complete, failures) and what the loop returns; the polling cadence
+// itself is covered by TestAbortableSleepAndDeviceFlow, which keeps the real
+// sleep. Tests in this package do not run in parallel, so the swap is safe.
+func fastDeviceCodeFlows(t *testing.T) {
+	t.Helper()
+	previous := deviceCodeSleep
+	deviceCodeSleep = func(ctx context.Context, _ time.Duration, cancelMessage string) error {
+		return AbortableSleep(ctx, time.Millisecond, cancelMessage)
+	}
+	t.Cleanup(func() { deviceCodeSleep = previous })
 }

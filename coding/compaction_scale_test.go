@@ -31,11 +31,7 @@ func TestPrepareCompactionProjectsTheContextOnce(t *testing.T) {
 	}
 
 	measure := func(entries []SessionEntry) int64 {
-		return testing.Benchmark(func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				PrepareCompaction(entries, settings)
-			}
-		}).AllocedBytesPerOp()
+		return allocatedBytesPerRun(t, 5, func() { PrepareCompaction(entries, settings) })
 	}
 	small, large := build(80), build(160)
 	smallBytes, largeBytes := measure(small), measure(large)

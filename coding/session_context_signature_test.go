@@ -77,12 +77,12 @@ func TestContextSignatureMatchesTheProjectedContext(t *testing.T) {
 
 // TestCacheContextIsCurrentDoesNotProjectTheSession guards the request path: the
 // currency check runs on every request (and while the warmer is active), so it
-// must not rebuild the session context. Projecting a large session allocated
-// megabytes per call.
+// must not rebuild the session context. Projecting even this session allocated
+// hundreds of kilobytes per call, far past the budget below.
 func TestCacheContextIsCurrentDoesNotProjectTheSession(t *testing.T) {
 	persist := false
 	m := NewSessionManager(t.TempDir(), &SessionManagerOptions{SessionDir: t.TempDir(), Persist: &persist})
-	for i := 0; i < 3000; i++ {
+	for i := 0; i < 500; i++ {
 		m.AppendMessage(createUserMessage("a message with enough text to make the projection allocate"))
 		assistant := createAssistantMessageT("a reply")
 		assistant.Provider, assistant.Model = "anthropic", "claude-opus-4-5"
@@ -118,7 +118,9 @@ func TestCacheContextIsCurrentDoesNotProjectTheSession(t *testing.T) {
 func TestProjectionDoesNotHoldTheSessionLock(t *testing.T) {
 	persist := false
 	m := NewSessionManager(t.TempDir(), &SessionManagerOptions{SessionDir: t.TempDir(), Persist: &persist})
-	for i := 0; i < 60000; i++ {
+	// 4000 entries keep the projection (and therefore the observation window)
+	// well past the 50 ms floor under the race detector.
+	for i := 0; i < 4000; i++ {
 		m.AppendMessage(createUserMessage("a message with enough text that the projection takes a while"))
 	}
 
@@ -244,7 +246,7 @@ func TestAppendCompactionDoesNotHoldTheSessionLock(t *testing.T) {
 	persist := false
 	m := NewSessionManager(t.TempDir(), &SessionManagerOptions{SessionDir: t.TempDir(), Persist: &persist})
 	m.AppendMessage(&ai.SystemMessage{Content: ai.StringOrBlocks{Text: "system"}, Timestamp: 1})
-	for i := 0; i < 12000; i++ {
+	for i := 0; i < 3000; i++ {
 		m.AppendMessage(createUserMessage("a message with enough text that the projection takes a while"))
 	}
 	entries := m.GetEntries()

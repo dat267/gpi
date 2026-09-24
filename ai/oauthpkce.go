@@ -56,6 +56,13 @@ type OAuthDeviceCodePollResult[T any] struct {
 	Value T
 }
 
+// deviceCodeSleep is the poll loop's sleep. RFC 8628's interval is in whole
+// seconds and is floored at one, so a flow that polls a few times costs real
+// seconds; the OAuth tests assert which polls happen, never how long they take,
+// and they swap this for a millisecond sleep (fastDeviceCodeFlows) instead of
+// spending ~25 s of the suite asleep.
+var deviceCodeSleep = AbortableSleep
+
 // OAuthDeviceCodePollOptions configure PollOAuthDeviceCodeFlow.
 type OAuthDeviceCodePollOptions[T any] struct {
 	IntervalSeconds     *int
@@ -118,7 +125,7 @@ func PollOAuthDeviceCodeFlow[T any](options OAuthDeviceCodePollOptions[T]) (T, e
 			if left < wait {
 				wait = left
 			}
-			if err := AbortableSleep(options.Ctx, wait, DeviceCodeCancelMessage); err != nil {
+			if err := deviceCodeSleep(options.Ctx, wait, DeviceCodeCancelMessage); err != nil {
 				return zero, err
 			}
 		}
@@ -160,7 +167,7 @@ func PollOAuthDeviceCodeFlow[T any](options OAuthDeviceCodePollOptions[T]) (T, e
 		if left < wait {
 			wait = left
 		}
-		if err := AbortableSleep(options.Ctx, wait, DeviceCodeCancelMessage); err != nil {
+		if err := deviceCodeSleep(options.Ctx, wait, DeviceCodeCancelMessage); err != nil {
 			return zero, err
 		}
 	}

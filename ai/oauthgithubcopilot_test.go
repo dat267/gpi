@@ -121,6 +121,7 @@ func TestParseGitHubCopilotModelCatalog(t *testing.T) {
 }
 
 func TestGitHubCopilotDeviceFlow(t *testing.T) {
+	fastDeviceCodeFlows(t)
 	polls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
@@ -246,6 +247,7 @@ func TestRefreshGitHubCopilotAccessToken(t *testing.T) {
 }
 
 func TestEnableGitHubCopilotModels(t *testing.T) {
+	fastDeviceCodeFlows(t)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost {
 			t.Errorf("method = %s", request.Method)

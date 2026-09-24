@@ -92,6 +92,7 @@ func TestXaiCredentialsFromTokenResponse(t *testing.T) {
 }
 
 func TestXaiDeviceCodeFlow(t *testing.T) {
+	fastDeviceCodeFlows(t)
 	var tokenCalls int
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
@@ -189,6 +190,7 @@ func TestXaiRefresh(t *testing.T) {
 }
 
 func TestKimiDeviceCodeFlow(t *testing.T) {
+	fastDeviceCodeFlows(t)
 	t.Setenv("KIMI_CODE_OAUTH_HOST", "")
 	t.Setenv("KIMI_OAUTH_HOST", "")
 	if host := KimiCodingOAuthHost(); host != KimiCodingDefaultOAuthHost {
@@ -278,6 +280,7 @@ func TestKimiDeviceAuthorizationValidation(t *testing.T) {
 }
 
 func TestKimiTokenPollErrors(t *testing.T) {
+	fastDeviceCodeFlows(t)
 	cases := []struct {
 		status int
 		body   string

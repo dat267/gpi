@@ -72,6 +72,24 @@ The gate runs with `GOTRACEBACK=all` in CI so a hung test prints every
 goroutine. The PTY watchdogs reuse a prebuilt binary via `PIER_TEST_BIN`
 (CI builds `.` first); locally they fall back to `./bin/pier`.
 
+Keep the suite quick — the race detector slows every path 5-10x, and the gate
+runs each test twice (`-p 8` overlaps the test-binary builds; the whole gate is
+~50 s, `-race -count=1` ~30 s on four cores):
+
+- Size fixtures to the *property*, not to production scale. The projection tests
+  assert ratios (window vs session, warm memo vs cold), so a few hundred
+  message pairs discriminate as well as a few thousand; at 60k appends one test
+  cost 44 s under `-race` on its own. Do not grow a fixture back without
+  re-measuring the package.
+- Avoid `testing.Benchmark` in tests: it has a hard one-second floor per
+  measurement, so two scaling tests paid ~5 s of pure timer wait. Use
+  `allocatedBytesPerRun` (`coding/allocmeasure_test.go`) for bytes and
+  `testing.AllocsPerRun` for counts.
+- Never sleep a spec-mandated interval in a test. RFC 8628's device-code poll
+  interval is a whole second, which made the OAuth tests spend ~25 s asleep;
+  they swap `deviceCodeSleep` (`ai/oauthpkce.go`) for a millisecond instead.
+- `-short` skips the PTY watchdogs (they wait on real rendering).
+
 The interactive mode reads credentials from `~/.pi/agent/auth.json` (or
 `PI_CODING_AGENT_DIR`). `/login` is wired, but the CLI does not install a
 browser opener (`interactive.SetBrowserOpener`), so the OAuth browser flow is a

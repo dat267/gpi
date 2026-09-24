@@ -160,6 +160,7 @@ func TestOpenAICodexTokenExchangeAndRefresh(t *testing.T) {
 }
 
 func TestOpenAICodexDeviceAuthFlow(t *testing.T) {
+	fastDeviceCodeFlows(t)
 	polls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")

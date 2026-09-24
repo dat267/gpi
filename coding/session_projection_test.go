@@ -9,7 +9,11 @@ import (
 )
 
 // newProjectionTestSession builds a session with enough messages that resolving
-// the projection allocates visibly.
+// the projection allocates visibly. The size is a compromise: the properties
+// under test are ratios (window vs session, warm memo vs cold), so a few
+// hundred pairs discriminate as well as a few thousand while the race detector
+// — which slows the whole-materialization path ~10x — keeps the package under
+// ten seconds. Do not grow it back without re-measuring the package.
 // newTestSessionForProjection is a small persisted-free session for the
 // correctness tests.
 func newTestSessionForProjection(t *testing.T) *SessionManager {
@@ -25,7 +29,7 @@ func newProjectionTestSession(t *testing.T) *SessionManager {
 	m := NewSessionManager(t.TempDir(), &SessionManagerOptions{SessionDir: t.TempDir(), Persist: &persist})
 	m.AppendMessage(&ai.SystemMessage{Content: ai.StringOrBlocks{Text: "system prompt"}, Timestamp: 1})
 	m.AppendModelChange("anthropic", "claude-opus-4-5")
-	for i := 0; i < 2000; i++ {
+	for i := 0; i < 400; i++ {
 		m.AppendMessage(createUserMessage("a message with enough text that decoding it allocates"))
 		m.AppendMessage(createAssistantMessageT("a reply with enough text that decoding it allocates"))
 	}
@@ -162,7 +166,7 @@ func TestProjectionDecodesOnlyTheAppendedEntries(t *testing.T) {
 		m.AppendMessage(createUserMessage("after the memo was warm"))
 		_ = m.Projection()
 	})
-	// A reset memo forces the full decode of the 4000-message session that the
+	// A reset memo forces the full decode of the whole session that the
 	// resolution used to pay on every append.
 	cold := testing.AllocsPerRun(5, func() {
 		m.messages.reset()
@@ -250,7 +254,7 @@ var projectedTimestampPattern = regexp.MustCompile(`"timestamp":(?:"[^"]*"|[0-9]
 // session; the window here is eight entries (the compaction, the six it kept, and the message after it).
 func TestCompactedProjectionCostsTheWindowNotTheSession(t *testing.T) {
 	m := newTestSessionForProjection(t)
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 500; i++ {
 		m.AppendMessage(createUserMessage("a message with enough text that copying it is visible in the measurement"))
 		m.AppendMessage(createAssistantMessageT("a reply with enough text that copying it is visible too"))
 	}
@@ -270,8 +274,8 @@ func TestCompactedProjectionCostsTheWindowNotTheSession(t *testing.T) {
 	context := m.Projection()
 	runtime.ReadMemStats(&after)
 	allocated := after.TotalAlloc - before.TotalAlloc
-	t.Logf("projection of a 2001-entry compacted session allocated %d bytes and kept %d entries",
-		allocated, len(context.Entries))
+	t.Logf("projection of a %d-entry compacted session allocated %d bytes and kept %d entries",
+		len(entries)+1, allocated, len(context.Entries))
 	if len(context.Entries) != 8 {
 		t.Fatalf("window kept %d entries; want 8", len(context.Entries))
 	}

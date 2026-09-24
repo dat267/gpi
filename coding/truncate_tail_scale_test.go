@@ -19,11 +19,9 @@ func TestTruncateTailBuildsTheWindowWithoutPrepending(t *testing.T) {
 	content := sb.String()
 
 	measure := func(maxLines int) int64 {
-		return testing.Benchmark(func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				_ = TruncateTail(content, TruncationOptions{MaxLines: maxLines, MaxBytes: len(content)})
-			}
-		}).AllocedBytesPerOp()
+		return allocatedBytesPerRun(t, 10, func() {
+			_ = TruncateTail(content, TruncationOptions{MaxLines: maxLines, MaxBytes: len(content)})
+		})
 	}
 	smallBytes := measure(50)
 	largeBytes := measure(2000)
