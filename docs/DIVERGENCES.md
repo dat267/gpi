@@ -140,15 +140,27 @@ code comments at the point of divergence; this file is the log. The range is
   and the CLI installs them at startup under the upstream names (`dark`,
   `light`), so the whole settings/terminal-detection path (`ResolveThemeSetting`,
   `ParseAutoThemeSetting`, `GetDefaultTheme`) is unchanged and still picks the
-  variant from the terminal. Two deliberate departures from upstream's
-  `dark.json`/`light.json`: **every background token is left unset**, which
+  variant from the terminal. Three deliberate departures from upstream's
+  `dark.json`/`light.json`: **the decorative background tokens are left unset**
+  (user and custom messages, the selected list row, search matches), which
   renders as the terminal's default background (`\x1b[49m`) so the theme never
   paints over a transparent or blurred terminal (primary text is the terminal's
-  own foreground for the same reason), and **the accent is amber rather than
+  own foreground for the same reason); **the tool-state fills are kept**
+  (`toolPendingBg` / `toolSuccessBg` / `toolErrorBg`, a neutral panel while a
+  call runs and the success/error hues as a tint of it), because they are not
+  decoration but the *only* signal upstream has that a tool call failed —
+  `components/tool-execution.ts` picks between them and fills the whole block,
+  and the port does the same in `toolexecution.go`, so leaving them unset made a
+  failed `bash` call byte-identical to a successful one (they are also the three
+  tokens the HTML export paints `.tool-execution.pending/success/error` with,
+  which came out blank as well); and **the accent is amber rather than
   upstream's teal** — it carries the wordmark, borders, selection and list
   bullets, so which build is running is obvious at a glance. Selection stays
   legible without a fill because every list marks the current row with an
-  accent-coloured `→ ` prefix. The embedded upstream palettes are kept: they are
+  accent-coloured `→ ` prefix. The tool tints are chosen to stay distinct after
+  the 256-colour conversion (`rgbTo256` sends a low-spread dark to the grey ramp
+  and pushes a hue into the cube), so the three states remain distinguishable on
+  a terminal without truecolor. The embedded upstream palettes are kept: they are
   upstream's reference palette, they are what the **upstream-parity test corpus
   renders with** (those tests clear the theme registry first, so they are
   unaffected by the install), and they remain the fallback for library consumers

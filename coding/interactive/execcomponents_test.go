@@ -258,3 +258,85 @@ func TestExecHelpers(t *testing.T) {
 }
 
 func ReplaceTabsLocal(value string) string { return strings.ReplaceAll(value, "\t", "   ") }
+
+// backgroundFills extracts the background *fills* of a rendered block (the
+// \x1b[48;…m sequences), ignoring the \x1b[49m reset that every styled run ends
+// with: the caller can then ask whether a block is filled at all, and whether
+// two blocks are filled the same.
+func backgroundFills(lines []string) []string {
+	var found []string
+	for _, line := range lines {
+		for _, seq := range ansiSequenceRe.FindAllString(line, -1) {
+			if strings.HasPrefix(seq, "\x1b[48;") {
+				found = append(found, seq)
+			}
+		}
+	}
+	return found
+}
+
+// A tool call has to look different while it runs, when it succeeds and when it
+// fails. Upstream picks toolPendingBg / toolSuccessBg / toolErrorBg in
+// components/tool-execution.ts (updateDisplay) and pi-tui's Box fills the whole
+// block with it; the port does the same in toolexecution.go. The corpus above
+// pins that with the embedded upstream palette, which is not what the CLI
+// installs — so this renders the three states with the port's own palette
+// (D154), where the signal had gone missing.
+func TestToolExecutionBackgroundsSignalState(t *testing.T) {
+	installPierThemeForTest(t)
+	t.Cleanup(func() { SetRegisteredThemes(nil) })
+
+	render := func(isPartial bool, isError bool) []string {
+		definition := builtinToolRenderers["bash"]
+		component := NewToolExecutionComponent("bash", "call-1", map[string]any{"command": "ls"}, ToolExecutionOptions{}, &definition, nil, "/tmp")
+		component.MarkExecutionStarted()
+		component.SetArgsComplete()
+		component.UpdateResult(&SortToolResultContent{
+			Content: []ToolResultContent{{Type: "text", Text: "one\ntwo"}},
+			IsError: isError,
+		}, isPartial)
+		return component.Render(40)
+	}
+
+	states := []struct {
+		label   string
+		partial bool
+		err     bool
+	}{
+		{"pending", true, false},
+		{"success", false, false},
+		{"failed", false, true},
+	}
+	for _, name := range []string{"dark", "light"} {
+		t.Run(name, func(t *testing.T) {
+			InitTheme(name, false)
+			blocks := map[string]string{}
+			fills := map[string]string{}
+			for _, state := range states {
+				lines := render(state.partial, state.err)
+				blocks[state.label] = strings.Join(lines, "\n")
+				got := backgroundFills(lines)
+				if len(got) == 0 {
+					t.Fatalf("%s: the block is not filled at all", state.label)
+				}
+				for _, fill := range got {
+					if fill != got[0] {
+						t.Errorf("%s: mixed fills %q and %q in one block", state.label, got[0], fill)
+						break
+					}
+				}
+				fills[state.label] = got[0]
+			}
+			for i, a := range states {
+				for _, b := range states[i+1:] {
+					if blocks[a.label] == blocks[b.label] {
+						t.Errorf("%s and %s render identically", a.label, b.label)
+					}
+					if fills[a.label] == fills[b.label] {
+						t.Errorf("%s and %s are filled the same (%s)", a.label, b.label, fills[a.label])
+					}
+				}
+			}
+		})
+	}
+}

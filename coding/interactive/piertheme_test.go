@@ -48,9 +48,9 @@ func TestInstallPierThemeShadowsUpstream(t *testing.T) {
 	}
 }
 
-// The point of the palette: the terminal's own background shows through, so no
-// background token may resolve to a colour.
-func TestPierThemeBackgroundsAreTerminalDefault(t *testing.T) {
+// The point of the palette: the terminal's own background shows through the
+// decorative fills, so none of them may resolve to a colour.
+func TestPierThemeDecorativeBackgroundsAreTerminalDefault(t *testing.T) {
 	installPierThemeForTest(t)
 	for _, name := range []string{"dark", "light"} {
 		t.Run(name, func(t *testing.T) {
@@ -58,7 +58,7 @@ func TestPierThemeBackgroundsAreTerminalDefault(t *testing.T) {
 			if theme == nil {
 				t.Fatalf("theme %q did not load", name)
 			}
-			for key := range backgroundColorKeys {
+			for _, key := range transparentBackgroundColors {
 				ansi, ok := theme.bgColors[key]
 				if !ok {
 					t.Errorf("%s: no background token %q", name, key)
@@ -75,6 +75,46 @@ func TestPierThemeBackgroundsAreTerminalDefault(t *testing.T) {
 			// Primary text is the terminal's foreground, for the same reason.
 			if got := theme.Fg("text", "hello"); got != "\x1b[39mhello\x1b[39m" {
 				t.Errorf("%s: Fg(text) = %q", name, got)
+			}
+		})
+	}
+}
+
+// The exception to that rule: the tool-state fills are the only thing that says
+// a tool call is running, failed or succeeded (upstream
+// components/tool-execution.ts picks toolPendingBg / toolSuccessBg /
+// toolErrorBg and fills the whole block), so they must be real colours, must
+// differ from one another, and must survive the 256-colour conversion a
+// terminal without truecolor goes through.
+func TestPierThemeToolStateBackgroundsDiffer(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mode ColorMode
+		json *ThemeJSON
+	}{
+		{"dark", ColorModeTruecolor, pierDarkJSON()},
+		{"light", ColorModeTruecolor, pierLightJSON()},
+		{"dark/256", ColorMode256, pierDarkJSON()},
+		{"light/256", ColorMode256, pierLightJSON()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			theme := CreateTheme(tc.json, tc.mode, "")
+			seen := map[string]string{}
+			for _, key := range toolStateBackgroundColors {
+				ansi, ok := theme.bgColors[key]
+				if !ok {
+					t.Errorf("no background token %q", key)
+					continue
+				}
+				if ansi == "\x1b[49m" {
+					t.Errorf("%s is the terminal default, so the state is invisible", key)
+					continue
+				}
+				if other, dup := seen[ansi]; dup {
+					t.Errorf("%s and %s share %q", key, other, ansi)
+					continue
+				}
+				seen[ansi] = key
 			}
 		})
 	}

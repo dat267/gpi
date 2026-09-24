@@ -4,13 +4,19 @@ package interactive
 // background, one for a light one — chosen by the same settings/terminal
 // detection as upstream.
 //
-// Two deliberate differences from upstream's dark.json/light.json:
+// Three deliberate differences from upstream's dark.json/light.json:
 //
-//   - **The backgrounds are the terminal's.** Every background token is left
-//     unset, which renders as the terminal's default background (\x1b[49m)
-//     rather than a panel colour, so the theme never paints over a transparent
-//     or blurred terminal. This is why nothing here sets userMessageBg,
-//     toolSuccessBg and friends to a tint.
+//   - **The decorative backgrounds are the terminal's.** The fills that only
+//     group content — user and custom messages, the selected list row, search
+//     matches — are left unset, which renders as the terminal's default
+//     background (\x1b[49m) rather than a panel colour, so the theme never
+//     paints over a transparent or blurred terminal. This is why nothing here
+//     sets userMessageBg and friends to a tint, and why every list marks its
+//     selection with an accent-coloured "→ " prefix instead of a fill.
+//   - **The tool-state backgrounds are not.** toolPendingBg / toolSuccessBg /
+//     toolErrorBg are kept, because they are not decoration: they are the only
+//     signal that a tool call is still running, failed or succeeded. Left
+//     unset, a failed `bash` call was byte-identical to a successful one.
 //   - **The accent is amber, not teal.** Upstream's accent (#8abeb7, with blue
 //     borders) is replaced throughout, so the palette is recognisably this port
 //     at a glance — the header wordmark, borders, selection and list bullets all
@@ -20,12 +26,25 @@ package interactive
 // own foreground, and colour is spent on structure (borders, diffs) and
 // emphasis (the accent) rather than on decoration.
 
-// transparentBackgroundColors are the background tokens. They are left unset so
-// the terminal's own background shows through; bgAnsi renders an unset value as
-// \x1b[49m, and every list marks its selection with an accent-coloured "→ "
-// prefix, so a transparent selectedBg costs nothing in legibility.
+// transparentBackgroundColors are the decorative background tokens. They are
+// left unset so the terminal's own background shows through; bgAnsi renders an
+// unset value as \x1b[49m, and every list marks its selection with an
+// accent-coloured "→ " prefix, so a transparent selectedBg costs nothing in
+// legibility.
+//
+// The tool-state fills are the exception — see toolStateBackgroundColors — and
+// pierColors gives a hex in the palette precedence over this list.
 var transparentBackgroundColors = []string{
 	"selectedBg", "searchMatchBg", "userMessageBg", "customMessageBg",
+}
+
+// toolStateBackgroundColors are the three tokens that say whether a tool call is
+// running, failed or succeeded: upstream components/tool-execution.ts picks
+// between them and fills the whole block, and the port does the same in
+// toolexecution.go. They carry a colour in both palettes because for a failed
+// call this fill is the *only* signal — without it a failure is
+// indistinguishable from a success.
+var toolStateBackgroundColors = []string{
 	"toolPendingBg", "toolSuccessBg", "toolErrorBg",
 }
 
@@ -73,6 +92,13 @@ func pierDarkJSON() *ThemeJSON {
 			"userMessageText":    "",
 			"customMessageText":  "",
 			"customMessageLabel": "#c792ea",
+
+			// The tool-state fills: a neutral panel while a call runs, and the
+			// success/error hues as a tint of it. They are the one thing the palette
+			// paints behind text (see toolStateBackgroundColors).
+			"toolPendingBg": "#2b2b2b",
+			"toolSuccessBg": "#22302a",
+			"toolErrorBg":   "#3a2424",
 
 			"mdHeading":         "#ffb454",
 			"mdLink":            "#6cb6ff",
@@ -140,6 +166,11 @@ func pierLightJSON() *ThemeJSON {
 			"userMessageText":    "",
 			"customMessageText":  "",
 			"customMessageLabel": "#8250df",
+
+			// Warm-neutral while a call runs; the success/error hues as a light tint.
+			"toolPendingBg": "#ececec",
+			"toolSuccessBg": "#e6f2e9",
+			"toolErrorBg":   "#f7e7e7",
 
 			"mdHeading":         "#b45309",
 			"mdLink":            "#0969da",
