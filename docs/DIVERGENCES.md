@@ -135,43 +135,52 @@ code comments at the point of divergence; this file is the log. The range is
   that flags these mechanically was written and dropped as not worth its keep
   (AST heuristics plus a maintained allowlist, which drifts); this row is the
   record instead.
-- D154 — **the port ships its own theme palette**. `coding/interactive/piertheme.go`
-  defines two themes — one for a dark terminal background, one for a light one —
-  and the CLI installs them at startup under the upstream names (`dark`,
-  `light`), so the whole settings/terminal-detection path (`ResolveThemeSetting`,
-  `ParseAutoThemeSetting`, `GetDefaultTheme`) is unchanged and still picks the
-  variant from the terminal. Three deliberate departures from upstream's
-  `dark.json`/`light.json`: **the decorative background tokens are left unset**
-  (user and custom messages, the selected list row, search matches), which
-  renders as the terminal's default background (`\x1b[49m`) so the theme never
-  paints over a transparent or blurred terminal (primary text is the terminal's
-  own foreground for the same reason); **the tool-state fills are kept**
-  (`toolPendingBg` / `toolSuccessBg` / `toolErrorBg`, a neutral panel while a
-  call runs and the success/error hues as a tint of it), because they are not
-  decoration but the *only* signal upstream has that a tool call failed —
-  `components/tool-execution.ts` picks between them and fills the whole block,
-  and the port does the same in `toolexecution.go`, so leaving them unset made a
-  failed `bash` call byte-identical to a successful one (they are also the three
-  tokens the HTML export paints `.tool-execution.pending/success/error` with,
-  which came out blank as well); and **the accent is amber rather than
-  upstream's teal** — it carries the wordmark, borders, selection and list
-  bullets, so which build is running is obvious at a glance. Selection stays
-  legible without a fill because every list marks the current row with an
-  accent-coloured `→ ` prefix. The tool tints are chosen to stay distinct after
-  the 256-colour conversion (`rgbTo256` sends a low-spread dark to the grey ramp
-  and pushes a hue into the cube), so the three states remain distinguishable on
-  a terminal without truecolor. The embedded upstream palettes are kept: they are
-  upstream's reference palette, they are what the **upstream-parity test corpus
-  renders with** (those tests clear the theme registry first, so they are
-  unaffected by the install), and they remain the fallback for library consumers
-  that never call the installer. Two fixes fell out of this: `loadThemeJSON`
-  checked the built-ins *before* the registry while `loadTheme` checked the
-  registry first, so a theme shadowing `dark` rendered as the override but
-  resolved its export and resolved-colour tokens from the built-in — both now
-  prefer the registry — and `Theme` carries its source document, so a registered
-  theme that has no file on disk can still be exported to HTML. The install must
-  follow the truecolor/style capability switch, since a theme bakes its 256-colour
-  or truecolor escapes at creation time.
+- D154 — **the port ships its own theme palette**.
+  `coding/interactive/piertheme.go` defines two themes — one for a dark terminal
+  background, one for a light one — and the CLI installs them at startup under
+  the upstream names (`dark`, `light`), so the whole settings/terminal-detection
+  path (`ResolveThemeSetting`, `ParseAutoThemeSetting`, `GetDefaultTheme`) is
+  unchanged and still picks the variant from the terminal. Three deliberate
+  departures from upstream's `dark.json`/`light.json`: **the decorative
+  background tokens are left unset** (the selected list row, search matches,
+  custom messages), which renders as the terminal's default background
+  (`\x1b[49m`) so the theme never paints over a transparent or blurred terminal
+  (primary text is the terminal's own foreground for the same reason); **the
+  signal fills are kept** (`toolPendingBg` / `toolSuccessBg` / `toolErrorBg`, a
+  neutral panel while a call runs and the success/error hues as a tint of it,
+  plus `userMessageBg`), because they are not decoration. The tool three are the
+  *only* signal upstream has that a tool call failed
+  (`components/tool-execution.ts` picks between them and fills the whole block;
+  the port does the same in `toolexecution.go`), so leaving them unset made a
+  failed `bash` call byte-identical to a successful one; the user fill is the
+  only thing that marks a block as yours, since the assistant message has no
+  fill and both are otherwise plain markdown in the same box. All four are also
+  painted by the HTML export (`.tool-execution.success/error` and the user
+  block, via `--toolSuccessBg` and friends), which came out blank as well. Their
+  values are the port's own, not upstream's: a user message is a warm panel tied
+  to the accent (`#393630` dark, `#f4eee1` light) where upstream's is a cool
+  blue-gray (`#343541`) or plain grey (`#e8e8e8`); and **the accent is amber
+  rather than upstream's teal** — it carries the wordmark, borders, selection
+  and list bullets, so which build is running is obvious at a glance. Selection
+  stays legible without a fill because every list marks the current row with an
+  accent-coloured `→ ` prefix. The fills are chosen to stay distinct after the
+  256-colour conversion (`rgbTo256` sends a low-spread dark to the grey ramp and
+  pushes a hue into the cube: the warm `#393630` lands on grey 237, one ramp
+  step from `toolPendingBg`'s 235, and a subtler dark would have collapsed onto
+  the same index), so the states remain distinguishable on a terminal without
+  truecolor — and `piertheme_test.go` pins all of it. The embedded upstream
+  palettes are kept: they are upstream's reference palette, they are what the
+  **upstream-parity test corpus renders with** (those tests clear the theme
+  registry first, so they are unaffected by the install), and they remain the
+  fallback for library consumers that never call the installer. Two fixes fell
+  out of this: `loadThemeJSON` checked the built-ins *before* the registry while
+  `loadTheme` checked the registry first, so a theme shadowing `dark` rendered
+  as the override but resolved its export and resolved-colour tokens from the
+  built-in — both now prefer the registry — and `Theme` carries its source
+  document, so a registered theme that has no file on disk can still be exported
+  to HTML. The install must follow the truecolor/style capability switch, since
+  a theme bakes its 256-colour or truecolor escapes at creation time.
+
 - D153 — **the CLI's startup flags are wired** rather than merely parsed
   (`cmd/main.go`, with the pure parts in `coding/clidiagnostics.go`,
   `coding/cliinitial.go`, `coding/listmodels.go`, `coding/paths.go` and

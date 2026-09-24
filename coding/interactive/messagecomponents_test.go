@@ -285,3 +285,50 @@ func tuiKeybindingCount() int {
 	}
 	return count
 }
+
+// The user-message fill is the only thing that says a block is yours: upstream
+// components/user-message.ts fills the box with userMessageBg and the assistant
+// message has no fill at all (which is still true here). The port paints it with
+// its own colour rather than upstream's, so both halves of that are worth a
+// test.
+func TestUserMessageBackgroundMarksYourMessages(t *testing.T) {
+	installPierThemeForTest(t)
+	t.Cleanup(func() { SetRegisteredThemes(nil) })
+
+	for _, name := range []string{"dark", "light"} {
+		t.Run(name, func(t *testing.T) {
+			InitTheme(name, false)
+
+			lines := NewUserMessageComponent("explain the freeze class", nil, 1, nil).Render(56)
+			fills := backgroundFills(lines)
+			if len(fills) == 0 {
+				t.Fatalf("the user message is not filled")
+			}
+			for _, fill := range fills {
+				if fill != fills[0] {
+					t.Errorf("mixed fills %q and %q in one message", fills[0], fill)
+					break
+				}
+			}
+
+			assistant := NewAssistantMessageComponent(&ai.AssistantMessage{
+				Content:    ai.ContentList{ai.TextContent{Text: "here you go"}},
+				StopReason: ai.StopStop,
+			}, false, nil, "", 1, nil)
+			if other := backgroundFills(assistant.Render(56)); len(other) != 0 {
+				t.Errorf("the assistant message is filled too: %v", other)
+			}
+
+			// Your message must not look like a tool call in one of its states.
+			for _, key := range toolStateBackgroundColors {
+				state := backgroundFills([]string{ActiveTheme().Bg(key, "x")})
+				if len(state) == 0 {
+					t.Fatalf("%s has no fill", key)
+				}
+				if state[0] == fills[0] {
+					t.Errorf("the user message is filled with %s (%s)", key, fills[0])
+				}
+			}
+		})
+	}
+}

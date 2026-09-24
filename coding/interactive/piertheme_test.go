@@ -80,13 +80,12 @@ func TestPierThemeDecorativeBackgroundsAreTerminalDefault(t *testing.T) {
 	}
 }
 
-// The exception to that rule: the tool-state fills are the only thing that says
-// a tool call is running, failed or succeeded (upstream
-// components/tool-execution.ts picks toolPendingBg / toolSuccessBg /
-// toolErrorBg and fills the whole block), so they must be real colours, must
-// differ from one another, and must survive the 256-colour conversion a
-// terminal without truecolor goes through.
-func TestPierThemeToolStateBackgroundsDiffer(t *testing.T) {
+// The exception to that rule: the filled tokens carry a signal rather than
+// grouping content — a tool call being pending/failed/succeeded, and a message
+// being yours — so they must be real colours, must differ from one another, and
+// must survive the 256-colour conversion a terminal without truecolor goes
+// through.
+func TestPierThemeFilledBackgroundsDiffer(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		mode ColorMode
@@ -100,7 +99,7 @@ func TestPierThemeToolStateBackgroundsDiffer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			theme := CreateTheme(tc.json, tc.mode, "")
 			seen := map[string]string{}
-			for _, key := range toolStateBackgroundColors {
+			for _, key := range filledBackgroundColors {
 				ansi, ok := theme.bgColors[key]
 				if !ok {
 					t.Errorf("no background token %q", key)
@@ -115,6 +114,29 @@ func TestPierThemeToolStateBackgroundsDiffer(t *testing.T) {
 					continue
 				}
 				seen[ansi] = key
+			}
+		})
+	}
+}
+
+// The fills carry a signal, but the look stays this port's. Copying upstream's
+// values would make a user message (or a finished tool call) read as pi's.
+func TestPierThemeFilledBackgroundsDifferFromUpstream(t *testing.T) {
+	upstream := getBuiltinThemes()
+	for _, tc := range []struct {
+		name string
+		json *ThemeJSON
+	}{
+		{"dark", pierDarkJSON()},
+		{"light", pierLightJSON()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ours := CreateTheme(tc.json, ColorModeTruecolor, "")
+			theirs := CreateTheme(upstream[tc.name], ColorModeTruecolor, "")
+			for _, key := range filledBackgroundColors {
+				if ours.bgColors[key] == theirs.bgColors[key] {
+					t.Errorf("%s: %s = %q is upstream's value", tc.name, key, ours.bgColors[key])
+				}
 			}
 		})
 	}

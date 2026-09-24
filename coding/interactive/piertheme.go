@@ -7,16 +7,19 @@ package interactive
 // Three deliberate differences from upstream's dark.json/light.json:
 //
 //   - **The decorative backgrounds are the terminal's.** The fills that only
-//     group content — user and custom messages, the selected list row, search
-//     matches — are left unset, which renders as the terminal's default
-//     background (\x1b[49m) rather than a panel colour, so the theme never
-//     paints over a transparent or blurred terminal. This is why nothing here
-//     sets userMessageBg and friends to a tint, and why every list marks its
+//     group content — the selected list row, search matches, custom messages —
+//     are left unset, which renders as the terminal's default background
+//     (\x1b[49m) rather than a panel colour, so the theme never paints over a
+//     transparent or blurred terminal. This is why every list marks its
 //     selection with an accent-coloured "→ " prefix instead of a fill.
-//   - **The tool-state backgrounds are not.** toolPendingBg / toolSuccessBg /
-//     toolErrorBg are kept, because they are not decoration: they are the only
-//     signal that a tool call is still running, failed or succeeded. Left
-//     unset, a failed `bash` call was byte-identical to a successful one.
+//   - **The signal backgrounds are carried, in this port's colours.**
+//     toolPendingBg / toolSuccessBg / toolErrorBg and userMessageBg are kept,
+//     because they are not decoration: the first three are the only thing that
+//     says a tool call is running, failed or succeeded, and the fourth is the
+//     only thing that says a block is yours. Left unset, a failed `bash` call
+//     was byte-identical to a successful one. They are not upstream's values
+//     either — your messages get a warm panel tied to the accent, where
+//     upstream's is a cool blue-gray — so the palette stays recognisable.
 //   - **The accent is amber, not teal.** Upstream's accent (#8abeb7, with blue
 //     borders) is replaced throughout, so the palette is recognisably this port
 //     at a glance — the header wordmark, borders, selection and list bullets all
@@ -32,10 +35,10 @@ package interactive
 // accent-coloured "→ " prefix, so a transparent selectedBg costs nothing in
 // legibility.
 //
-// The tool-state fills are the exception — see toolStateBackgroundColors — and
+// The filled tokens are the exception — see filledBackgroundColors — and
 // pierColors gives a hex in the palette precedence over this list.
 var transparentBackgroundColors = []string{
-	"selectedBg", "searchMatchBg", "userMessageBg", "customMessageBg",
+	"selectedBg", "searchMatchBg", "customMessageBg",
 }
 
 // toolStateBackgroundColors are the three tokens that say whether a tool call is
@@ -47,6 +50,13 @@ var transparentBackgroundColors = []string{
 var toolStateBackgroundColors = []string{
 	"toolPendingBg", "toolSuccessBg", "toolErrorBg",
 }
+
+// filledBackgroundColors are every background token the palette paints: the
+// tool states above plus userMessageBg, the fill that marks a block as yours
+// (upstream components/user-message.ts, and the assistant message has no fill).
+// Not decoration, so not transparent — and not upstream's colour either, since
+// the port's palette is meant to be recognisable at a glance.
+var filledBackgroundColors = append(append([]string{}, toolStateBackgroundColors...), "userMessageBg")
 
 func pierColors(hex map[string]string) map[string]ColorValue {
 	colors := make(map[string]ColorValue, len(hex)+len(transparentBackgroundColors))
@@ -94,11 +104,17 @@ func pierDarkJSON() *ThemeJSON {
 			"customMessageLabel": "#c792ea",
 
 			// The tool-state fills: a neutral panel while a call runs, and the
-			// success/error hues as a tint of it. They are the one thing the palette
-			// paints behind text (see toolStateBackgroundColors).
+			// success/error hues as a tint of it. With userMessageBg below they are
+			// the only things the palette paints behind text — see
+			// filledBackgroundColors.
 			"toolPendingBg": "#2b2b2b",
 			"toolSuccessBg": "#22302a",
 			"toolErrorBg":   "#3a2424",
+
+			// Your own messages get a warm panel tied to the amber accent, where
+			// upstream's is a cool blue-gray (#343541). Same lightness as
+			// upstream's, so a transcript reads the same way.
+			"userMessageBg": "#393630",
 
 			"mdHeading":         "#ffb454",
 			"mdLink":            "#6cb6ff",
@@ -171,6 +187,10 @@ func pierLightJSON() *ThemeJSON {
 			"toolPendingBg": "#ececec",
 			"toolSuccessBg": "#e6f2e9",
 			"toolErrorBg":   "#f7e7e7",
+
+			// A warm cream for your own messages, where upstream's is plain grey
+			// (#e8e8e8).
+			"userMessageBg": "#f4eee1",
 
 			"mdHeading":         "#b45309",
 			"mdLink":            "#0969da",
