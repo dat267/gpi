@@ -50,13 +50,19 @@ func TestProjectionIsCachedUntilTheBranchChanges(t *testing.T) {
 		t.Fatalf("a cached projection allocated %.0f objects per call; want ~0", hit)
 	}
 
-	// Every append changes the version and forces one resolution.
-	rebuild := testing.AllocsPerRun(1, func() {
-		m.AppendMessage(createUserMessage("after the cache was warm"))
-		_ = m.Projection()
-	})
-	if rebuild < 100 {
-		t.Fatalf("an append did not invalidate the projection (%.0f allocations)", rebuild)
+	// Every append changes the version and forces one resolution. Asserted as
+	// identity rather than as an allocation budget: a cache hit hands back the
+	// slice it holds, a fresh resolution builds a new one. (An allocation
+	// threshold sat here first and turned into a fixture-size measurement — 99
+	// objects against a limit of 100 — which failed about one run in five.)
+	before := m.Projection()
+	m.AppendMessage(createUserMessage("after the cache was warm"))
+	after := m.Projection()
+	if len(before.Messages) == 0 || len(after.Messages) == 0 {
+		t.Fatal("the projection lost its messages")
+	}
+	if &after.Messages[0] == &before.Messages[0] {
+		t.Fatal("an append was served from the cached projection")
 	}
 
 	// A leaf move invalidates it too.
