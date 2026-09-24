@@ -3,7 +3,6 @@ package interactive
 import (
 	"os"
 	"sync"
-	"time"
 
 	"github.com/dat267/pier/coding"
 	"github.com/dat267/pier/tui"
@@ -47,22 +46,13 @@ func SelectSession(options SelectSessionOptions) string {
 			result <- path
 		})
 	}
-	stop := func() { ui.Stop(tui.TuiStopOptions{}) }
 	selector := NewSessionSelectorComponent(
 		options.CurrentLoader,
 		options.AllLoader,
-		func(path string) {
-			println("ONSELECT", path)
-			settle(path)
-			stop()
-		},
+		settle,
+		func() { settle("") },
 		func() {
-			println("ONCANCEL")
-			settle("")
-			stop()
-		},
-		func() {
-			stop()
+			ui.Stop(tui.TuiStopOptions{})
 			exit := options.Exit
 			if exit == nil {
 				exit = os.Exit
@@ -78,76 +68,9 @@ func SelectSession(options SelectSessionOptions) string {
 	ui.AddChild(selector)
 	ui.SetFocus(selector.GetSessionList())
 
-	// D146: the picker is driven by its own loop — terminal input and paints
-	// share this goroutine, replacing the renderer's internal render timer.
-	rawTerminal, isRaw := terminal.(tui.RawInputTerminal)
-	if isRaw {
-		rawTerminal.EnableRawInput()
-	}
-	inputs := make(chan string, 256)
-	ui.EnableLoopInput(func(data string) { inputs <- data }, func() {})
-	// Post-driven work (loader results) signals the tick channel; the loop
-	// below drains and paints it.
-	ui.EnableRenderTicks()
-	ui.Start()
-	defer ui.Stop(tui.TuiStopOptions{})
-	// Paint the initial state and drain the constructor's posted load.
-	ui.RenderNow(false)
-
-	timer := time.NewTimer(time.Hour)
-	timer.Stop()
-	defer timer.Stop()
-
-	for !settled {
-		// A posted render (loader results, selection updates) paints here.
-		select {
-		case <-ui.RenderTicks():
-			ui.RenderNow(false)
-			continue
-		default:
-		}
-		// Arm the wake timer for the next input flush deadline (a lone ESC,
-		// an incomplete sequence, a split Kitty response).
-		var wake <-chan time.Time
-		if isRaw {
-			if flushDeadline, ok := rawTerminal.NextInputFlushDeadline(); ok {
-				delay := time.Until(flushDeadline)
-				if delay <= 0 {
-					for _, sequence := range rawTerminal.FlushPendingInput() {
-						ui.HandleTerminalInput(sequence)
-					}
-					ui.RenderNow(false)
-					continue
-				}
-				timer.Reset(delay)
-				wake = timer.C
-			}
-		}
-
-		select {
-		case <-ui.RenderTicks():
-			ui.RenderNow(false)
-		case chunk, ok := <-inputs:
-			if !ok {
-				continue
-			}
-			if isRaw {
-				for _, sequence := range rawTerminal.FeedInput([]byte(chunk)) {
-					ui.HandleTerminalInput(sequence)
-				}
-			} else {
-				println("HANDLE-LEN", len(chunk))
-				ui.HandleTerminalInput(chunk)
-			}
-			ui.RenderNow(false)
-		case <-wake:
-			if isRaw {
-				for _, sequence := range rawTerminal.FlushPendingInput() {
-					ui.HandleTerminalInput(sequence)
-				}
-			}
-			ui.RenderNow(false)
-		}
-	}
+	// D146: the picker is driven by its own loop, shared with the startup prompts
+	// — terminal input and paints on this goroutine instead of the renderer's
+	// internal render timer.
+	RunStartupScreenLoop(ui, terminal, func() bool { return settled })
 	return <-result
 }
