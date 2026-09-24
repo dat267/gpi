@@ -2,6 +2,7 @@ package coding
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -39,5 +40,32 @@ func TestCustomEntryDataField(t *testing.T) {
 	}
 	if string(parsed.Entry.Data) != string(payload) {
 		t.Fatalf("parsed data = %s", parsed.Entry.Data)
+	}
+}
+
+// entryIDPattern is upstream's short-id shape (generateId slices a random UUID
+// to eight hex characters).
+var entryIDPattern = regexp.MustCompile(`^[0-9a-f]{8}$`)
+
+// TestEntryIDsAreShortAndRandom pins that shape. generateID sliced a UUIDv7,
+// whose leading characters are the millisecond timestamp, so every id generated
+// in the same ~4.3 s window matched, the retry loop burned 100 UUIDs, and the
+// fallback handed out full-length ids: port sessions are full of 32-hex entry
+// ids where upstream has 8.
+func TestEntryIDsAreShortAndRandom(t *testing.T) {
+	m := newTestSessionForProjection(t)
+	for i := 0; i < 8; i++ {
+		m.AppendMessage(createUserMessage("a message that gets an entry id"))
+	}
+
+	seen := map[string]bool{}
+	for _, entry := range m.GetEntries() {
+		if !entryIDPattern.MatchString(entry.ID) {
+			t.Fatalf("entry %q has id %q; want eight hex characters", entry.Type, entry.ID)
+		}
+		if seen[entry.ID] {
+			t.Fatalf("duplicate entry id %q", entry.ID)
+		}
+		seen[entry.ID] = true
 	}
 }

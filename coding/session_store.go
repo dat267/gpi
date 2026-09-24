@@ -173,11 +173,16 @@ func AssertValidSessionID(id string) error {
 	return nil
 }
 
-// generateID makes a unique short id (8 hex chars, collision-checked).
+// generateID makes a unique short id (8 hex chars, collision-checked). The
+// characters come from the random tail of the UUID: upstream slices a random
+// (v4) UUID, whose every character is random, while a UUIDv7 starts with the
+// millisecond timestamp — slicing its head made every id generated in the same
+// ~4.3 s window identical, so the retry loop burned 100 UUIDs and the fallback
+// handed out full-length ids.
 func generateID(byID map[string]*SessionEntry) string {
 	for i := 0; i < 100; i++ {
-		id := UUIDv7()
-		id = strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(id, "-", ""), "_", ""), ".", "")[:8]
+		id := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(UUIDv7(), "-", ""), "_", ""), ".", "")
+		id = id[len(id)-8:]
 		if _, taken := byID[id]; !taken {
 			return id
 		}
