@@ -344,6 +344,14 @@ code comments at the point of divergence; this file is the log. The range is
     belongs to another directory — the port used to boot such a session with the
     starting directory's settings and trust. CLI path flags stay
     process-relative, as upstream's `resolveCliPaths(cwd, …)` does.
+  - **a switch resets the view the way a replacement does** (upstream
+    `rebindCurrentSession` → `renderCurrentSessionState`): the loaded-resources
+    and pending-message containers, the compaction queue, the streaming component
+    and the pending tools are dropped, and the transcript is re-rendered through
+    `renderInitialMessages` — not the reload's `rebuildChatFromMessages`, which
+    skips the initial render's trust warning, its footer update and the editor
+    history it repopulates. `StartupWiring.RenderCurrentSessionState` had no
+    production caller before this.
   - **a switch re-points the settings manager** (`SettingsManager.RebindProject`)
     at the new cwd after resolving its trust with `hasUI` false, so an undecided
     project stays untrusted rather than being asked mid-session (upstream reports

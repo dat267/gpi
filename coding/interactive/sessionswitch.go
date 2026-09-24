@@ -159,7 +159,9 @@ func (a *App) applySessionReplacement(sessionManager *coding.SessionManager) (*S
 		})
 	}
 	a.Footer.Invalidate()
-	a.Startup.RebuildChatFromMessages()
+	// upstream rebindCurrentSession({renderBeforeBind: true}) → the session's own
+	// reset, which is the initial render and not the reload's rebuild.
+	a.Startup.RenderCurrentSessionState()
 	a.UI.RequestRender(false)
 	return &SessionSwitchResult{}, nil
 }

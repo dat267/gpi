@@ -52,6 +52,9 @@ type StartupWiring struct {
 	// SessionInfo is the session manager.
 	SessionInfo *coding.SessionManager
 
+	// ClearCompactionQueue drops the messages queued during a compaction that
+	// belonged to the session being replaced.
+	ClearCompactionQueue func()
 	// RenderInitialMessages re-renders the initial transcript.
 	RenderInitialMessages func()
 	// ShowWarning/ShowError/ShowStatus report messages.
@@ -203,6 +206,9 @@ func (w *StartupWiring) RenderCurrentSessionState() {
 	}
 	if w.PendingMessages != nil {
 		w.PendingMessages.Clear()
+	}
+	if w.ClearCompactionQueue != nil {
+		w.ClearCompactionQueue()
 	}
 	if w.Transcript != nil {
 		w.Transcript.StreamingComponent = nil
@@ -392,5 +398,6 @@ func newStartupWiring(app *App) *StartupWiring {
 		// The branch-navigation reset (ClearChatAndRenderInitialMessages) re-renders
 		// the transcript through this seam; leaving it unset made the reset a no-op.
 		RenderInitialMessages: func() { app.Transcript.RenderInitialMessages() },
+		ClearCompactionQueue:  app.Queue.ClearCompactionQueue,
 	}
 }

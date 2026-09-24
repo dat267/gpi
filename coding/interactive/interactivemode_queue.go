@@ -73,6 +73,13 @@ func NewQueueController(ui tui.TUI, session QueueSession, settings *coding.Setti
 	}
 }
 
+// ClearCompactionQueue drops the messages queued during a compaction without
+// sending them (upstream resetting compactionQueuedMessages when a session is
+// replaced: they belong to the session that is going away).
+func (c *QueueController) ClearCompactionQueue() {
+	c.compactionQueuedMessages = nil
+}
+
 // SetBashMode updates the bash-mode flag (drives the editor border color).
 func (c *QueueController) SetBashMode(isBashMode bool) {
 	if c.isBashMode == isBashMode {
