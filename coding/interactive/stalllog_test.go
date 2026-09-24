@@ -83,3 +83,40 @@ func TestStallLogThresholdDefaultsOn(t *testing.T) {
 		}
 	}
 }
+
+// TestMidPhaseWatchdogRecordsWhileStillRunning covers the mid-phase watchdog: a
+// phase that is still running at the threshold gets a record written from a
+// timer goroutine while the phase executes, so the dump shows where the loop
+// was — the after-phase record only shows the loop back in its event loop. The
+// sleeping test goroutine appears in the mid-phase dump by name; that is the
+// assertion that the capture is mid-flight and not post hoc.
+func TestMidPhaseWatchdogRecordsWhileStillRunning(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pier-stall.log")
+	wiring := &RunWiring{StallLogPath: path, StallLogThreshold: 5 * time.Millisecond}
+	done := wiring.phase("render")
+
+	time.Sleep(40 * time.Millisecond)
+	mid, err := os.ReadFile(path)
+	if err != nil {
+		done()
+		t.Fatalf("no mid-phase record while the phase was still running: %v", err)
+	}
+	midLog := string(mid)
+	if !strings.Contains(midLog, `slow UI phase "render"`) || !strings.Contains(midLog, "still running") {
+		done()
+		t.Fatalf("mid-phase record missing or malformed:\n%s", midLog)
+	}
+	if !strings.Contains(midLog, "TestMidPhaseWatchdogRecordsWhileStillRunning") {
+		done()
+		t.Fatalf("mid-phase dump does not contain the running goroutine's frame:\n%s", midLog)
+	}
+
+	done()
+	final, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("final record not written: %v", err)
+	}
+	if n := strings.Count(string(final), `slow UI phase "render"`); n != 2 {
+		t.Fatalf("want one mid-phase and one final record, got %d:\n%s", n, final)
+	}
+}

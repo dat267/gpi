@@ -135,7 +135,11 @@ invented to bridge that gap). Stage 1 has landed:
   exceeds the threshold is recorded to `<agentDir>/pier-stall.log`, each with a
   goroutine dump. It exists for stutters that do not reproduce on the
   development machine: a record names the phase and the stacks instead of only
-  how long it took. It was opt-in first, but both post-fix freezes struck
+  how long it took. A phase still running at the threshold is also recorded
+  mid-flight by a timer goroutine, whose dump shows where the loop was — the
+  after-phase dump only shows the loop back in its event loop. Heavy tool-side
+  commands (test suites, builds) run `nice`d: on a 4-CPU machine an ungated
+  test run competes with the UI goroutine and looks like a freeze. It was opt-in first, but both post-fix freezes struck
   sessions started without the variable, so the default flipped — a capture
   that requires remembering to set an env var does not survive real usage.
 - The loop calls a **watchdog beat** once per iteration

@@ -8,6 +8,7 @@ import (
 	"runtime/pprof"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -522,14 +523,21 @@ func (w *RunWiring) renderUI() {
 
 // phase measures one UI-loop phase, recording it (with the goroutine stacks)
 // when it exceeds the stall threshold. Usage: defer w.phase("render")().
+// A phase still running at the threshold is recorded mid-flight by a timer
+// goroutine, whose dump shows where the loop was — the after-phase record only
+// shows the loop back in its event loop.
 func (w *RunWiring) phase(name string) func() {
 	if w.StallLogThreshold <= 0 || w.StallLogPath == "" {
 		return func() {}
 	}
 	start := time.Now()
+	watchdog := time.AfterFunc(w.StallLogThreshold, func() {
+		w.writeStallRecord(name, time.Since(start), " still running")
+	})
 	return func() {
+		watchdog.Stop()
 		if elapsed := time.Since(start); elapsed >= w.StallLogThreshold {
-			w.writeStallRecord(name, elapsed)
+			w.writeStallRecord(name, elapsed, "")
 		}
 	}
 }
@@ -539,8 +547,15 @@ func (w *RunWiring) phase(name string) func() {
 const stallLogMaxBytes = 4 << 20
 
 // writeStallRecord appends the slow phase and every goroutine stack, so a stall
-// names where the loop was instead of only how long it took.
-func (w *RunWiring) writeStallRecord(name string, elapsed time.Duration) {
+// names where the loop was instead of only how long it took. note (possibly
+// empty) distinguishes a mid-flight capture from the after-phase one. The mutex
+// serializes the UI goroutine's final record against the watchdog timer's
+// mid-flight one.
+var stallWriteMu sync.Mutex
+
+func (w *RunWiring) writeStallRecord(name string, elapsed time.Duration, note string) {
+	stallWriteMu.Lock()
+	defer stallWriteMu.Unlock()
 	flags := os.O_APPEND | os.O_CREATE | os.O_WRONLY
 	if info, err := os.Stat(w.StallLogPath); err == nil && info.Size() > stallLogMaxBytes {
 		flags = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
@@ -550,7 +565,7 @@ func (w *RunWiring) writeStallRecord(name string, elapsed time.Duration) {
 		return
 	}
 	defer file.Close()
-	fmt.Fprintf(file, "%s slow UI phase %q %v\n", time.Now().Format(time.RFC3339Nano), name, elapsed.Round(time.Millisecond))
+	fmt.Fprintf(file, "%s slow UI phase %q %v%s\n", time.Now().Format(time.RFC3339Nano), name, elapsed.Round(time.Millisecond), note)
 	_ = pprof.Lookup("goroutine").WriteTo(file, 1)
 }
 
