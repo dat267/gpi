@@ -31,11 +31,29 @@ type SessionManager struct {
 	persist     bool
 	flushed     bool
 
-	fileEntries     []FileEntry
-	byID            map[string]*SessionEntry
-	labelsByID      map[string]string
-	labelTimestamps map[string]string
-	leafID          *string
+	fileEntries []FileEntry
+	// loadedData is the file buffer OpenSession loaded from. Raw message and
+	// line subslices of lazily loaded entries alias it, so it is retained for
+	// the manager's lifetime; it costs one copy of the file instead of the
+	// per-entry copies the eager decode made.
+	loadedData []byte
+
+	// cacheScan seeding: the loaded prefix is consumed by a background
+	// goroutine (it parses every message's JSON, ~250ms on a 55MB session),
+	// while appends queue until the seed installs. lazySeedPending marks the
+	// one loadEntries call whose buildIndex must skip the consume; a later
+	// buildIndex (fork, session switch) cancels the in-flight seed and consumes
+	// synchronously instead. cacheSeedGen invalidates an in-flight seed when
+	// the scan state is reset underneath it.
+	lazySeedPending  bool
+	cacheScanSeeding bool
+	cacheScanPending []*SessionEntry
+	cacheSeedGen     int
+	cacheSeedDone    chan struct{}
+	byID             map[string]*SessionEntry
+	labelsByID       map[string]string
+	labelTimestamps  map[string]string
+	leafID           *string
 
 	// branchCache memoizes the current leaf's root path. GetBranch("") is
 	// called on every footer paint (context usage) and rebuilding a long
@@ -142,6 +160,9 @@ func (m *SessionManager) NewSession(options *NewSessionOptions) string {
 	m.leafID = nil
 	m.messages.reset()
 	m.cacheScan.reset()
+	m.cacheSeedGen++
+	m.cacheScanSeeding = false
+	m.cacheScanPending = nil
 	m.flushed = false
 
 	if m.persist {
@@ -162,10 +183,11 @@ func OpenSession(path string, sessionDir string, cwdOverride string) (*SessionMa
 		labelsByID:      map[string]string{},
 		labelTimestamps: map[string]string{},
 	}
-	entries, err := LoadEntriesFromFile(resolvedPath)
+	entries, data, _, err := LoadEntriesFromFileBuffered(resolvedPath)
 	if err != nil {
 		return nil, err
 	}
+	m.loadedData = data
 	cwd := cwdOverride
 	if cwd == "" {
 		if len(entries) > 0 && entries[0].Header != nil {
@@ -195,7 +217,9 @@ func OpenSession(path string, sessionDir string, cwdOverride string) (*SessionMa
 			return m, nil
 		}
 		m.sessionFile = resolvedPath
+		m.lazySeedPending = true
 		m.loadEntries(entries, nil)
+		m.seedCacheScanInBackground()
 		m.flushed = true
 	} else {
 		m.NewSession(nil)
@@ -257,7 +281,55 @@ func (m *SessionManager) loadEntries(entries []FileEntry, options *NewSessionOpt
 	m.buildIndex()
 }
 
+// seedCacheScanInBackground consumes the lazily loaded entries' cache-scan
+// facts off the UI goroutine: the scan parses every message's JSON, ~250ms on
+// a 55MB session, and the load path must not pay it. Until the seed installs,
+// cache statistics are empty and appends queue in order; the seed installs
+// under the manager lock and drains the queue, so the combined state matches
+// an eager consume exactly.
+func (m *SessionManager) seedCacheScanInBackground() {
+	m.cacheScanSeeding = true
+	m.cacheSeedDone = make(chan struct{})
+	gen := m.cacheSeedGen
+	shells := make([]FileEntry, len(m.fileEntries))
+	copy(shells, m.fileEntries)
+	go func() {
+		var state cacheScanState
+		for i := range shells {
+			if entry := shells[i].Entry; entry != nil {
+				state.consume(entry)
+			}
+		}
+		m.mu.Lock()
+		if m.cacheSeedGen != gen {
+			m.mu.Unlock()
+			return
+		}
+		m.cacheScan.prev = state.prev
+		m.cacheScan.candidates = state.candidates
+		m.cacheScan.entryIndex = state.entryIndex
+		m.cacheScanSeeding = false
+		pending := m.cacheScanPending
+		m.cacheScanPending = nil
+		for _, entry := range pending {
+			m.cacheScan.consume(entry)
+		}
+		m.mu.Unlock()
+		close(m.cacheSeedDone)
+	}()
+}
+
 func (m *SessionManager) buildIndex() {
+	lazy := m.lazySeedPending
+	m.lazySeedPending = false
+	if !lazy && m.cacheScanSeeding {
+		// A rebuild while a seed is in flight (fork, session switch) replaces
+		// the entry list the seed was walking: cancel it and consume this
+		// list synchronously. Queued appends belong to the replaced list.
+		m.cacheSeedGen++
+		m.cacheScanSeeding = false
+		m.cacheScanPending = nil
+	}
 	m.byID = map[string]*SessionEntry{}
 	m.labelsByID = map[string]string{}
 	m.labelTimestamps = map[string]string{}
@@ -270,7 +342,9 @@ func (m *SessionManager) buildIndex() {
 		if entry == nil {
 			continue
 		}
-		m.cacheScan.consume(entry)
+		if !lazy {
+			m.cacheScan.consume(entry)
+		}
 		m.byID[entry.ID] = entry
 		leafID := entry.ID
 		m.leafID = &leafID

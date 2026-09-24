@@ -1,6 +1,7 @@
 package coding
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
@@ -123,6 +124,300 @@ func MarshalFileEntry(entry FileEntry) (string, error) {
 	}
 	enc, err := ai.MarshalJSON(entry.Entry)
 	return string(enc) + "\n", err
+}
+
+// sessionLineMeta is what the index scan extracts from one JSONL line.
+type sessionLineMeta struct {
+	typ       string
+	id        string
+	parentID  *string
+	timestamp string
+	message   []byte // the raw "message" member value, nil when absent
+}
+
+// scanSessionLine extracts the top-level members a lazy load needs without a
+// structural JSON decode. Message entries are ~98% of a real session file's
+// bytes and are complete with their base fields plus the raw message, so the
+// loader can skip decoding them entirely. The scanner is conservative: any
+// shape it does not fully understand — escaped strings, unexpected members,
+// non-objects, malformed structure — returns ok=false and the caller
+// full-decodes the line instead, so the two paths can never disagree.
+func scanSessionLine(line []byte) (sessionLineMeta, bool) {
+	var meta sessionLineMeta
+	i := 0
+	skipSpace := func() {
+		for i < len(line) && (line[i] == ' ' || line[i] == '\t' || line[i] == '\r' || line[i] == '\n') {
+			i++
+		}
+	}
+	skipSpace()
+	if i >= len(line) || line[i] != '{' {
+		return meta, false
+	}
+	i++
+	first := true
+	seen := map[string]bool{}
+	for {
+		skipSpace()
+		if i >= len(line) {
+			return meta, false
+		}
+		if line[i] == '}' {
+			i++
+			break
+		}
+		if !first {
+			if line[i] != ',' {
+				return meta, false
+			}
+			i++
+			skipSpace()
+			if i < len(line) && line[i] == '}' {
+				return meta, false // trailing comma: not valid JSON
+			}
+		}
+		key, n, ok := scanJSONStringBytes(line[i:])
+		if !ok || strings.IndexByte(key, '\\') >= 0 {
+			// An escaped key decodes to a name the switch would miss, leaving
+			// a field silently unset in the shell; reject the fast path.
+			return meta, false
+		}
+		if seen[key] {
+			// The v2 decoder rejects duplicate members, so the scanner must
+			// not shell out a line the decode would drop.
+			return meta, false
+		}
+		seen[key] = true
+		i += n
+		skipSpace()
+		if i >= len(line) || line[i] != ':' {
+			return meta, false
+		}
+		i++
+		skipSpace()
+		switch key {
+		case "type", "id", "timestamp":
+			val, n, ok := scanJSONStringBytes(line[i:])
+			if !ok || strings.IndexByte(val, '\\') >= 0 {
+				return meta, false
+			}
+			switch key {
+			case "type":
+				meta.typ = val
+			case "id":
+				meta.id = val
+			case "timestamp":
+				meta.timestamp = val
+			}
+			i += n
+		case "parentId":
+			if bytes.HasPrefix(line[i:], []byte("null")) {
+				i += 4
+			} else {
+				val, n, ok := scanJSONStringBytes(line[i:])
+				if !ok || strings.IndexByte(val, '\\') >= 0 {
+					return meta, false
+				}
+				parent := val
+				meta.parentID = &parent
+				i += n
+			}
+		case "message":
+			n, ok := skipJSONValue(line[i:])
+			if !ok {
+				return meta, false
+			}
+			meta.message = line[i : i+n]
+			i += n
+		default:
+			// An unknown member means the shell would silently drop it;
+			// only lines whose members are all understood can be shelled.
+			return meta, false
+		}
+		first = false
+	}
+	skipSpace()
+	if i != len(line) {
+		return meta, false
+	}
+	return meta, true
+}
+
+// scanJSONStringBytes consumes one JSON string and returns its raw inner bytes
+// (escape sequences left in; callers reject strings containing them).
+func scanJSONStringBytes(s []byte) (content string, consumed int, ok bool) {
+	if len(s) == 0 || s[0] != '"' {
+		return "", 0, false
+	}
+	i := 1
+	for i < len(s) {
+		switch s[i] {
+		case '"':
+			return string(s[1:i]), i + 1, true
+		case '\\':
+			i += 2
+		default:
+			i++
+		}
+	}
+	return "", 0, false
+}
+
+// skipJSONValue consumes one JSON value of any type, tracking nesting and
+// strings, without validating beyond structure.
+func skipJSONValue(s []byte) (consumed int, ok bool) {
+	if len(s) == 0 {
+		return 0, false
+	}
+	switch s[0] {
+	case '"':
+		_, n, ok := scanJSONStringBytes(s)
+		return n, ok
+	case '{', '[':
+		depth := 0
+		for i := 0; i < len(s); i++ {
+			switch s[i] {
+			case '"':
+				_, n, ok := scanJSONStringBytes(s[i:])
+				if !ok {
+					return 0, false
+				}
+				i += n - 1
+			case '{', '[':
+				depth++
+			case '}', ']':
+				depth--
+				if depth == 0 {
+					return i + 1, true
+				}
+			}
+		}
+		return 0, false
+	case 't':
+		if bytes.HasPrefix(s, []byte("true")) {
+			return 4, true
+		}
+	case 'f':
+		if bytes.HasPrefix(s, []byte("false")) {
+			return 5, true
+		}
+	case 'n':
+		if bytes.HasPrefix(s, []byte("null")) {
+			return 4, true
+		}
+	default:
+		for i := 0; i < len(s); i++ {
+			switch {
+			case s[i] >= '0' && s[i] <= '9', s[i] == '-', s[i] == '+', s[i] == '.', s[i] == 'e', s[i] == 'E':
+			default:
+				if i == 0 {
+					return 0, false
+				}
+				return i, true
+			}
+		}
+		return len(s), true
+	}
+	return 0, false
+}
+
+// LoadEntriesFromFileBuffered loads a session file the lazy way: one scan
+// extracts per-line metadata and the raw message member without a structural
+// decode, and message entries become complete shells referencing the buffer.
+// The returned buffer backs every raw subslice and must be kept alive alongside
+// the entries (OpenSession keeps it on the manager). fast reports whether the
+// scanner path was used: older-format files are fully decoded instead, because
+// the version migration may rewrite them.
+func LoadEntriesFromFileBuffered(filePath string) ([]FileEntry, []byte, bool, error) {
+	resolved := NormalizePath(filePath, PathInputOptions{})
+	if _, err := os.Stat(resolved); err != nil {
+		return nil, nil, false, nil
+	}
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	// The header's version decides the path: a file that needs the v2->v3
+	// migration is fully decoded so the migration sees exactly what it always
+	// has.
+	fast := true
+	if headerLine, _, found := firstJSONLLine(data); found {
+		if headerEntry, err := UnmarshalFileEntry(string(headerLine)); err == nil && headerEntry.Header != nil {
+			if headerEntry.Header.Version != nil && *headerEntry.Header.Version < CurrentSessionVersion {
+				fast = false
+			}
+		}
+	}
+
+	var entries []FileEntry
+	start := 0
+	for start < len(data) {
+		end := bytes.IndexByte(data[start:], '\n')
+		var line []byte
+		if end == -1 {
+			line = data[start:]
+			start = len(data)
+		} else {
+			line = data[start : start+end]
+			start += end + 1
+		}
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		if fast {
+			if meta, ok := scanSessionLine(line); ok && meta.typ == "message" && meta.id != "" {
+				entry := &SessionEntry{
+					Type: meta.typ,
+					SessionEntryBase: SessionEntryBase{
+						ID:        meta.id,
+						ParentID:  meta.parentID,
+						Timestamp: meta.timestamp,
+					},
+					Message: json.RawMessage(meta.message),
+				}
+				entry.raw = json.RawMessage(line)
+				entries = append(entries, FileEntry{Entry: entry})
+				continue
+			}
+		}
+		entry, err := UnmarshalFileEntry(string(line))
+		if err == nil {
+			entries = append(entries, *entry)
+		}
+	}
+	// Header validation before repair, as in the eager loader.
+	if len(entries) == 0 {
+		return entries, data, fast, nil
+	}
+	header := entries[0]
+	if header.Header == nil || header.Header.ID == "" {
+		return entries, data, fast, nil
+	}
+	if !bytes.HasSuffix(data, []byte("\n")) && len(data) > 0 {
+		_ = os.WriteFile(resolved, append(append([]byte{}, data...), '\n'), 0o644)
+	}
+	return entries, data, fast, nil
+}
+
+// firstJSONLLine returns the first non-blank line of the buffer.
+func firstJSONLLine(data []byte) (line []byte, start int, found bool) {
+	s := 0
+	for s < len(data) {
+		end := bytes.IndexByte(data[s:], '\n')
+		var line []byte
+		if end == -1 {
+			line = data[s:]
+			s = len(data)
+		} else {
+			line = data[s : s+end]
+			s += end + 1
+		}
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		return line, s, true
+	}
+	return nil, 0, false
 }
 
 // UnmarshalFileEntry decodes one JSONL line.
