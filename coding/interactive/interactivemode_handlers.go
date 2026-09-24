@@ -600,11 +600,12 @@ func newSubmitWiring(app *App) *SubmitWiring {
 						truncation = &coding.TruncationResult{Truncated: true, Content: result.Output}
 					}
 					app.UI.Post(func() {
+						// ExecuteBash recorded the result itself (upstream executeBash
+						// calls recordBashResult), which is what puts it in the
+						// transcript's replay and keeps the `!!` form out of the model's
+						// context. Recording it here as well wrote every `!` run to the
+						// session twice, and a reopened session rendered it twice.
 						component.SetComplete(result.ExitCode, result.Cancelled, truncation, result.FullOutputPath)
-						// The result also joins the session history, which is what puts it in
-						// the transcript's replay (and keeps it out of the model's context
-						// for the `!!` form).
-						app.Session.RecordBashResult(command, *result, excludeFromContext)
 						app.UI.RequestRender(false)
 					})
 					return nil

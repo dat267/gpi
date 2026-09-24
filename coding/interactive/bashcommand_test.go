@@ -140,18 +140,72 @@ func TestBashCommandShowsTheExitCode(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	waitForBashExitCode(t, app, "(exit 3)")
+}
+
+// waitForBashExitCode drains the loop until the component renders its exit
+// code. SetComplete and the recording both happen in one posted callback, so
+// the rendered exit code means every record that is going to happen has
+// happened.
+func waitForBashExitCode(t *testing.T, app *App, marker string) {
+	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		app.UI.RenderNow(true)
 		if component := bashComponentIn(app); component != nil {
-			if rendered := strings.Join(component.Render(80), "\n"); strings.Contains(rendered, "(exit 3)") {
+			if rendered := strings.Join(component.Render(80), "\n"); strings.Contains(rendered, marker) {
 				return
 			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the component never showed the exit code; children = %d", len(app.Chat.Children))
+			t.Fatalf("the component never showed %q; children = %d", marker, len(app.Chat.Children))
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// countBashExecutionEntries counts the session's bash-execution entries: the
+// transcript replay (and therefore what `pier -c` renders) is built from those.
+func countBashExecutionEntries(t *testing.T, app *App) int {
+	t.Helper()
+	count := 0
+	for _, entry := range app.Session.Sessions.GetEntries() {
+		if len(entry.Message) == 0 {
+			continue
+		}
+		var message struct {
+			Role string `json:"role"`
+		}
+		if err := json.Unmarshal(entry.Message, &message); err != nil {
+			t.Fatalf("decode entry message: %v", err)
+		}
+		if message.Role == coding.RoleBashExecution {
+			count++
+		}
+	}
+	return count
+}
+
+// TestBashCommandIsRecordedOnce pins one session entry per `!` run. The
+// session's ExecuteBash records the result itself (upstream executeBash calls
+// recordBashResult), so the handler must not record it again — it did, which
+// wrote every run to the session twice and made a reopened session render the
+// command and its output twice.
+func TestBashCommandIsRecordedOnce(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+
+	// A non-zero exit, because that is what renders the completion marker the
+	// wait below keys on.
+	run := newSubmitWiring(app).Handlers.HandleBashCommand
+	if err := run("exit 3", false); err != nil {
+		t.Fatal(err)
+	}
+	pumpUntilRecorded(t, app, "exit 3")
+	waitForBashExitCode(t, app, "(exit 3)")
+
+	if count := countBashExecutionEntries(t, app); count != 1 {
+		t.Fatalf("session holds %d bash-execution entries for one command; want 1", count)
 	}
 }
 
