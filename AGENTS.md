@@ -129,11 +129,15 @@ invented to bridge that gap). Stage 1 has landed:
   producers blocked on a full channel are released by the run context's
   cancellation or by the queue's `Close` (the terminal reader and event
   subscribers never receive a context, so both arms are present).
-- **`PIER_STALL_MS=<ms>`** makes the loop record every phase it measures
-  (`render`, `events`, `event-apply`, `beat`, `input`) above the threshold to
-  `<agentDir>/pier-stall.log`, each with a goroutine dump. It is off by default
-  and exists for stutters that do not reproduce on the development machine: a
-  record names the phase and the stacks instead of only how long it took.
+- **Slow-phase logging is on by default at 100 ms**; `PIER_STALL_MS=<ms>`
+  overrides the threshold and `PIER_STALL_MS=0` disables it. Every phase the
+  loop measures (`render`, `events`, `event-apply`, `beat`, `input`) that
+  exceeds the threshold is recorded to `<agentDir>/pier-stall.log`, each with a
+  goroutine dump. It exists for stutters that do not reproduce on the
+  development machine: a record names the phase and the stacks instead of only
+  how long it took. It was opt-in first, but both post-fix freezes struck
+  sessions started without the variable, so the default flipped — a capture
+  that requires remembering to set an env var does not survive real usage.
 - The loop calls a **watchdog beat** once per iteration
   (`RunWiring.LoopBeats`, exposed as `App.LoopBeats`): a stalled loop stops
   advancing it, so a watchdog can detect a hang.

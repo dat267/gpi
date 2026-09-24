@@ -69,7 +69,8 @@ type RunWiring struct {
 	OnPartialEventApplied func()
 	// StallLogPath, when non-empty, receives a record with a goroutine dump for
 	// any UI-loop phase that exceeds StallLogThreshold. It exists to diagnose
-	// stutters that do not reproduce elsewhere: PIER_STALL_MS sets both.
+	// stutters that do not reproduce elsewhere: the threshold defaults to 100ms
+	// and PIER_STALL_MS overrides it (0 disables).
 	StallLogPath      string
 	StallLogThreshold time.Duration
 	// OnThemeChange registers the theme-file watcher callback.
@@ -980,15 +981,18 @@ func versionNotification(release *coding.LatestRelease) (*LatestRelease, bool) {
 	return &LatestRelease{Version: release.Version}, true
 }
 
-// stallLogThreshold reads PIER_STALL_MS: zero (the default) disables the log.
+// stallLogThreshold defaults to 100ms so a freeze is captured even when the
+// session was not started with PIER_STALL_MS — the first two freezes after the
+// markdown fix struck sessions with the logger off, and both went undiagnosed.
+// PIER_STALL_MS overrides it; PIER_STALL_MS=0 disables the log entirely.
 func stallLogThreshold() time.Duration {
 	value := os.Getenv("PIER_STALL_MS")
 	if value == "" {
-		return 0
+		return 100 * time.Millisecond
 	}
 	millis, err := strconv.Atoi(value)
-	if err != nil || millis <= 0 {
-		return 0
+	if err != nil || millis < 0 {
+		return 100 * time.Millisecond
 	}
 	return time.Duration(millis) * time.Millisecond
 }
