@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -125,23 +126,50 @@ func MarshalFileEntry(entry FileEntry) (string, error) {
 }
 
 // UnmarshalFileEntry decodes one JSONL line.
+// entryTypeFast reads the top-level "type" member straight from the prefix.
+// Our writer (and upstream's) emits "type" first, so this dispatches without
+// decoding: the probe pass otherwise scans and validates the entire line to
+// read one field, doubling the JSON work on 23k-line session loads. Anything
+// that does not match the shape falls back to the probe decode.
+func entryTypeFast(line string) (string, bool) {
+	const prefix = `{"type":"`
+	if !strings.HasPrefix(line, prefix) {
+		return "", false
+	}
+	rest := line[len(prefix):]
+	end := strings.IndexByte(rest, '"')
+	if end < 0 {
+		return "", false
+	}
+	return rest[:end], true
+}
+
 func UnmarshalFileEntry(line string) (*FileEntry, error) {
-	var probe struct {
-		Type string `json:"type"`
+	// encoding/json/v2 directly: the v1 API wraps v2 with legacy compatibility
+	// (case-insensitive members, etc.) that costs ~2.5x on the 23k-line session
+	// loads — measured at 707ms vs 276ms against upstream for a 55MB file.
+	// Custom UnmarshalJSON methods on the message types still run, through v2's
+	// arshaler wrapper.
+	typ, fast := entryTypeFast(line)
+	if !fast {
+		var probe struct {
+			Type string `json:"type"`
+		}
+		if err := jsonv2.Unmarshal([]byte(line), &probe); err != nil {
+			return nil, err
+		}
+		typ = probe.Type
 	}
-	if err := json.Unmarshal([]byte(line), &probe); err != nil {
-		return nil, err
-	}
-	if probe.Type == "session" {
+	if typ == "session" {
 		var header SessionHeader
-		if err := json.Unmarshal([]byte(line), &header); err != nil {
+		if err := jsonv2.Unmarshal([]byte(line), &header); err != nil {
 			return nil, err
 		}
 		header.raw = json.RawMessage(line)
 		return &FileEntry{Header: &header}, nil
 	}
 	var entry SessionEntry
-	if err := json.Unmarshal([]byte(line), &entry); err != nil {
+	if err := jsonv2.Unmarshal([]byte(line), &entry); err != nil {
 		return nil, err
 	}
 	entry.raw = json.RawMessage(line)

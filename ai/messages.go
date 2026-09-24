@@ -3,6 +3,7 @@ package ai
 import (
 	"bytes"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"sort"
 )
@@ -120,10 +121,10 @@ func (s StringOrBlocks) MarshalJSON() ([]byte, error) {
 func (s *StringOrBlocks) UnmarshalJSON(data []byte) error {
 	if len(data) > 0 && data[0] == '"' {
 		s.Blocks = nil
-		return json.Unmarshal(data, &s.Text)
+		return jsonv2.Unmarshal(data, &s.Text)
 	}
 	var raw []json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := jsonv2.Unmarshal(data, &raw); err != nil {
 		return err
 	}
 	blocks := make([]Content, 0, len(raw))
@@ -312,7 +313,7 @@ func decodeSections(data []byte, m *SystemMessage) error {
 		}
 		if string(raw) != "null" {
 			var s string
-			if err := json.Unmarshal(raw, &s); err != nil {
+			if err := jsonv2.Unmarshal(raw, &s); err != nil {
 				return err
 			}
 			value = &s
@@ -376,7 +377,7 @@ func (m *SystemMessage) UnmarshalJSON(data []byte) error {
 		ToolsRemoved []ToolReference `json:"toolsRemoved"`
 		Timestamp    int64           `json:"timestamp"`
 	}
-	if err := json.Unmarshal(data, &wire); err != nil {
+	if err := jsonv2.Unmarshal(data, &wire); err != nil {
 		return err
 	}
 	*m = SystemMessage{
@@ -509,7 +510,7 @@ func (t *Tool) UnmarshalJSON(data []byte) error {
 		Parameters          json.RawMessage `json:"parameters"`
 		ConstrainedSampling json.RawMessage `json:"constrainedSampling,omitempty"`
 	}
-	if err := json.Unmarshal(data, &a); err != nil {
+	if err := jsonv2.Unmarshal(data, &a); err != nil {
 		return err
 	}
 	t.Name, t.Description, t.Parameters = a.Name, a.Description, a.Parameters
@@ -520,7 +521,7 @@ func (t *Tool) UnmarshalJSON(data []byte) error {
 		t.ConstrainedSampling = FalseValue
 	default:
 		cfg := new(ConstrainedSamplingConfig)
-		if err := json.Unmarshal(a.ConstrainedSampling, cfg); err != nil {
+		if err := jsonv2.Unmarshal(a.ConstrainedSampling, cfg); err != nil {
 			return err
 		}
 		t.ConstrainedSampling = ConstrainedSamplingValue{Set: true, Config: cfg}
@@ -566,7 +567,7 @@ func (c *ConstrainedSamplingConfig) UnmarshalJSON(data []byte) error {
 	var probe struct {
 		Type string `json:"type"`
 	}
-	if err := json.Unmarshal(data, &probe); err != nil {
+	if err := jsonv2.Unmarshal(data, &probe); err != nil {
 		return err
 	}
 	switch probe.Type {
@@ -575,7 +576,7 @@ func (c *ConstrainedSamplingConfig) UnmarshalJSON(data []byte) error {
 			Type   string `json:"type"`
 			Strict string `json:"strict"`
 		}
-		if err := json.Unmarshal(data, &v); err != nil {
+		if err := jsonv2.Unmarshal(data, &v); err != nil {
 			return err
 		}
 		*c = ConstrainedSamplingConfig{Type: v.Type, Strict: v.Strict}
@@ -584,7 +585,7 @@ func (c *ConstrainedSamplingConfig) UnmarshalJSON(data []byte) error {
 			Type     string            `json:"type"`
 			Variants map[string]string `json:"variants"`
 		}
-		if err := json.Unmarshal(data, &v); err != nil {
+		if err := jsonv2.Unmarshal(data, &v); err != nil {
 			return err
 		}
 		*c = ConstrainedSamplingConfig{Type: v.Type, Variants: v.Variants}
