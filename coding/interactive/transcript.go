@@ -67,6 +67,11 @@ type TranscriptRenderer struct {
 	// MessageRenderer resolves extension message renderers (out of scope).
 	MessageRenderer func(customType string) MessageRenderer
 
+	// RenderProjectTrustWarning draws the untrusted-project warning, which
+	// RenderInitialMessages runs through on every rebuild (upstream
+	// renderProjectTrustWarningIfNeeded).
+	RenderProjectTrustWarning func()
+
 	pendingTools             map[string]*ToolExecutionComponent
 	lastStatusSpacer         *tui.Spacer
 	lastStatusText           *tui.Text
@@ -680,6 +685,13 @@ func (r *TranscriptRenderer) RenderInitialMessages() {
 	}
 	entries := r.SessionInfo.BuildContextEntriesForLeaf()
 	r.RenderSessionEntries(entries, true, true)
+
+	// Upstream renderInitialMessages draws the untrusted-project warning here, so
+	// it is present at startup and comes back with every rebuild (the tree
+	// navigation's included).
+	if r.RenderProjectTrustWarning != nil {
+		r.RenderProjectTrustWarning()
+	}
 
 	allEntries := r.SessionInfo.GetEntries()
 	compactionCount := 0

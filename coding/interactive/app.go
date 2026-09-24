@@ -323,6 +323,11 @@ func NewApp(options AppOptions) *App {
 	app.Transcript.Editor = app.DefaultEditor
 	app.Transcript.Display = app.Display
 	app.Transcript.MarkdownTheme = app.markdownTheme()
+	// Upstream's renderInitialMessages draws the untrusted-project warning, so the
+	// warning appears at startup and again whenever the transcript is rebuilt.
+	if app.Trust != nil {
+		app.Transcript.RenderProjectTrustWarning = app.Trust.RenderProjectTrustWarningIfNeeded
+	}
 
 	app.Queue = NewQueueController(app.UI, app.Session, app.Settings, app.DefaultEditor, app.Chat, app.PendingMessages)
 	// The queue reports through these functions, and an unassigned one is a silent

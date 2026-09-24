@@ -3,6 +3,7 @@ package interactive
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -269,6 +270,7 @@ func TestAppWiringCompleteness(t *testing.T) {
 		{"Submit.Handlers.Shutdown", app.Submit.Handlers.Shutdown != nil},
 		{"Trust.Stop", app.Trust.Stop != nil},
 		{"Startup.RenderInitialMessages", app.Startup.RenderInitialMessages != nil},
+		{"Transcript.RenderProjectTrustWarning", app.Transcript.RenderProjectTrustWarning != nil},
 		{"Startup.ShowError", app.Startup.ShowError != nil},
 		{"Startup.ShowStatus", app.Startup.ShowStatus != nil},
 		{"Startup.RequestRender", app.Startup.RequestRender != nil},
@@ -311,5 +313,36 @@ func TestNavigatedEditorTextKeepsDrafts(t *testing.T) {
 	app.Selectors.SetNavigatedEditorText("third point")
 	if got := app.DefaultEditor.GetText(); got != "third point" {
 		t.Errorf("whitespace-only editor = %q", got)
+	}
+}
+
+// Upstream draws the untrusted-project warning from renderInitialMessages
+// (interactive-mode.ts:4062) — the function the tree navigation calls to rebuild
+// the transcript, so the warning comes back with it. The port's
+// RenderProjectTrustWarningIfNeeded was only ever called by tests, so the
+// warning never appeared on screen at all.
+func TestRenderInitialMessagesWarnsAboutUntrustedProject(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+
+	cwd := app.SessionMgr.GetCwd()
+	configDir := filepath.Join(cwd, coding.ConfigDirName, "skills")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// SettingsManagerCreateOptions.ProjectTrusted defaults to true.
+	app.Settings.SetProjectTrusted(false)
+	if app.Settings.IsProjectTrusted() {
+		t.Fatal("the test project should be untrusted")
+	}
+	if !coding.HasTrustRequiringProjectResources(cwd) {
+		t.Fatalf("expected %s to require trust", configDir)
+	}
+
+	app.Chat.Clear()
+	app.Transcript.RenderInitialMessages()
+	rendered := strings.Join(renderChat(t, app.Chat), "\n")
+	if !strings.Contains(rendered, "This project is not trusted") {
+		t.Errorf("the trust warning is missing from the transcript:\n%s", rendered)
 	}
 }
