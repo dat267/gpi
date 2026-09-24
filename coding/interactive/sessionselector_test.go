@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,6 +92,14 @@ func TestSessionSelectorAgainstUpstreamGolden(t *testing.T) {
 
 	for _, label := range sortedKeys(corpus.Cases) {
 		spec := corpus.Cases[label]
+		if label == "narrow" {
+			// The one upstream render the port deliberately does not reproduce:
+			// at 44 columns upstream truncates the header's controls and squeezes
+			// the message beside its metadata, and the port stacks both instead
+			// (D158). TestSessionSelectorHeaderStacksOnNarrowTerminals and
+			// TestSessionListUsesTwoLineRowsOnNarrowTerminals pin the replacement.
+			continue
+		}
 		// A fixed "now" keeps the relative ages stable while still matching
 		// the probe's Date.now()-based offsets.
 		now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
@@ -290,5 +299,165 @@ func TestSessionSelectorDeleteFlow(t *testing.T) {
 	}
 	if message := component.GetHeader().statusMessage; message == nil || message.Message != "Session moved to trash" {
 		t.Fatalf("status = %+v", message)
+	}
+}
+
+// The session picker is also the mobile interface (/resume on a phone, or pier
+// -r over ssh from Termux): at phone widths upstream's single-line header is
+// truncated to the title plus at best one control, and the right-hand metadata
+// column squeezes the session's message into a handful of characters. Below
+// mobileTerminalWidth the port stacks both — controls on their own lines, the
+// metadata under the message — which is a deliberate divergence (D158).
+
+// mobileTestMessage is 36 columns: too wide for a 40-column one-line row beside
+// its metadata, comfortable once the metadata moves below it.
+const mobileTestMessage = "Fix the parser bug in the loader"
+
+func newMobileSessionList(t *testing.T, width int) *SessionList {
+	t.Helper()
+	SetCustomThemesDir(t.TempDir())
+	SetRegisteredThemes(nil)
+	SetTrueColorSupport(true)
+	SetStyleColorsEnabled(true)
+	InitTheme("dark", false)
+	appKeybindings := NewAppKeybindingsManager(nil, "")
+	previous := tui.GetKeybindings()
+	tui.SetKeybindings(appKeybindings.KeybindingsManager)
+	t.Cleanup(func() { tui.SetKeybindings(previous) })
+
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	infos := toSessionInfos([]sessionSpecJSON{
+		{Path: "/s/one.jsonl", FirstMessage: mobileTestMessage, ModifiedAgoMs: 3 * 3600 * 1000, MessageCount: 3},
+		{Path: "/s/two.jsonl", MessageCount: 2, FirstMessage: "Deploy the release to staging", ModifiedAgoMs: 8 * 24 * 3600 * 1000},
+	}, now)
+	list := NewSessionList(infos, false, SortThreaded, NameFilterAll, appKeybindings.KeybindingsManager, "")
+	list.now = func() time.Time { return now }
+	list.maxVisible = 4
+	return list
+}
+
+// TestSessionListUsesTwoLineRowsOnNarrowTerminals: the message gets the full
+// width and the metadata moves below it.
+// plainLines strips styling so the layout can be asserted on text.
+func plainLines(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, strings.TrimRight(ansiSequenceRe.ReplaceAllString(line, ""), " "))
+	}
+	return out
+}
+
+func TestSessionListUsesTwoLineRowsOnNarrowTerminals(t *testing.T) {
+	list := newMobileSessionList(t, 40)
+	lines := list.Render(40)
+	for _, line := range lines {
+		if tui.VisibleWidth(line) > 40 {
+			t.Errorf("line wider than the terminal: %q", line)
+		}
+	}
+	rows := plainLines(lines)
+	joined := strings.Join(rows, "\n")
+	// The message is 36 columns: it does not fit beside the metadata at 40
+	// columns, so it is only shown whole once the metadata is below it.
+	if !strings.Contains(joined, "› "+mobileTestMessage) {
+		t.Errorf("the selected message should keep the full width:\n%s", joined)
+	}
+	if !strings.Contains(joined, "3 3h") {
+		t.Errorf("the metadata is missing from its own line:\n%s", joined)
+	}
+	for index, row := range rows {
+		if !strings.Contains(row, "3 3h") {
+			continue
+		}
+		if index == 0 {
+			t.Fatalf("metadata on the message's line:\n%s", joined)
+		}
+		if !strings.HasPrefix(row, "  3 3h") {
+			t.Errorf("metadata line = %q, want it indented under the message", row)
+		}
+	}
+}
+
+// The wide layout is untouched: same one line per session as upstream.
+func TestSessionListKeepsOneLineWhenWide(t *testing.T) {
+	list := newMobileSessionList(t, 100)
+	lines := list.Render(100)
+	if len(lines) > 8 {
+		t.Fatalf("expected one line per session, got %d lines:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(strings.Join(plainLines(lines), "\n"), "3 3h") {
+		t.Fatalf("metadata missing at width 100:\n%s", strings.Join(plainLines(lines), "\n"))
+	}
+}
+
+// TestSessionSelectorHeaderStacksOnNarrowTerminals: every control stays
+// readable instead of the line being cut off.
+func TestSessionSelectorHeaderStacksOnNarrowTerminals(t *testing.T) {
+	SetCustomThemesDir(t.TempDir())
+	SetRegisteredThemes(nil)
+	SetTrueColorSupport(true)
+	SetStyleColorsEnabled(true)
+	InitTheme("dark", false)
+
+	header := NewSessionSelectorHeader(SessionScopeCurrent, SortThreaded, NameFilterAll, func() {})
+	lines := header.Render(40)
+	for _, line := range lines {
+		if tui.VisibleWidth(line) > 40 {
+			t.Errorf("header line wider than the terminal: %q", line)
+		}
+	}
+	joined := strings.Join(plainLines(lines), "\n")
+	for _, want := range []string{"Resume Session (Current Folder)", "◉ Current Folder", "Name: All", "Sort: Threaded"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("header is missing %q:\n%s", want, joined)
+		}
+	}
+	// The title is its own line, and the controls follow on theirs.
+	rows := plainLines(lines)
+	if !strings.Contains(rows[0], "Resume Session (Current Folder)") {
+		t.Errorf("first line = %q, want the title", rows[0])
+	}
+	if strings.Contains(rows[0], "Sort:") {
+		t.Errorf("the controls should have moved off the title's line: %q", rows[0])
+	}
+}
+
+// The header at 80 columns is upstream's single line, unchanged.
+func TestSessionSelectorHeaderStaysOneLineWhenWide(t *testing.T) {
+	SetCustomThemesDir(t.TempDir())
+	SetRegisteredThemes(nil)
+	SetTrueColorSupport(true)
+	SetStyleColorsEnabled(true)
+	InitTheme("dark", false)
+
+	header := NewSessionSelectorHeader(SessionScopeCurrent, SortThreaded, NameFilterAll, func() {})
+	lines := plainLines(header.Render(80))
+	// At 80 columns upstream cuts the title short rather than moving a control:
+	// the title still leads the line and every control follows it.
+	if !strings.HasPrefix(lines[0], "Resume Session (Current Fol") || !strings.Contains(lines[0], "Sort: Threaded") {
+		t.Fatalf("wide header line = %q, want title and controls together", lines[0])
+	}
+	if len(lines) < 3 {
+		t.Fatalf("wide header = %#v, want the three upstream lines", lines)
+	}
+}
+
+// TestWrapParts covers the layout helper: one line when the parts fit, more when
+// they do not, and never past the width.
+func TestWrapParts(t *testing.T) {
+	if got := wrapParts([]string{"aa", "bb", "cc"}, " · ", 40); len(got) != 1 || got[0] != "aa · bb · cc" {
+		t.Fatalf("fits on one line: %#v", got)
+	}
+	got := wrapParts([]string{"aaaa", "bbbb", "cccc"}, " · ", 12)
+	if len(got) != 2 || got[0] != "aaaa · bbbb" || got[1] != "cccc" {
+		t.Fatalf("wrap = %#v", got)
+	}
+	for _, line := range got {
+		if tui.VisibleWidth(line) > 12 {
+			t.Errorf("line %q exceeds the width", line)
+		}
+	}
+	if got := wrapParts([]string{"averyveryveryverylongpart"}, " · ", 8); len(got) != 1 || tui.VisibleWidth(got[0]) > 8 {
+		t.Fatalf("oversized part = %#v", got)
 	}
 }

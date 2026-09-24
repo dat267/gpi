@@ -143,6 +143,43 @@ type sessionStatusMessage struct {
 }
 
 // SessionSelectorHeader renders the selector title, scope and hints.
+// mobileTerminalWidth is the width below which the session picker switches to
+// the stacked layout (D158). Upstream keeps one line per header part and one
+// column of metadata on the right, which on a phone-sized terminal leaves the
+// header showing the title and at most one control, and the session's message a
+// handful of characters. Both are usable from about 60 columns up.
+const mobileTerminalWidth = 60
+
+// wrapParts lays out already-styled parts on as few lines as width allows,
+// keeping separator between the parts on a line. It is what keeps the narrow
+// header's controls and hints readable instead of truncating them.
+func wrapParts(parts []string, separator string, width int) []string {
+	if len(parts) == 0 {
+		return nil
+	}
+	separatorWidth := tui.VisibleWidth(separator)
+	var lines []string
+	current := ""
+	currentWidth := 0
+	for _, part := range parts {
+		partWidth := tui.VisibleWidth(part)
+		switch {
+		case current == "":
+			current, currentWidth = part, partWidth
+		case currentWidth+separatorWidth+partWidth <= width:
+			current += separator + part
+			currentWidth += separatorWidth + partWidth
+		default:
+			lines = append(lines, tui.TruncateToWidth(current, width, "…", false))
+			current, currentWidth = part, partWidth
+		}
+	}
+	if current != "" {
+		lines = append(lines, tui.TruncateToWidth(current, width, "…", false))
+	}
+	return lines
+}
+
 type SessionSelectorHeader struct {
 	scope      SessionScope
 	sortMode   SortMode
@@ -277,22 +314,39 @@ func (h *SessionSelectorHeader) Render(width int) []string {
 		scopeText = theme.Fg("muted", "○ Current Folder | ") + theme.Fg("accent", "◉ All")
 	}
 
-	rightText := tui.TruncateToWidth(scopeText+"  "+nameText+"  "+sortText, width, "", false)
-	availableLeft := max(0, width-tui.VisibleWidth(rightText)-1)
-	left := tui.TruncateToWidth(leftText, availableLeft, "", false)
-	spacing := max(0, width-tui.VisibleWidth(left)-tui.VisibleWidth(rightText))
+	var lines []string
+	if width < mobileTerminalWidth {
+		// Narrow: the title keeps its line and the controls take their own, so
+		// none of them is cut off (D158).
+		lines = append(lines, tui.TruncateToWidth(leftText, width, "", false))
+		lines = append(lines, wrapParts([]string{scopeText, nameText, sortText}, "  ", width)...)
+	} else {
+		rightText := tui.TruncateToWidth(scopeText+"  "+nameText+"  "+sortText, width, "", false)
+		availableLeft := max(0, width-tui.VisibleWidth(rightText)-1)
+		left := tui.TruncateToWidth(leftText, availableLeft, "", false)
+		spacing := max(0, width-tui.VisibleWidth(left)-tui.VisibleWidth(rightText))
+		lines = append(lines, left+strings.Repeat(" ", spacing)+rightText)
+	}
 
+	// Upstream's two hint lines, plus the same hints as parts so a narrow
+	// terminal can wrap them instead of ending them in an ellipsis.
 	var hintLine1, hintLine2 string
+	var narrowHints [][]string
 	switch {
 	case h.confirmingDeletePath != nil:
 		confirmHint := "Delete session? " + KeyHint("tui.select.confirm", "confirm") + " · " + KeyHint("tui.select.cancel", "cancel")
 		hintLine1 = theme.Fg("error", tui.TruncateToWidth(confirmHint, width, "…", false))
+		narrowHints = [][]string{{
+			theme.Fg("error", "Delete session? "+KeyHint("tui.select.confirm", "confirm")),
+			theme.Fg("error", KeyHint("tui.select.cancel", "cancel")),
+		}}
 	case h.statusMessage != nil:
 		color := "accent"
 		if h.statusMessage.Type == "error" {
 			color = "error"
 		}
 		hintLine1 = theme.Fg(color, tui.TruncateToWidth(h.statusMessage.Message, width, "…", false))
+		narrowHints = [][]string{{hintLine1}}
 	default:
 		pathState := "(off)"
 		if h.showPath {
@@ -311,9 +365,20 @@ func (h *SessionSelectorHeader) Render(width int) []string {
 		}
 		hintLine1 = tui.TruncateToWidth(hint1, width, "…", false)
 		hintLine2 = tui.TruncateToWidth(strings.Join(hint2Parts, sep), width, "…", false)
+		narrowHints = [][]string{
+			{KeyHint("tui.input.tab", "scope"), theme.Fg("muted", `re:<pattern> regex · "phrase" exact`)},
+			hint2Parts,
+		}
 	}
-
-	return []string{left + strings.Repeat(" ", spacing) + rightText, hintLine1, hintLine2}
+	if width >= mobileTerminalWidth {
+		return append(lines, hintLine1, hintLine2)
+	}
+	// The narrow path drops upstream's empty trailing hint line: the wrapped
+	// hints end where they end.
+	for _, parts := range narrowHints {
+		lines = append(lines, wrapParts(parts, theme.Fg("muted", " · "), width)...)
+	}
+	return lines
 }
 
 // sessionTreeNode is a session tree node.
@@ -436,6 +501,9 @@ type SessionList struct {
 	OnError                    func(message string)
 
 	maxVisible int
+	// lastWidth is the width of the most recent render, so paging and the window
+	// use the same rules the layout did.
+	lastWidth int
 
 	now func() time.Time
 
@@ -583,6 +651,16 @@ func (l *SessionList) isCurrentSessionPath(path string) bool {
 func (l *SessionList) Invalidate() {}
 
 // Render renders the list.
+// visibleSessions is how many sessions fit a screenful at the current width:
+// each takes two lines below mobileTerminalWidth (D158).
+func (l *SessionList) visibleSessions() int {
+	visible := l.maxVisible
+	if l.lastWidth < mobileTerminalWidth {
+		visible = max(1, l.maxVisible/2)
+	}
+	return visible
+}
+
 func (l *SessionList) Render(width int) []string {
 	theme := ActiveTheme()
 	var lines []string
@@ -608,8 +686,12 @@ func (l *SessionList) Render(width int) []string {
 		return lines
 	}
 
-	startIndex := max(0, min(l.selectedIndex-l.maxVisible/2, len(l.filtered)-l.maxVisible))
-	endIndex := min(startIndex+l.maxVisible, len(l.filtered))
+	// A narrow terminal shows each session on two lines (D158), so a screenful
+	// holds half as many of them.
+	l.lastWidth = width
+	visibleSessions := l.visibleSessions()
+	startIndex := max(0, min(l.selectedIndex-visibleSessions/2, len(l.filtered)-visibleSessions))
+	endIndex := min(startIndex+visibleSessions, len(l.filtered))
 
 	now := l.now()
 	for i := startIndex; i < endIndex; i++ {
@@ -646,6 +728,13 @@ func (l *SessionList) Render(width int) []string {
 		prefixWidth := tui.VisibleWidth(prefix)
 		rightWidth := tui.VisibleWidth(rightPart) + 2
 		availableForMsg := width - 2 - prefixWidth - rightWidth
+		stacked := width < mobileTerminalWidth
+
+		if stacked {
+			// The metadata moves below the message, which then keeps the full
+			// width instead of being squeezed into a few characters (D158).
+			availableForMsg = width - 2 - prefixWidth
+		}
 
 		truncatedMsg := tui.TruncateToWidth(normalizedMessage, max(10, availableForMsg), "…", false)
 
@@ -674,6 +763,13 @@ func (l *SessionList) Render(width int) []string {
 			rightColor = "error"
 		}
 		styledRight := theme.Fg(rightColor, rightPart)
+
+		if stacked {
+			lines = append(lines, tui.TruncateToWidth(leftPart, width, "", false))
+			metadata := strings.Repeat(" ", 2+prefixWidth) + styledRight
+			lines = append(lines, tui.TruncateToWidth(metadata, width, "…", false))
+			continue
+		}
 
 		line := leftPart + strings.Repeat(" ", spacing) + styledRight
 		if isSelected {
@@ -724,7 +820,6 @@ func (l *SessionList) buildTreePrefix(node flatSessionNode) string {
 
 // HandleInput processes the list input.
 func (l *SessionList) HandleInput(keyData string) {
-	println("LIST-INPUT", len(keyData), len(l.filtered))
 	kb := tui.GetKeybindings()
 
 	if l.confirmingDeletePath != nil {
@@ -788,9 +883,9 @@ func (l *SessionList) HandleInput(keyData string) {
 	case kb.Matches(keyData, "tui.select.down"):
 		l.selectedIndex = min(len(l.filtered)-1, l.selectedIndex+1)
 	case kb.Matches(keyData, "tui.select.pageUp"):
-		l.selectedIndex = max(0, l.selectedIndex-l.maxVisible)
+		l.selectedIndex = max(0, l.selectedIndex-l.visibleSessions())
 	case kb.Matches(keyData, "tui.select.pageDown"):
-		l.selectedIndex = min(len(l.filtered)-1, l.selectedIndex+l.maxVisible)
+		l.selectedIndex = min(len(l.filtered)-1, l.selectedIndex+l.visibleSessions())
 	case kb.Matches(keyData, "tui.select.confirm"):
 		if l.selectedIndex >= 0 && l.selectedIndex < len(l.filtered) && l.OnSelect != nil {
 			l.OnSelect(l.filtered[l.selectedIndex].Session.Path)

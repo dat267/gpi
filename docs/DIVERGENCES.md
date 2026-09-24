@@ -4,7 +4,7 @@ Numbered **D-rows**: every place this port knowingly differs from upstream —
 usually because upstream relies on a JS or Node behaviour that has no direct Go
 equivalent, or because a defect upstream is fixed here. D-row numbers live in
 code comments at the point of divergence; this file is the log. The range is
-**D1–D157**.
+**D1–D158**.
 
 - D41 — extension mechanics are out of scope (extension discovery in the
   resource loader, the extension runner, package/tools managers); seams are
@@ -312,6 +312,27 @@ code comments at the point of divergence; this file is the log. The range is
 - D137 — model-selector callbacks run outside the state mutex.
 - D138 — terminal input is delivered outside the terminal lock.
 - D139 — stdin-buffer callbacks are emitted outside the buffer lock.
+- D158 — **the session picker has a stacked layout for narrow terminals**.
+  Upstream renders the resume selector — `/resume` in the app and `pier -r`
+  (`components/session-selector.ts`) — as a single-line header (title on the
+  left, scope/name/sort pinned right) plus one line per session with the
+  message count, the age, and optionally the cwd or path in a right-hand column,
+  and truncates each of those lines to the width. That is fine on a desktop
+  terminal and unusable on a phone: this port is developed on Termux, where a
+  portrait terminal is 40-55 columns, and there the header shows the title and
+  at most one control, the hints end in `…` before the keys that do the work,
+  and the metadata column leaves roughly twenty columns for the session's
+  message. Below `mobileTerminalWidth` (60) the picker stacks instead: the title
+  keeps its line and the controls move to the next one, the two hint lines are
+  wrapped at their separators rather than truncated, and each session becomes
+  two lines — the message at the full width, the metadata indented beneath it.
+  A screenful therefore holds half as many sessions (`maxVisible/2`, which also
+  becomes the page-up/page-down step), and the list's own windowing and paging
+  follow the same rule. Above 60 columns nothing changes: upstream's layout is
+  reproduced byte for byte, which is why the upstream golden corpus passes
+  unchanged there — and why its one 44-column case (`narrow`) is now the single
+  corpus render the port deliberately does not reproduce, skipped in
+  `sessionselector_test.go` with a pointer here.
 - D157 — **path completion treats a trailing `.` or `..` as a directory, not as
   part of the name to split on**. `getFileSuggestions` expands `~` first and then
   splits the result into directory + file prefix, and both `path.join` upstream
