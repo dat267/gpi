@@ -94,7 +94,10 @@ func TestPostCallbackMayRequestRender(t *testing.T) {
 	})
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	// Generous on purpose: this bound exists to turn a deadlock into a failure,
+	// not to measure speed. Under a race-instrumented run with the packages in
+	// parallel, a healthy drain has taken longer than the original 5s.
+	case <-time.After(60 * time.Second):
 		t.Fatal("posted callback deadlocked")
 	}
 }
