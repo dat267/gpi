@@ -773,7 +773,13 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 				continue
 			}
 			if w.Events != nil {
-				w.Events.HandleEvent(event)
+				// Phased like event-apply: partial events stream in continuously,
+				// and an unphased slow pass would freeze without any stall record
+				// (the blind spot the first armed sessions exposed).
+				func() {
+					defer w.phase("partial-event-apply")()
+					w.Events.HandleEvent(event)
+				}()
 			}
 			if w.OnPartialEventApplied != nil {
 				w.OnPartialEventApplied()
@@ -786,9 +792,12 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 			// Raw input is latency-sensitive: reassemble, dispatch every
 			// complete sequence, then paint once.
 			if w.RawTerminal != nil && w.UI != nil {
-				for _, sequence := range w.RawTerminal.FeedInput([]byte(raw)) {
-					w.UI.HandleTerminalInput(sequence)
-				}
+				func() {
+					defer w.phase("raw-input")()
+					for _, sequence := range w.RawTerminal.FeedInput([]byte(raw)) {
+						w.UI.HandleTerminalInput(sequence)
+					}
+				}()
 			}
 			w.drainReadyEvents()
 			paint()

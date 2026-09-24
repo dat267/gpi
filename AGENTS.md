@@ -131,7 +131,8 @@ invented to bridge that gap). Stage 1 has landed:
   subscribers never receive a context, so both arms are present).
 - **Slow-phase logging is on by default at 100 ms**; `PIER_STALL_MS=<ms>`
   overrides the threshold and `PIER_STALL_MS=0` disables it. Every phase the
-  loop measures (`render`, `events`, `event-apply`, `beat`, `input`) that
+  loop measures (`render`, `events`, `event-apply`, `partial-event-apply`, `beat`, `input`,
+  `raw-input`) that
   exceeds the threshold is recorded to `<agentDir>/pier-stall.log`, each with a
   goroutine dump. It exists for stutters that do not reproduce on the
   development machine: a record names the phase and the stacks instead of only
