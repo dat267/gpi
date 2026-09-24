@@ -72,9 +72,12 @@ func (w *TrustCrashWiring) RenderProjectTrustWarningIfNeeded() {
 	if len(w.Chat.Children) > 0 {
 		w.Chat.AddChild(tui.NewSpacer(1))
 	}
+	// Upstream's wording also mentions installing project packages and running
+	// project extensions; this port does neither (D41), so the warning names only
+	// what is actually gated.
 	w.Chat.AddChild(tui.NewText(theme.Fg("warning",
 		"This project is not trusted. Project "+coding.ConfigDirName+
-			" resources and packages are ignored. Use /trust to save a trust decision, then restart pi."), 1, 0, nil))
+			" resources are ignored. Use /trust to save a trust decision, then restart pi."), 1, 0, nil))
 }
 
 // PromptForMissingSessionCwd asks for a fallback cwd.

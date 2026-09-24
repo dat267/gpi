@@ -236,8 +236,17 @@ func run(appName string, args *coding.Args) error {
 	// the defaultProjectTrust setting, then the startup prompt. The answer builds
 	// the runtime settings manager, so an untrusted project's .pi settings,
 	// skills, prompts, themes and prompt files stay unread.
+	// The runtime is cwd-bound to the session, not to the process: a resumed
+	// session can belong to another directory, and upstream resolves project
+	// trust and builds the runtime settings manager for `sessionManager.getCwd()`
+	// (main.ts's createRuntime factory takes the session's cwd). The CLI path
+	// flags stay process-relative, as upstream's resolveCliPaths does.
+	runtimeCwd := sessions.GetCwd()
+	if runtimeCwd == "" {
+		runtimeCwd = cwd
+	}
 	trusted, trustErr := resolveStartupProjectTrust(startupTrustOptions{
-		cwd:       cwd,
+		cwd:       runtimeCwd,
 		agentDir:  agentDir,
 		override:  args.ProjectTrustOverride,
 		bootstrap: settings,
@@ -247,7 +256,7 @@ func run(appName string, args *coding.Args) error {
 	if trustErr != nil {
 		return trustErr
 	}
-	settings = coding.NewSettingsManagerFromFiles(cwd, agentDir, coding.SettingsManagerCreateOptions{
+	settings = coding.NewSettingsManagerFromFiles(runtimeCwd, agentDir, coding.SettingsManagerCreateOptions{
 		ProjectTrusted: &trusted,
 	})
 	if args.UseTheme != nil {
@@ -319,7 +328,7 @@ func run(appName string, args *coding.Args) error {
 	// --no-builtin-tools map onto the noTools option.
 	tools := args.ToolSelection()
 	created, err := coding.CreateAgentSession(ctx, &coding.CreateAgentSessionOptions{
-		Cwd:             cwd,
+		Cwd:             runtimeCwd,
 		AgentDir:        agentDir,
 		Model:           model,
 		ThinkingLevel:   thinking,
@@ -376,7 +385,7 @@ func run(appName string, args *coding.Args) error {
 	}
 
 	app := interactive.NewApp(interactive.AppOptions{
-		Cwd:          cwd,
+		Cwd:          runtimeCwd,
 		AgentDir:     agentDir,
 		TuiMode:      tuiMode,
 		Version:      coding.Version,
@@ -390,9 +399,10 @@ func run(appName string, args *coding.Args) error {
 		Offline:      args.Offline,
 		// The first message carries any @file text ahead of the first positional
 		// message; the rest stay queued behind it.
-		InitialMessage:      initialPrompt.Message,
-		InitialMessages:     initialPrompt.Rest,
-		InitialThemeSetting: args.UseTheme,
+		InitialMessage:       initialPrompt.Message,
+		InitialMessages:      initialPrompt.Rest,
+		InitialThemeSetting:  args.UseTheme,
+		ProjectTrustOverride: args.ProjectTrustOverride,
 		// A model restore or resolution fallback is surfaced at startup.
 		ModelFallbackMessage: created.ModelFallbackMessage,
 		// Model-scope warnings ("No models match pattern ...") are shown at

@@ -118,6 +118,16 @@ func (a *App) applySessionReplacement(sessionManager *coding.SessionManager) (*S
 		a.unsubscribe = nil
 	}
 
+	// The runtime is cwd-bound: upstream's createRuntime resolves the session's
+	// cwd's project trust and builds a settings manager for it, so a session from
+	// another directory gets that directory's settings, resources and trust
+	// rather than this project's. Resolving here — without a prompt, because
+	// upstream passes hasUI false for every runtime but the initial one — and
+	// re-pointing the one settings manager (D160) keeps every holder consistent.
+	if err := a.rebindProjectSettings(sessionManager.GetCwd()); err != nil {
+		return nil, err
+	}
+
 	created, err := coding.CreateAgentSession(context.Background(), &coding.CreateAgentSessionOptions{
 		Cwd:             sessionManager.GetCwd(),
 		AgentDir:        a.options.AgentDir,
@@ -152,6 +162,38 @@ func (a *App) applySessionReplacement(sessionManager *coding.SessionManager) (*S
 	a.Startup.RebuildChatFromMessages()
 	a.UI.RequestRender(false)
 	return &SessionSwitchResult{}, nil
+}
+
+// rebindProjectSettings re-points the settings manager at a session's project,
+// resolving that project's trust first. A switch within the same project, or one
+// with no directory to resolve, keeps the current settings.
+func (a *App) rebindProjectSettings(cwd string) error {
+	if cwd == "" || cwd == a.Settings.Cwd() {
+		return nil
+	}
+	trusted, err := coding.ResolveProjectTrusted(coding.ResolveProjectTrustedOptions{
+		Cwd:                 cwd,
+		TrustStore:          coding.NewProjectTrustStore(a.options.AgentDir),
+		TrustOverride:       a.options.ProjectTrustOverride,
+		DefaultProjectTrust: a.Settings.GetDefaultProjectTrust(),
+		// No UI: a switch is never the startup prompt (upstream's
+		// projectTrustContextFactory reports hasUI false off the initial runtime),
+		// so an undecided project stays untrusted.
+		ProjectTrustContext: coding.ProjectTrustContext{},
+	})
+	if err != nil {
+		return err
+	}
+	a.Settings.RebindProject(cwd, trusted)
+	// The run's own override is not part of the project scope, so re-apply it
+	// (upstream applies the CLI overrides to the runtime settings manager).
+	if a.options.InitialThemeSetting != nil {
+		a.Settings.ApplyOverrides(&coding.Settings{Theme: a.options.InitialThemeSetting})
+	}
+	// Settings-derived UI state follows the manager (upstream rebindCurrentSession
+	// calls applyRuntimeSettings).
+	a.applySettingsDependentUI()
+	return nil
 }
 
 // forkAtEntry is the runtime's fork (upstream AgentSessionRuntime.fork), shared

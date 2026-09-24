@@ -44,9 +44,11 @@ type ProjectTrustContext struct {
 	Select func(prompt string, options []string) (string, error)
 }
 
-// FormatProjectTrustPrompt renders the trust question.
+// FormatProjectTrustPrompt renders the trust question. Upstream's sentence also
+// promises installing project packages and running project extensions; this port
+// does neither (D41), so the question names only what is actually gated.
 func FormatProjectTrustPrompt(cwd string) string {
-	return fmt.Sprintf("Trust project folder?\n%s\n\nThis allows %s to load %s settings and resources, install missing project packages, and execute project extensions.",
+	return fmt.Sprintf("Trust project folder?\n%s\n\nThis allows %s to load %s settings and resources.",
 		cwd, AppName, ConfigDirName)
 }
 

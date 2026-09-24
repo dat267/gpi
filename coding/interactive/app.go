@@ -64,6 +64,10 @@ type AppOptions struct {
 
 	// InitialThemeSetting seeds the theme controller.
 	InitialThemeSetting *string
+	// ProjectTrustOverride is --approve/--no-approve: it settles project trust
+	// for the run without consulting or updating the trust store, which is what a
+	// session switch re-resolves against.
+	ProjectTrustOverride *bool
 	// Offline disables the startup catalog refresh.
 	Offline bool
 	// Hyperlinks enables OSC 8 links in the update cards.
@@ -512,6 +516,29 @@ func (a *App) Init(ctx context.Context) {
 	a.Autocomplete.SetupAutocompleteProvider()
 }
 
+// applySettingsDependentUI re-applies the settings-derived UI state (upstream
+// applyRuntimeSettings minus the terminal-capability and HTTP-dispatcher parts,
+// which have no port counterpart). It runs after /reload and after a session
+// switch re-points the settings manager at another project.
+func (a *App) applySettingsDependentUI() {
+	hidden := a.Settings.GetHideThinkingBlock()
+	pad := a.Settings.GetOutputPad()
+	a.updateThinkingBlockVisibility(hidden)
+	a.Display.OutputPad = pad
+	a.applyFullscreenScrollbarSetting()
+	if altscreen, ok := tuiConcrete(a.UI).(*tui.AltScreen); ok {
+		altscreen.SetCopyOnSelect(a.Settings.GetFullscreenCopyOnSelect())
+	}
+	a.UI.SetShowHardwareCursor(a.Settings.GetShowHardwareCursor())
+	clearOnShrink := a.Settings.GetClearOnShrink()
+	a.UI.SetClearOnShrink(clearOnShrink)
+	if !clearOnShrink && a.UIState != nil {
+		a.UIState.ClearStatusContainerIfIdle()
+	}
+	a.DefaultEditor.SetPaddingX(a.Settings.GetEditorPaddingX())
+	a.DefaultEditor.SetAutocompleteMaxVisible(a.Settings.GetAutocompleteMaxVisible())
+}
+
 // runContext is the active run's context (producers select on it).
 var _ = 0
 
@@ -762,10 +789,7 @@ func (a *App) updateEditorBorderColor() {
 // the UI loop. Terminal capability overrides and the HTTP dispatcher have no
 // port counterpart (D41 scope).
 func (a *App) applyReloadedSettings() {
-	hidden := a.Settings.GetHideThinkingBlock()
-	pad := a.Settings.GetOutputPad()
-	a.updateThinkingBlockVisibility(hidden)
-	a.Display.OutputPad = pad
+	a.applySettingsDependentUI()
 	// Upstream rebuildChatFromMessages (the reload's beforeSessionStart hook).
 	if a.Startup != nil {
 		a.Startup.RebuildChatFromMessages()
@@ -778,20 +802,6 @@ func (a *App) applyReloadedSettings() {
 	}
 	// Reloaded resources (upstream showLoadedResources after /reload).
 	a.ShowLoadedResources(false)
-	a.applyFullscreenScrollbarSetting()
-	if altscreen, ok := tuiConcrete(a.UI).(*tui.AltScreen); ok {
-		altscreen.SetCopyOnSelect(a.Settings.GetFullscreenCopyOnSelect())
-	}
-	a.UI.SetShowHardwareCursor(a.Settings.GetShowHardwareCursor())
-	clearOnShrink := a.Settings.GetClearOnShrink()
-	a.UI.SetClearOnShrink(clearOnShrink)
-	if !clearOnShrink && a.UIState != nil {
-		a.UIState.ClearStatusContainerIfIdle()
-	}
-	editorPad := a.Settings.GetEditorPaddingX()
-	maxVisible := a.Settings.GetAutocompleteMaxVisible()
-	a.DefaultEditor.SetPaddingX(editorPad)
-	a.DefaultEditor.SetAutocompleteMaxVisible(maxVisible)
 	// Custom theme files are re-read from disk by ApplyFromSettings.
 	a.Theme.ApplyFromSettings()
 	// Rebuild the autocomplete provider (upstream setupAutocompleteProvider);

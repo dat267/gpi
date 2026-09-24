@@ -408,6 +408,19 @@ type SettingsManager struct {
 	projectSettingsLoadError error
 	errors                   []SettingsError
 	settingsPaths            map[SettingsScope]string
+
+	// cwd and agentDir are the resolved scope roots: with them the manager can be
+	// re-pointed at another project (RebindProject).
+	cwd      string
+	agentDir string
+}
+
+// Cwd is the project directory this manager's project scope belongs to. It is
+// empty for a manager built over arbitrary storage (in-memory or a test's).
+func (m *SettingsManager) Cwd() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cwd
 }
 
 // NewSettingsManagerFromFiles loads settings from the standard paths.
@@ -418,15 +431,61 @@ func NewSettingsManagerFromFiles(cwd, agentDir string, options SettingsManagerCr
 	resolvedCwd := NormalizePath(cwd, PathInputOptions{})
 	resolvedAgentDir := NormalizePath(agentDir, PathInputOptions{})
 	storage := NewFileSettingsStorage(resolvedCwd, resolvedAgentDir)
-	return newSettingsManagerFromStorage(storage, options, map[SettingsScope]string{
-		SettingsScopeGlobal:  filepath.Join(resolvedAgentDir, "settings.json"),
-		SettingsScopeProject: filepath.Join(resolvedCwd, ConfigDirName, "settings.json"),
-	})
+	manager := newSettingsManagerFromStorage(storage, options, settingsPathsFor(resolvedCwd, resolvedAgentDir))
+	manager.cwd = resolvedCwd
+	manager.agentDir = resolvedAgentDir
+	return manager
 }
 
 // NewSettingsManagerFromStorage builds a manager over an arbitrary storage.
 func NewSettingsManagerFromStorage(storage SettingsStorage, options SettingsManagerCreateOptions) *SettingsManager {
 	return newSettingsManagerFromStorage(storage, options, nil)
+}
+
+// settingsPathsFor is where the two scopes' files live for a cwd and agent dir.
+func settingsPathsFor(resolvedCwd, resolvedAgentDir string) map[SettingsScope]string {
+	return map[SettingsScope]string{
+		SettingsScopeGlobal:  filepath.Join(resolvedAgentDir, "settings.json"),
+		SettingsScopeProject: filepath.Join(resolvedCwd, ConfigDirName, "settings.json"),
+	}
+}
+
+// RebindProject points the manager at another cwd's project settings, under that
+// cwd's trust decision, keeping the global scope.
+//
+// Upstream builds a whole settings manager per cwd — main.ts's createRuntime runs
+// once per session runtime, so switching to a session from another directory
+// gets that directory's settings, resources and trust. This port has one manager
+// per process (D160), so the project half is re-pointed here instead; the
+// callers that cache the manager keep working, and there is no holder to miss.
+func (m *SettingsManager) RebindProject(cwd string, trusted bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	resolvedCwd := NormalizePath(cwd, PathInputOptions{})
+	resolvedAgentDir := m.agentDir
+	if resolvedAgentDir == "" {
+		resolvedAgentDir = NormalizePath(GetAgentDir(), PathInputOptions{})
+	}
+	m.cwd = resolvedCwd
+	m.agentDir = resolvedAgentDir
+	m.storage = NewFileSettingsStorage(resolvedCwd, resolvedAgentDir)
+	m.settingsPaths = settingsPathsFor(resolvedCwd, resolvedAgentDir)
+	m.projectTrusted = trusted
+	m.modifiedProjectFields = map[string]bool{}
+	m.modifiedProjectNested = map[string]map[string]bool{}
+	if !trusted {
+		m.projectSettings = &Settings{}
+		m.projectSettingsLoadError = nil
+		m.settings = DeepMergeSettings(m.globalSettings, m.projectSettings)
+		return
+	}
+	projectLoad, projectErr := tryLoadFromStorage(m.storage, SettingsScopeProject, trusted)
+	m.projectSettings = projectLoad
+	m.projectSettingsLoadError = projectErr
+	if projectErr != nil {
+		m.recordError(SettingsScopeProject, projectErr)
+	}
+	m.settings = DeepMergeSettings(m.globalSettings, m.projectSettings)
 }
 
 func newSettingsManagerFromStorage(storage SettingsStorage, options SettingsManagerCreateOptions, paths map[SettingsScope]string) *SettingsManager {

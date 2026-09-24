@@ -4,7 +4,7 @@ Numbered **D-rows**: every place this port knowingly differs from upstream —
 usually because upstream relies on a JS or Node behaviour that has no direct Go
 equivalent, or because a defect upstream is fixed here. D-row numbers live in
 code comments at the point of divergence; this file is the log. The range is
-**D1–D159**.
+**D1–D160**.
 
 - D41 — extension mechanics are out of scope (extension discovery in the
   resource loader, the extension runner, package/tools managers); seams are
@@ -25,7 +25,10 @@ code comments at the point of divergence; this file is the log. The range is
   never happens. The same rule covers the other extension-flavoured user-visible
   text: the update card names the module's install path instead of `<app>
   update` (there is no package manager and no update command), the trust row's
-  description says "when no saved trust decision decides project trust", and
+  description says "when no saved trust decision decides project trust", the
+  trust prompt and the untrusted-project warning name only the `.pi` settings and
+  resources this port actually gates (not installing packages or running
+  extensions), and
   the package-update card is gone: its only caller upstream asks the package
   manager about the extension packages it installed, which this port has no
   equivalent of.  The update card is reachable: the release check runs at startup off the UI
@@ -325,6 +328,37 @@ code comments at the point of divergence; this file is the log. The range is
 - D137 — model-selector callbacks run outside the state mutex.
 - D138 — terminal input is delivered outside the terminal lock.
 - D139 — stdin-buffer callbacks are emitted outside the buffer lock.
+- D160 — **the runtime follows the session's directory, and trust is resolved
+  there**. Upstream builds a whole runtime per cwd: `main.ts`'s `createRuntime`
+  factory takes `sessionManager.getCwd()`, resolves that directory's project
+  trust (`resolveProjectTrusted`, its per-cwd cache `projectTrustByCwd`, and —
+  only for the initial runtime — the interactive prompt), and builds a settings
+  manager, resource loader and session for it. Every session replacement goes
+  through it again, so resuming or switching into a session from another
+  directory runs in *that* project: its settings, skills, prompt files, context
+  files, system prompt and trust. This port keeps one settings manager per
+  process, so:
+  - **at boot the runtime cwd is the session's**, not the process's: `cmd`
+    resolves trust, builds the runtime settings manager and creates the session
+    with `sessions.GetCwd()`, which matters exactly when a resumed session
+    belongs to another directory — the port used to boot such a session with the
+    starting directory's settings and trust. CLI path flags stay
+    process-relative, as upstream's `resolveCliPaths(cwd, …)` does.
+  - **a switch re-points the settings manager** (`SettingsManager.RebindProject`)
+    at the new cwd after resolving its trust with `hasUI` false, so an undecided
+    project stays untrusted rather than being asked mid-session (upstream reports
+    `hasUI: isInitialRuntime && mode === "interactive"`). Re-pointing rather than
+    rebuilding is why no holder of the manager can go stale — a switch that
+    rebuilt it would have to reach every wiring that cached it. The run's own
+    overrides are re-applied (`--use-theme`), and the settings-derived UI state
+    is re-applied (`applySettingsDependentUI`, upstream's `applyRuntimeSettings`
+    from `rebindCurrentSession`).
+  Gaps this leaves: there is no per-cwd trust cache inside a run, so a project
+  re-resolved after a switch re-reads the store (it never re-prompts, so the
+  answer can only differ if the store changed); the pre-boot theme discovery
+  still resolves against the process cwd, which the `-r` picker needs before the
+  session exists; and per-cwd extension services and a rebuilt model runtime have
+  no counterpart (D41).
 - D159 — **the port's session-wide accounting is non-blocking**. Upstream
   computes the `/session` panel (`handleSessionCommand`: the session statistics,
   the cache-waste totals and the usage cost breakdown) inline on its UI loop, and
