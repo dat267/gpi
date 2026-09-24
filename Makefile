@@ -1,11 +1,10 @@
 ## The Go port of pi (module github.com/dat267/pier).
 ##
-## There is no package at the repository root: the CLI is ./cmd/pier, so
-## `go install .` does not work — use `make install`, or
-## `go install ./cmd/pier` directly.
+## The CLI is the module root (a thin main.go) over the cmd package, so
+## `go build .` and `go install .` both work — `make install` wraps the latter.
 
 MODULE  := github.com/dat267/pier
-CMD     := ./cmd/pier
+CMD     := .
 BIN     := bin/pier
 
 # The CLI prints this for --version and uses it for changelog comparisons, so it

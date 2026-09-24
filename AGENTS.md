@@ -45,7 +45,7 @@ Packages mirror upstream `packages/`:
 | `coding` | `packages/coding-agent` core | session, tools, compaction, settings, model runtime |
 | `coding/interactive` | `packages/coding-agent` interactive mode | components, theme, the mode wirings |
 | `tui` | `packages/pi-tui` | terminal abstraction, renderer, components |
-| `cmd/pier` | `main.ts` | the CLI entrypoint |
+| `main.go`, `cmd` | `main.ts` | the CLI entrypoint (a thin root main over the `cmd` package) |
 | `chord`, `client`, `protocol`, `server`, `telemetry`, `durable` | same | supporting packages |
 | `scripts` | — | catalog generators |
 
@@ -58,14 +58,19 @@ gofmt -l .                         # must be empty
 go test -race -count=2 -timeout 60s ./...   # the completion gate (all packages)
 
 # the CLI (binary derives its display name from the file name)
-go build -o bin/pier ./cmd/pier
+go build -o bin/pier .
 ./bin/pier --help
 ./bin/pier -r                       # resume the newest session
 ```
 
+The module root is the command: `main.go` is a thin wrapper over
+`cmd.Execute`, and the `cmd` package holds the flags, boot and session
+resolution. That makes `go install github.com/dat267/pier@latest` work and
+matches the layout of `github.com/dat267/min`.
+
 The gate runs with `GOTRACEBACK=all` in CI so a hung test prints every
 goroutine. The PTY watchdogs reuse a prebuilt binary via `PIER_TEST_BIN`
-(CI builds `./cmd/pier` first); locally they fall back to `./bin/pier`.
+(CI builds `.` first); locally they fall back to `./bin/pier`.
 
 The interactive mode reads credentials from `~/.pi/agent/auth.json` (or
 `PI_CODING_AGENT_DIR`). `/login` is wired, but the CLI does not install a
@@ -167,8 +172,9 @@ into narrow, injectable wirings (all in `coding/interactive`):
   `_commands.go`, `_queue.go`, `_events.go`, `_ui.go` — the named surfaces.
 - `transcript.go`, `footer.go`, `customeditor.go`, `tuirenderer.go`,
   `extensionsselector.go`, `sessionshare.go`, `interactivemode_helpers.go`.
-- `cmd/pier/main.go` — boots settings/auth/model-runtime/agent-session and runs
-  the `App` (port of `main.ts`'s boot).
+- `main.go` (thin) and `cmd/main.go` — the `cmd` package boots
+  settings/auth/model-runtime/agent-session and runs the `App` (port of
+  `main.ts`'s boot); the root file only calls `cmd.Execute`.
 - Each `*Wiring` has a constructor next to its struct (`newCommandWiring(app)`,
   `newRunWiring(app)`, …) that owns its full field wiring; `NewApp` is the
   object graph plus a sequence of constructor calls. A field cannot be silently
@@ -383,7 +389,7 @@ snapshot under and deliver outside.
 ## Divergences
 
 Numbered D-rows live in code comments at the point of divergence and are
-summarized in the README scoreboard. The range is **D1–D150**. Representative:
+summarized in the README scoreboard. The range is **D1–D156**. Representative:
 
 - D41 — extension mechanics are out of scope (extension discovery in the
   resource loader, the extension runner, package/tools managers); seams are
@@ -507,7 +513,7 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   record instead.
 - D154 — **the port ships its own theme palette**. `coding/interactive/piertheme.go`
   defines two themes — one for a dark terminal background, one for a light one —
-  and `cmd/pier` installs them at startup under the upstream names (`dark`,
+  and the CLI installs them at startup under the upstream names (`dark`,
   `light`), so the whole settings/terminal-detection path (`ResolveThemeSetting`,
   `ParseAutoThemeSetting`, `GetDefaultTheme`) is unchanged and still picks the
   variant from the terminal. Two deliberate departures from upstream's
@@ -531,7 +537,7 @@ summarized in the README scoreboard. The range is **D1–D150**. Representative:
   follow the truecolor/style capability switch, since a theme bakes its 256-colour
   or truecolor escapes at creation time.
 - D153 — **the CLI's startup flags are wired** rather than merely parsed
-  (`cmd/pier/main.go`, with the pure parts in `coding/clidiagnostics.go`,
+  (`cmd/main.go`, with the pure parts in `coding/clidiagnostics.go`,
   `coding/cliinitial.go`, `coding/listmodels.go`, `coding/paths.go` and
   `coding/sessionresourceload.go`). Fifteen documented flags plus two
   non-flag inputs were read by nothing: an unknown single-dash option, a bad
@@ -695,7 +701,8 @@ then the `pi-tui` library (renderer, layout, terminals, keys, markdown,
 components), then the interactive coding-agent mode (theme, every component,
 and the mode method groups), each round verified against upstream Node goldens
 and committed locally with a README scoreboard update. The CLI
-(`cmd/pier`, originally `cmd/pi`) and its composition layer (`app.go`) came last,
+(the root `main.go` over the `cmd` package, originally `cmd/pi`) and its
+composition layer (`app.go`) came last,
 followed by five deadlock fixes: D136 (editor submit), D137 (model selector),
 D138 (scroll) and D139 (exit) were found by driving the real binary in a PTY,
 and D156 (login) by reading the dispatch path, with a test that fails instead of

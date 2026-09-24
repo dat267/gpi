@@ -36,7 +36,7 @@ type activeCatalogRefresh struct {
 
 // ModelCatalogRefreshCoordinator deduplicates concurrent refreshes per
 // runtime (the registry is shared by the model/scoped selectors, the auth
-// flows and cmd/pier's create-time refresh).
+// flows and the CLI's create-time refresh).
 type ModelCatalogRefreshCoordinator struct {
 	active atomic.Pointer[map[ModelCatalogRuntime]*activeCatalogRefresh]
 }

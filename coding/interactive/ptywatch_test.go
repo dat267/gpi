@@ -73,7 +73,7 @@ func pierBinary(t *testing.T) string {
 			ptyBinaryErr = fmt.Errorf("module root not found")
 			return
 		}
-		build := exec.Command("go", "build", "-o", bin, "./cmd/pier")
+		build := exec.Command("go", "build", "-o", bin, ".")
 		build.Dir = root
 		if out, err := build.CombinedOutput(); err != nil {
 			ptyBinaryErr = fmt.Errorf("build pier: %v: %s", err, out)

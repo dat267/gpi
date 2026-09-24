@@ -1,7 +1,6 @@
 /pier
 *.test
 /bin/
-/cmd/pier/pier
 
 # Python bytecode cache (scripts/gen_*.py)
 __pycache__/

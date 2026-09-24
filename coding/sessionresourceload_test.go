@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// sessionWithResources builds a session the way cmd/pier does, over temp dirs.
+// sessionWithResources builds a session the way the CLI does, over temp dirs.
 func sessionWithResources(t *testing.T, settings *SettingsManager, options *CreateAgentSessionOptions) *AgentSession {
 	t.Helper()
 	options.Cwd = t.TempDir()

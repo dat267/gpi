@@ -30,7 +30,7 @@ jobs:
         run: |
           if [ -z "${VERSION#v}" ] || [ "$VERSION" = "main" ]; then VERSION="${GITHUB_SHA::7}"; fi
           go build -trimpath -ldflags "-s -w -X github.com/dat267/pier/coding.Version=$VERSION" \
-            -o pier-android-arm64 ./cmd/pier
+            -o pier-android-arm64 .
           file pier-android-arm64
           sha256sum pier-android-arm64 > pier-android-arm64.sha256
 

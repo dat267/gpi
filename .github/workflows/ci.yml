@@ -30,7 +30,7 @@ jobs:
         run: go vet ./...
 
       - name: build pier (used by the PTY watchdogs)
-        run: go build -o pier ./cmd/pier
+        run: go build -o pier .
 
       - name: test
         env:

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// installPierThemeForTest puts the port's palette in place the way cmd/pier
+// installPierThemeForTest puts the port's palette in place the way the CLI
 // does, without the rest of the app's setup.
 func installPierThemeForTest(t *testing.T) {
 	t.Helper()

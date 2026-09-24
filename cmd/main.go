@@ -1,10 +1,12 @@
-// Command pier is the Go port's interactive coding-agent CLI.
+// Package cmd boots the port of pi's interactive coding-agent CLI: it wires
+// the settings, auth, model runtime and agent session from the command-line
+// flags and runs the ported interactive mode (coding/interactive). The upstream
+// print/json/rpc modes, package manager, extensions and migrations are out of
+// scope (see README).
 //
-// It is a pragmatic entrypoint: it boots the ported session/services (settings,
-// auth, model runtime, agent session) and runs the ported interactive mode
-// (coding/interactive). The upstream print/json/rpc modes, package manager,
-// extensions and migrations are out of scope (see README).
-package main
+// The module root's main.go is a thin wrapper over Execute, so the module is
+// installable with `go install github.com/dat267/pier@latest`.
+package cmd
 
 import (
 	"bufio"
@@ -46,7 +48,8 @@ func installThemeCapabilities() {
 // a diagnostic, so main only has to set the exit status.
 var errAlreadyReported = errors.New("already reported")
 
-func main() {
+// Execute runs the CLI, exiting the process on a fatal error.
+func Execute() {
 	appName := executableName()
 	args := coding.ParseArgs(os.Args[1:])
 
