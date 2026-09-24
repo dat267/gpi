@@ -205,7 +205,11 @@ into narrow, injectable wirings (all in `coding/interactive`):
   object graph plus a sequence of constructor calls. A field cannot be silently
   skipped in the composition root because it lives with its struct —
   `TestAppWiringCompleteness` pins the required hooks (the `/debug`
-  `WriteDebugLog` and right-click-paste hooks shipped unwired this way).
+  `WriteDebugLog` and right-click-paste hooks shipped unwired this way). Read the
+  target before wiring an unassigned seam: some seams are unassigned because
+  assigning them is wrong. `ConfigureHTTPIdleTimeout` fed a helper that wrote the
+  process-wide `http.DefaultTransport` — a data race against in-flight requests —
+  and the setting already reached the wire per request (D40).
 
 `tui/render.go` (+ `mainscreen.go`, `altscreen.go`, `terminal.go`,
 `stdinbuffer.go`) is the differential renderer core. Its lock discipline is
