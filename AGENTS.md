@@ -430,7 +430,11 @@ summarized in the README scoreboard. The range is **D1–D156**. Representative:
   the `/reload` notice speaks of keybindings, skills, prompts, themes and
   context files. It deliberately drops upstream's leading "extensions": nothing
   in the port implements them (D41), so the notice would announce work that
-  never happens.
+  never happens. The same rule covers the other extension-flavoured user-visible
+  text: the update card names the module's install path instead of `<app>
+  update` (there is no package manager and no update command), the package card
+  lists its packages without inventing an action, and the trust row's
+  description says "when no saved trust decision decides project trust".
 - D133 — tool renderers always resolve to the built-in set (no extension
   definitions); `computeEditsPreview` is synchronous.
 - D140 — the user's provider extensions (hyper, commandcode) are compiled in as

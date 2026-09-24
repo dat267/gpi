@@ -616,9 +616,12 @@ func NewSettingsSelectorComponent(config SettingsConfig, callbacks SettingsCallb
 			Values:       []string{"true", "false"},
 		},
 		{
-			ID:           "default-project-trust",
-			Label:        "Default project trust",
-			Description:  "Fallback behavior when no extension or saved trust decision decides project trust",
+			ID:    "default-project-trust",
+			Label: "Default project trust",
+			// Upstream says "no extension or saved trust decision": extension
+			// mechanics are out of scope (D41), so only a saved decision (or the
+			// --approve flag) can decide trust here.
+			Description:  "Fallback behavior when no saved trust decision decides project trust",
 			CurrentValue: defaultProjectTrustLabel(config.DefaultProjectTrust),
 			Values:       trustLabels(),
 		},

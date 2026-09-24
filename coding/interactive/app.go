@@ -761,7 +761,6 @@ func (a *App) applyReloadedSettings() {
 	pad := a.Settings.GetOutputPad()
 	a.updateThinkingBlockVisibility(hidden)
 	a.Display.OutputPad = pad
-	a.Display.OutputPad = pad
 	// Upstream rebuildChatFromMessages (the reload's beforeSessionStart hook).
 	if a.Startup != nil {
 		a.Startup.RebuildChatFromMessages()

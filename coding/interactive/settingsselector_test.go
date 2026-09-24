@@ -283,6 +283,30 @@ func TestSettingsSelectorAgainstUpstreamGolden(t *testing.T) {
 	}
 }
 
+// TestTrustSettingDoesNotAdvertiseExtensions pins the trust row's description.
+// It is upstream's text, and upstream lets an extension decide project trust;
+// nothing in the port can (D41), so naming one describes a decider that never
+// exists. The description is rendered under the selected row, so this drives the
+// real component.
+func TestTrustSettingDoesNotAdvertiseExtensions(t *testing.T) {
+	SetCustomThemesDir(t.TempDir())
+	SetRegisteredThemes(nil)
+	SetTrueColorSupport(true)
+	SetStyleColorsEnabled(true)
+	InitTheme("dark", false)
+
+	events := []string{}
+	component := NewSettingsSelectorComponent(baseSettingsConfig(t), recordingCallbacks(&events))
+	component.GetSettingsList().SelectItem("default-project-trust")
+	rendered := strings.Join(component.Render(120), "\n")
+	if strings.Contains(rendered, "extension") {
+		t.Fatalf("the trust row advertises extensions: %q", rendered)
+	}
+	if !strings.Contains(rendered, "Fallback behavior when no saved trust decision") {
+		t.Fatalf("the trust row lost its description: %q", rendered)
+	}
+}
+
 // TestSettingsSelectorHelpers covers the theme helpers.
 func TestSettingsSelectorHelpers(t *testing.T) {
 	themes := []string{"dark", "light", "solarized"}

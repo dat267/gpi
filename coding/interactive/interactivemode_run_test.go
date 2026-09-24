@@ -77,9 +77,28 @@ func TestRunNotifications(t *testing.T) {
 		t.Fatalf("hyperlink missing: %q", got)
 	}
 
+	// Both cards used to tell the user to run `<app> update [--extensions]`:
+	// upstream's command, which ships with its package manager. The port has no
+	// package manager and no update command (D41), so the version card names the
+	// way this module is actually installed, and the package card — whose whole
+	// subject, extension packages, does not exist here — states the list without
+	// inventing an action to take.
+	version, _ := newRunTestWiring(t)
+	version.ShowNewVersionNotification(LatestRelease{Version: "1.1.0"}, false)
+	got := strings.Join(version.Chat.Render(80), "\n")
+	if strings.Contains(got, version.AppName+" update") {
+		t.Fatalf("version card instructs a command the port does not have: %q", got)
+	}
+	if !strings.Contains(got, "go install github.com/dat267/pier@latest") {
+		t.Fatalf("version card lost its upgrade path: %q", got)
+	}
+
 	packages, _ := newRunTestWiring(t)
 	packages.ShowPackageUpdateNotification([]string{"a", "b"})
-	got := strings.Join(packages.Chat.Render(80), "\n")
+	got = strings.Join(packages.Chat.Render(80), "\n")
+	if strings.Contains(got, packages.AppName+" update") {
+		t.Fatalf("package card instructs a command the port does not have: %q", got)
+	}
 	if !strings.Contains(got, "Package Updates Available") || !strings.Contains(got, "- a") || !strings.Contains(got, "- b") {
 		t.Fatalf("package notification = %q", got)
 	}

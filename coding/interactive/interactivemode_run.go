@@ -194,14 +194,23 @@ func (w *RunWiring) ShowChatWarning(message string) {
 	w.requestRender()
 }
 
+// upgradeCommand is how this binary is upgraded, for the update card. Upstream
+// says `<app> update`, which is its package manager; the port has neither a
+// package manager nor an update command (D41), so the card names the install
+// path this module actually uses.
+const upgradeCommand = "go install github.com/dat267/pier@latest"
+
 // ShowNewVersionNotification renders the update card.
 func (w *RunWiring) ShowNewVersionNotification(release LatestRelease, hyperlinks bool) {
 	if w.Chat == nil {
 		return
 	}
 	theme := ActiveTheme()
-	action := theme.Fg("accent", w.AppName+" update")
-	updateInstruction := theme.Fg("muted", "New version "+release.Version+" is available. Run ") + action
+	// Two lines, unlike upstream's one: the install path is longer than
+	// "<app> update", and a card is truncated to the terminal width.
+	action := theme.Fg("accent", upgradeCommand)
+	updateInstruction := theme.Fg("muted", "New version "+release.Version+" is available.") + "\n" +
+		theme.Fg("muted", "Upgrade with ") + action
 	changelogURL := "https://pi.dev/changelog"
 	changelogLink := theme.Fg("accent", changelogURL)
 	if hyperlinks {
@@ -231,8 +240,10 @@ func (w *RunWiring) ShowPackageUpdateNotification(packages []string) {
 		return
 	}
 	theme := ActiveTheme()
-	action := theme.Fg("accent", w.AppName+" update --extensions")
-	updateInstruction := theme.Fg("muted", "Package updates are available. Run ") + action
+	// Upstream says "Run <app> update --extensions". The port has no package
+	// manager and no update command (D41), and its subject — extension packages —
+	// has no equivalent here, so the card states the list without inventing an
+	// action to take.
 	lines := make([]string, 0, len(packages))
 	for _, pkg := range packages {
 		lines = append(lines, "- "+pkg)
@@ -243,7 +254,7 @@ func (w *RunWiring) ShowPackageUpdateNotification(packages []string) {
 	w.Chat.AddChild(tui.NewSpacer(1))
 	w.Chat.AddChild(NewDynamicBorder(warningBorder))
 	w.Chat.AddChild(tui.NewText(theme.Bold(theme.Fg("warning", "Package Updates Available"))+"\n"+
-		updateInstruction+"\n"+theme.Fg("muted", "Packages:")+"\n"+packageLines, 1, 0, nil))
+		theme.Fg("muted", "Packages:")+"\n"+packageLines, 1, 0, nil))
 	w.Chat.AddChild(NewDynamicBorder(warningBorder))
 	w.requestRender()
 }
