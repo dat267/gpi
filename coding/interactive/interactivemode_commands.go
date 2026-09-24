@@ -403,9 +403,10 @@ func (w *CommandWiring) HandleSessionCommand(now int64) {
 	theme := ActiveTheme()
 	stats := w.Session.GetSessionStats()
 	sessionName := w.SessionInfo.GetSessionName()
-	entries := w.SessionInfo.GetEntries()
-	cacheWaste := coding.ComputeCacheWaste(entries, w.Session.ModelRuntime())
-	usageBreakdown := coding.GetUsageCostBreakdown(entries)
+	// These three walks read through the session's message memo; re-parsing the
+	// session for a panel cost about 1.5s on a 19k-entry session and froze the UI.
+	cacheWaste := w.SessionInfo.ComputeCacheWaste(w.Session.ModelRuntime())
+	usageBreakdown := w.SessionInfo.UsageCostBreakdown()
 
 	var info strings.Builder
 	info.WriteString(theme.Bold("Session Info") + "\n\n")

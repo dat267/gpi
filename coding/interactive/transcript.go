@@ -412,7 +412,7 @@ func (r *TranscriptRenderer) renderSessionItems(items []RenderSessionItem, updat
 	var cacheMisses map[*ai.AssistantMessage]coding.CacheMiss
 	if r.Settings != nil && r.Settings.GetShowCacheMissNotices() && r.SessionInfo != nil && r.Session != nil {
 		cacheMisses = map[*ai.AssistantMessage]coding.CacheMiss{}
-		for _, entry := range coding.CollectCacheMisses(r.SessionInfo.GetEntries(), r.Session.GetModelPriceSource()) {
+		for _, entry := range r.SessionInfo.CollectCacheMisses(r.Session.GetModelPriceSource()) {
 			cacheMisses[entry.Message] = entry.Miss
 		}
 	}

@@ -1,7 +1,6 @@
 package coding
 
 import (
-	"encoding/json"
 	"sort"
 
 	"github.com/dat267/pier/ai"
@@ -40,35 +39,48 @@ type UsageCostBreakdownEntry struct {
 }
 
 // GetUsageCostBreakdown groups attributable assistant usage by model and all
-// other usage into a separate bucket.
+// other usage into a separate bucket. This is the reference path (no cache);
+// callers holding a session use SessionManager.UsageCostBreakdown.
 func GetUsageCostBreakdown(entries []SessionEntry) []UsageCostBreakdownEntry {
+	return usageCostBreakdown(entries, nil)
+}
+
+// UsageCostBreakdown is GetUsageCostBreakdown over this session, reading through
+// the message memo: the /session panel used to unmarshal every message it walked
+// past (387ms of the panel's ~1.5s on a 19k-entry session).
+func (m *SessionManager) UsageCostBreakdown() []UsageCostBreakdownEntry {
+	return usageCostBreakdown(m.GetEntries(), &m.messages)
+}
+
+func usageCostBreakdown(entries []SessionEntry, cache *messageCache) []UsageCostBreakdownEntry {
 	totalsByKey := map[string]UsageTotals{}
 	var order []string
 
-	for _, entry := range entries {
+	for index := range entries {
+		entry := &entries[index]
 		key := ""
 		var usage *ai.Usage
 		switch entry.Type {
 		case "message":
-			message := decodeSessionMessage(entry.Message)
-			if message == nil {
+			messages := projectedMessages(entry, cache)
+			if len(messages) == 0 {
 				continue
 			}
-			var usageValue *ai.Usage
-			if message["role"] == "assistant" {
-				model := stringField(message, "responseModel")
-				if model == "" {
-					model = stringField(message, "model")
+			switch message := messages[0].(type) {
+			case *ai.AssistantMessage:
+				model := message.Model
+				if message.ResponseModel != nil {
+					model = *message.ResponseModel
 				}
-				key = stringField(message, "provider") + "/" + model
-				usageValue = usageFromRaw(message["usage"])
-			} else if message["role"] == "toolResult" {
-				usageValue = usageFromRaw(message["usage"])
-				if usageValue != nil {
+				key = string(message.Provider) + "/" + model
+				value := message.Usage
+				usage = &value
+			case *ai.ToolResultMessage:
+				if message.Usage != nil {
 					key = "Tools/summaries"
+					usage = message.Usage
 				}
 			}
-			usage = usageValue
 		case "branch_summary", "compaction":
 			if entry.Usage != nil {
 				key = "Tools/summaries"
@@ -108,37 +120,4 @@ func GetUsageCostBreakdown(entries []SessionEntry) []UsageCostBreakdownEntry {
 		return filtered[left].Cost > filtered[right].Cost
 	})
 	return filtered
-}
-
-// decodeSessionMessage parses a stored session message payload.
-func decodeSessionMessage(raw json.RawMessage) map[string]any {
-	if len(raw) == 0 {
-		return nil
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return nil
-	}
-	return decoded
-}
-
-func stringField(record map[string]any, key string) string {
-	value, _ := record[key].(string)
-	return value
-}
-
-// usageFromRaw decodes a usage object; explicit zeros are preserved.
-func usageFromRaw(raw any) *ai.Usage {
-	if raw == nil {
-		return nil
-	}
-	encoded, err := json.Marshal(raw)
-	if err != nil {
-		return nil
-	}
-	var usage ai.Usage
-	if err := json.Unmarshal(encoded, &usage); err != nil {
-		return nil
-	}
-	return &usage
 }

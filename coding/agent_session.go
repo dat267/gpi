@@ -690,7 +690,9 @@ func (s *AgentSession) GetSessionStats() *SessionStats {
 		totals.CacheWrite += u.CacheWrite
 		totals.Cost.Total += u.Cost.Total
 	}
-	for _, entry := range s.Sessions.GetEntries() {
+	entries := s.Sessions.GetEntries()
+	for index := range entries {
+		entry := &entries[index]
 		if (entry.Type == "branch_summary" || entry.Type == "compaction") && entry.Usage != nil {
 			addUsage(entry.Usage)
 		}
@@ -698,11 +700,13 @@ func (s *AgentSession) GetSessionStats() *SessionStats {
 			continue
 		}
 		stats.TotalMessages++
-		message, err := ai.UnmarshalMessage(entry.Message)
-		if err != nil {
+		// Through the session's message memo: re-parsing every message here cost
+		// 633ms of the /session panel's ~1.5s on a 19k-entry session.
+		messages := projectedMessages(entry, &s.Sessions.messages)
+		if len(messages) == 0 {
 			continue
 		}
-		switch m := message.(type) {
+		switch m := messages[0].(type) {
 		case *ai.UserMessage:
 			stats.UserMessages++
 		case *ai.ToolResultMessage:

@@ -66,7 +66,7 @@ type previousRequest struct {
 // the previous request; ok is false when nothing is counted. entries must not
 // yet contain message (message_end fires before persistence).
 func DetectCacheMiss(entries []SessionEntry, message *ai.AssistantMessage, models ModelPriceSource) (CacheMiss, bool) {
-	scanState := scanCacheEntries(entries, models)
+	scanState := scanCacheEntries(entries, models, nil)
 	return detectCacheMissFor(scanState.prev, message, models)
 }
 
@@ -213,10 +213,16 @@ func (m *SessionManager) CacheMissFor(message *ai.AssistantMessage, models Model
 	return detectCacheMissFor(prev, message, models)
 }
 
-func scanCacheEntries(entries []SessionEntry, models ModelPriceSource) cacheScanResult {
+// scanCacheEntries walks the session's assistant messages. The cache, when
+// there is one, supplies their already-decoded messages (the session manager's
+// memo), so the scan stops unmarshalling every message it walks past: on a
+// 19k-entry session this was 458ms of the /session panel's ~1.5s. The role is
+// read the same way — memoized with a cache, a header-only unmarshal without.
+func scanCacheEntries(entries []SessionEntry, models ModelPriceSource, cache *messageCache) cacheScanResult {
 	result := cacheScanResult{}
 
-	for index, entry := range entries {
+	for index := range entries {
+		entry := &entries[index]
 		if entry.Type == "compaction" || entry.Type == "branch_summary" {
 			// The context legitimately changed; the next turn's prompt is new
 			// content, not re-billed content. Model switches are NOT exempt:
@@ -224,10 +230,10 @@ func scanCacheEntries(entries []SessionEntry, models ModelPriceSource) cacheScan
 			result.prev = nil
 			continue
 		}
-		if entry.Type != "message" || !messageRoleAssistant(entry.Message) {
+		if entry.Type != "message" || projectedRole(entry, cache) != "assistant" {
 			continue
 		}
-		assistant := decodeAssistantMessage(entry.Message)
+		assistant := assistantMessageOf(entry, cache)
 		if assistant == nil {
 			continue
 		}
@@ -245,41 +251,37 @@ func scanCacheEntries(entries []SessionEntry, models ModelPriceSource) cacheScan
 }
 
 // ComputeCacheWaste returns cumulative cache waste across a session: prompt
-// tokens that should have been cache reads but were re-billed.
+// tokens that should have been cache reads but were re-billed. This is the
+// reference path (no cache); callers that hold a session use
+// SessionManager.ComputeCacheWaste.
 func ComputeCacheWaste(entries []SessionEntry, models ModelPriceSource) CacheWasteTotals {
-	return scanCacheEntries(entries, models).totals
+	return scanCacheEntries(entries, models, nil).totals
 }
 
 // CollectCacheMisses returns every counted cache miss across a session. Used to
 // re-derive transcript notices when rebuilding the chat from entries.
 func CollectCacheMisses(entries []SessionEntry, models ModelPriceSource) []CacheMissEntry {
-	return scanCacheEntries(entries, models).misses
+	return scanCacheEntries(entries, models, nil).misses
 }
 
-// decodeAssistantMessage parses an assistant message from a stored entry.
-// messageRoleAssistant reports whether a raw session message is an assistant
-// message, reading only the role. Reading the role through a decoded map (as
-// the scan did) decoded every message entry in full.
-func messageRoleAssistant(raw json.RawMessage) bool {
-	var header struct {
-		Role string `json:"role"`
-	}
-	if json.Unmarshal(raw, &header) != nil {
-		return false
-	}
-	return header.Role == "assistant"
+// ComputeCacheWaste is ComputeCacheWaste over this session, reading through the
+// message memo so a repeat scan decodes nothing.
+func (m *SessionManager) ComputeCacheWaste(models ModelPriceSource) CacheWasteTotals {
+	return scanCacheEntries(m.GetEntries(), models, &m.messages).totals
 }
 
-func decodeAssistantMessage(raw json.RawMessage) *ai.AssistantMessage {
-	if len(raw) == 0 {
+// CollectCacheMisses is CollectCacheMisses over this session.
+func (m *SessionManager) CollectCacheMisses(models ModelPriceSource) []CacheMissEntry {
+	return scanCacheEntries(m.GetEntries(), models, &m.messages).misses
+}
+
+// assistantMessageOf returns the entry's assistant message, decoded through the
+// cache when there is one.
+func assistantMessageOf(entry *SessionEntry, cache *messageCache) *ai.AssistantMessage {
+	messages := projectedMessages(entry, cache)
+	if len(messages) == 0 {
 		return nil
 	}
-	var message ai.AssistantMessage
-	if err := json.Unmarshal(raw, &message); err != nil {
-		return nil
-	}
-	if message.Usage == (ai.Usage{}) && message.Provider == "" && message.Model == "" {
-		return nil
-	}
-	return &message
+	assistant, _ := messages[0].(*ai.AssistantMessage)
+	return assistant
 }
