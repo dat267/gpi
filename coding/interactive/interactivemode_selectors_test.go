@@ -286,3 +286,74 @@ func TestSelectorTree(t *testing.T) {
 		t.Fatalf("errors = %v", errors)
 	}
 }
+
+// Upstream's /tree navigation does more than move the leaf: it rebuilds the
+// transcript (chatContainer.clear() then renderInitialMessages()), offers the
+// navigated point's message text in the editor when the editor is empty, and
+// flushes the compaction queue (interactive-mode.ts, handleTreeSelection). The
+// port moved the leaf and reported success, so the screen kept the old branch.
+func TestTreeNavigationRebuildsTranscript(t *testing.T) {
+	wiring, session, _, _ := newSelectorTestWiring(t)
+	statuses := []string{}
+	wiring.ShowStatus = func(message string) { statuses = append(statuses, message) }
+	wiring.TerminalRows = func() int { return 30 }
+
+	manager := coding.NewSessionManager("/tmp/proj", &coding.SessionManagerOptions{Persist: boolPtr(false)})
+	wiring.SessionInfo = manager
+	manager.AppendMessage(ai.Message(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "hello"}}))
+
+	rebuilds := 0
+	flushes := 0
+	editorTexts := []string{}
+	wiring.RebuildChat = func() { rebuilds++ }
+	wiring.FlushCompactionQueue = func() { flushes++ }
+	wiring.SetNavigatedEditorText = func(text string) { editorTexts = append(editorTexts, text) }
+
+	selectEntry := func(entryID string) {
+		t.Helper()
+		wiring.ShowTreeSelector(context.Background(), "", false)
+		tree, ok := wiring.Slot.ActiveSelectorComponent().(*TreeSelectorComponent)
+		if !ok {
+			t.Fatalf("selector type = %T", wiring.Slot.ActiveSelectorComponent())
+		}
+		tree.GetTreeList().OnSelect(entryID)
+	}
+
+	// A successful navigation rebuilds the transcript and offers the point's text.
+	session.navigateResult = &coding.NavigateTreeResult{EditorText: "SECOND QUESTION about beta"}
+	selectEntry("earlier-entry")
+	if rebuilds != 1 {
+		t.Errorf("rebuilds = %d, want the transcript rebuilt once", rebuilds)
+	}
+	if len(editorTexts) != 1 || editorTexts[0] != "SECOND QUESTION about beta" {
+		t.Errorf("editor texts = %v", editorTexts)
+	}
+	if flushes != 1 {
+		t.Errorf("flushes = %d, want the compaction queue flushed once", flushes)
+	}
+	if statuses[len(statuses)-1] != "Navigated to selected point" {
+		t.Errorf("statuses = %v", statuses)
+	}
+
+	// A point whose message has no text leaves the editor alone.
+	session.navigateResult = &coding.NavigateTreeResult{}
+	selectEntry("no-text-entry")
+	if rebuilds != 2 {
+		t.Errorf("rebuilds = %d", rebuilds)
+	}
+	if len(editorTexts) != 1 {
+		t.Errorf("an empty editor text should not reach the editor: %v", editorTexts)
+	}
+
+	// Cancelled and aborted navigations leave the screen alone.
+	session.navigateResult = &coding.NavigateTreeResult{Cancelled: true}
+	selectEntry("cancelled-entry")
+	if rebuilds != 2 || flushes != 2 || len(editorTexts) != 1 {
+		t.Errorf("a cancelled navigation rebuilt the transcript: rebuilds=%d flushes=%d texts=%v", rebuilds, flushes, editorTexts)
+	}
+	session.navigateResult = &coding.NavigateTreeResult{Aborted: true}
+	selectEntry("aborted-entry")
+	if rebuilds != 2 || flushes != 2 || len(editorTexts) != 1 {
+		t.Errorf("an aborted navigation rebuilt the transcript: rebuilds=%d flushes=%d texts=%v", rebuilds, flushes, editorTexts)
+	}
+}

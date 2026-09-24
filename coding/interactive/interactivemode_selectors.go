@@ -150,6 +150,15 @@ type SelectorWiring struct {
 	RestoreQueuedMessagesToEditor func()
 	// OnEditorText sets the editor text after a fork.
 	OnEditorText func(text string)
+	// RebuildChat re-renders the transcript after a branch navigation
+	// (upstream chatContainer.clear() + renderInitialMessages()).
+	RebuildChat func()
+	// SetNavigatedEditorText puts a navigated point's message text in the editor
+	// when the editor is empty (upstream's emptiness check lives by the editor).
+	SetNavigatedEditorText func(text string)
+	// FlushCompactionQueue drains queued compaction messages after a navigation
+	// (upstream flushCompactionQueue({willRetry:false})).
+	FlushCompactionQueue func()
 }
 
 func (w *SelectorWiring) showStatus(message string) {
@@ -454,7 +463,22 @@ func (w *SelectorWiring) handleTreeSelection(ctx context.Context, done func(), e
 		w.showStatus("Navigation cancelled")
 		return
 	}
+
+	// The leaf moved, so the screen has to follow it: upstream clears the chat
+	// container and re-renders the transcript from the new context, then offers
+	// the navigated point's message text and drains queued compaction messages
+	// (interactive-mode.ts, handleTreeSelection). Without this the transcript on
+	// screen kept describing the branch the user just left.
+	if w.RebuildChat != nil {
+		w.RebuildChat()
+	}
+	if result.EditorText != "" && w.SetNavigatedEditorText != nil {
+		w.SetNavigatedEditorText(result.EditorText)
+	}
 	w.showStatus("Navigated to selected point")
+	if w.FlushCompactionQueue != nil {
+		w.FlushCompactionQueue()
+	}
 }
 
 func (w *SelectorWiring) showExtensionSelector(ctx context.Context, title string, options []string) (string, bool) {
@@ -489,6 +513,21 @@ func newSelectorWiring(app *App) *SelectorWiring {
 			app.Queue.RestoreQueuedMessagesToEditor(true, text, text != "")
 		},
 		OnEditorText: func(text string) { app.DefaultEditor.SetText(text) },
+		// After a branch navigation the transcript describes the branch that was
+		// just left, so the chat is cleared and re-rendered from the new context
+		// (upstream chatContainer.clear() + renderInitialMessages()).
+		RebuildChat: func() {
+			if app.Startup != nil {
+				app.Startup.ClearChatAndRenderInitialMessages()
+			}
+		},
+		SetNavigatedEditorText: func(text string) {
+			// Upstream: result.editorText && !this.editor.getText().trim().
+			if strings.TrimSpace(app.DefaultEditor.GetText()) == "" {
+				app.DefaultEditor.SetText(text)
+			}
+		},
+		FlushCompactionQueue: func() { app.Queue.FlushCompactionQueue(context.Background(), false) },
 		// Forking from a message (the tree/user-message selector) goes through the
 		// runtime fork, which /clone shares.
 		RuntimeFork: app.forkAtEntry,

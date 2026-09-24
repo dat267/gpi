@@ -268,10 +268,14 @@ func TestAppWiringCompleteness(t *testing.T) {
 		{"Submit.Handlers.ShowTrustSelector", app.Submit.Handlers.ShowTrustSelector != nil},
 		{"Submit.Handlers.Shutdown", app.Submit.Handlers.Shutdown != nil},
 		{"Trust.Stop", app.Trust.Stop != nil},
+		{"Startup.RenderInitialMessages", app.Startup.RenderInitialMessages != nil},
 		{"Startup.ShowError", app.Startup.ShowError != nil},
 		{"Startup.ShowStatus", app.Startup.ShowStatus != nil},
 		{"Startup.RequestRender", app.Startup.RequestRender != nil},
 		{"Selectors.ShowError", app.Selectors.ShowError != nil},
+		{"Selectors.RebuildChat", app.Selectors.RebuildChat != nil},
+		{"Selectors.SetNavigatedEditorText", app.Selectors.SetNavigatedEditorText != nil},
+		{"Selectors.FlushCompactionQueue", app.Selectors.FlushCompactionQueue != nil},
 		{"SettingsW.RequestRender", app.SettingsW.RequestRender != nil},
 		{"Models.ShowError", app.Models.ShowError != nil},
 		{"Sessions.Shutdown", app.Sessions.Shutdown != nil},
@@ -281,5 +285,31 @@ func TestAppWiringCompleteness(t *testing.T) {
 		if !check.set {
 			t.Errorf("%s is not wired", check.name)
 		}
+	}
+}
+
+// The navigated point's message text lands in the editor only while the editor
+// is empty, upstream's `result.editorText && !this.editor.getText().trim()`:
+// re-editing a draft must not be overwritten by the tree navigation.
+func TestNavigatedEditorTextKeepsDrafts(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+
+	app.Selectors.SetNavigatedEditorText("from the tree")
+	if got := app.DefaultEditor.GetText(); got != "from the tree" {
+		t.Errorf("editor text = %q", got)
+	}
+
+	app.DefaultEditor.SetText("my draft")
+	app.Selectors.SetNavigatedEditorText("another point")
+	if got := app.DefaultEditor.GetText(); got != "my draft" {
+		t.Errorf("a draft was overwritten: %q", got)
+	}
+
+	// Whitespace-only counts as empty, as upstream's trim() does.
+	app.DefaultEditor.SetText("   ")
+	app.Selectors.SetNavigatedEditorText("third point")
+	if got := app.DefaultEditor.GetText(); got != "third point" {
+		t.Errorf("whitespace-only editor = %q", got)
 	}
 }

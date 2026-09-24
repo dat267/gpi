@@ -180,6 +180,19 @@ func (w *StartupWiring) RebuildChatFromMessages() {
 	w.Transcript.RenderSessionEntries(w.SessionInfo.BuildContextEntriesForLeaf(), false, false)
 }
 
+// ClearChatAndRenderInitialMessages resets the transcript after a branch
+// navigation: upstream clears the chat container and calls
+// renderInitialMessages, so the fork line replaces what was on screen instead of
+// being appended after the abandoned branch.
+func (w *StartupWiring) ClearChatAndRenderInitialMessages() {
+	if w.Chat != nil {
+		w.Chat.Clear()
+	}
+	if w.RenderInitialMessages != nil {
+		w.RenderInitialMessages()
+	}
+}
+
 // RenderCurrentSessionState resets the chat state and re-renders.
 func (w *StartupWiring) RenderCurrentSessionState() {
 	if w.LoadedResources != nil {
@@ -376,5 +389,8 @@ func newStartupWiring(app *App) *StartupWiring {
 		ShowError:       func(message string) { app.showError(message) },
 		ShowStatus:      func(message string) { app.Transcript.ShowStatus(message) },
 		RequestRender:   func() { app.UI.RequestRender(false) },
+		// The branch-navigation reset (ClearChatAndRenderInitialMessages) re-renders
+		// the transcript through this seam; leaving it unset made the reset a no-op.
+		RenderInitialMessages: func() { app.Transcript.RenderInitialMessages() },
 	}
 }

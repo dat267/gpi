@@ -275,3 +275,40 @@ func TestStartupAnthropicWarning(t *testing.T) {
 		t.Fatalf("warnings = %v", warnings)
 	}
 }
+
+// ClearChatAndRenderInitialMessages is the branch-navigation reset: the chat is
+// emptied and re-rendered from the session context, so the fork line replaces
+// the transcript on screen instead of being appended after the abandoned
+// branch. It goes through StartupWiring.RenderInitialMessages, which has to be
+// wired in production for that to do anything (it was test-only, so the reset
+// silently did nothing and the port's /tree left the old branch on screen).
+func TestClearChatAndRenderInitialMessages(t *testing.T) {
+	SetCustomThemesDir(t.TempDir())
+	SetRegisteredThemes(nil)
+	SetTrueColorSupport(true)
+	SetStyleColorsEnabled(true)
+	InitTheme("dark", false)
+
+	manager := coding.NewSessionManager(t.TempDir(), &coding.SessionManagerOptions{Persist: boolPtr(false)})
+	manager.AppendMessage(ai.Message(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "kept entry"}}))
+
+	chat := &tui.Container{}
+	transcript := NewTranscriptRenderer(chat, nil, nil, nil, manager)
+	chat.AddChild(tui.NewText("stale entry", 0, 0, nil))
+
+	wiring := &StartupWiring{
+		Chat:                  chat,
+		Transcript:            transcript,
+		SessionInfo:           manager,
+		RenderInitialMessages: func() { transcript.RenderInitialMessages() },
+	}
+	wiring.ClearChatAndRenderInitialMessages()
+
+	lines := strings.Join(renderChat(t, chat), "\n")
+	if strings.Contains(lines, "stale entry") {
+		t.Errorf("the stale transcript survived the reset:\n%s", lines)
+	}
+	if !strings.Contains(lines, "kept entry") {
+		t.Errorf("the session context was not re-rendered:\n%s", lines)
+	}
+}
