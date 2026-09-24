@@ -510,3 +510,52 @@ func TestModelRuntimeRadiusGateway(t *testing.T) {
 		t.Fatalf("baseUrl = %s", provider.BaseURL)
 	}
 }
+
+// models.json is the agent dir's file, never the cwd's. Upstream resolves the
+// agent dir once (`main.ts`) and its cwd-bound services carry it over unchanged,
+// so switching sessions never changes which models.json is read. This pins the
+// default path because the D160 writeup used to claim a per-project models.json,
+// which does not exist upstream.
+func TestModelRuntimeReadsModelsJSONFromTheAgentDir(t *testing.T) {
+	agentDir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", agentDir)
+	write := func(dir string) {
+		t.Helper()
+		content := `{"providers":{"custom":{"baseUrl":"https://custom.example.com/v1","api":"openai-completions",` +
+			`"models":[{"id":"custom-model","name":"Custom Model"}]}}}`
+		if err := os.WriteFile(filepath.Join(dir, "models.json"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	no := false
+	build := func() *ModelRuntime {
+		t.Helper()
+		runtime, err := CreateModelRuntime(CreateModelRuntimeOptions{
+			RefreshOnCreate: &no, // no network, no catalog fetch
+			Credentials:     newMemoryCredentialStore(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return runtime
+	}
+
+	// With no explicit path, the agent dir's file is the one that loads.
+	write(agentDir)
+	runtime := build()
+	if runtime.GetProvider("custom") == nil || len(runtime.GetModels("custom")) == 0 {
+		t.Fatalf("agent dir models.json not loaded; providers=%v", runtime.providerIDs())
+	}
+
+	// A models.json in the working directory is not consulted: the path follows
+	// the agent dir alone, as upstream's does.
+	cwd := t.TempDir()
+	write(cwd)
+	t.Chdir(cwd)
+	if err := os.Remove(filepath.Join(agentDir, "models.json")); err != nil {
+		t.Fatal(err)
+	}
+	if runtime := build(); runtime.GetProvider("custom") != nil {
+		t.Fatalf("the cwd's models.json was loaded; providers=%v", runtime.providerIDs())
+	}
+}

@@ -386,9 +386,10 @@ only as the code comment that introduced them. The range is **D1–D160**.
   install that the `-r` picker needs happens before any project resource is
   readable.
   What remains is D41's: there are no per-cwd extension services, and the model
-  runtime is one process-wide instance, so a resumed session from another
-  directory does not pick up that project's `models.json` (upstream rebuilds the
-  services per cwd). Everything else about the project does follow: settings,
+  runtime is one process-wide instance. That costs nothing: `models.json` lives
+  in the agent dir on both sides (upstream resolves the agent dir once and its
+  cwd-bound services carry it over, so switching sessions never changes which
+  file is read), and the port re-reads it on `/model` rather than on switch. Everything else about the project does follow: settings,
   skills, prompt templates, context files, system prompt, themes and trust.
 - D159 — **the port's session-wide accounting is non-blocking**. Upstream
   computes the `/session` panel (`handleSessionCommand`: the session statistics,
