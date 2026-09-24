@@ -404,6 +404,80 @@ func TestCreateAgentSessionRequestOptions(t *testing.T) {
 	}
 }
 
+// The HTTP idle timeout setting reaches the wire as the per-request timeout, which
+// is why /settings takes effect without a restart. There is no dispatcher to
+// reconfigure: mutating the shared transport on a settings change is a data race
+// (D40), so the value is read when each request's options are built.
+func TestHTTPIdleTimeoutReachesTheRequest(t *testing.T) {
+	tempAgentDir(t)
+	runtime, err := CreateModelRuntime(CreateModelRuntimeOptions{
+		AuthPath:        filepath.Join(GetAgentDir(), "auth.json"),
+		ModelsPath:      filepath.Join(GetAgentDir(), "models.json"),
+		Credentials:     newMemoryCredentialStore(),
+		RefreshOnCreate: boolPtr(false),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.SetRuntimeAPIKey("anthropic", "sk-1", ctxpkg.Background()); err != nil {
+		t.Fatal(err)
+	}
+	model := &ai.Model{
+		ID: "m", API: ai.APIAnthropicMessages, Provider: "anthropic",
+		ContextWindow: 100000, MaxTokens: 8192,
+	}
+
+	var captured *ai.SimpleStreamOptions
+	streamFn := func(streamModel *ai.Model, context ai.TranscriptContext, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		captured = options
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			message := &ai.AssistantMessage{
+				API: ai.APIAnthropicMessages, Provider: streamModel.Provider, Model: streamModel.ID,
+				Content: ai.ContentList{ai.TextContent{Text: "ack"}}, StopReason: ai.StopStop,
+			}
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: ai.StopStop, Message: message})
+		}()
+		return stream
+	}
+	// requestTimeout builds a session with the given setting and returns the
+	// timeout the provider request was built with. No provider retry timeout is
+	// configured, so the idle timeout is what answers.
+	requestTimeout := func(t *testing.T, settingsJSON string) int {
+		t.Helper()
+		settingsDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(settingsDir, ConfigDirName), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(settingsDir, ConfigDirName, "settings.json"), []byte(settingsJSON), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		settings := NewSettingsManagerFromFiles(settingsDir, agentDirForSettings(t), SettingsManagerCreateOptions{})
+		captured = nil
+		session, err := CreateAgentSession(ctxpkg.Background(), &CreateAgentSessionOptions{
+			Cwd: t.TempDir(), ModelRuntime: runtime, SettingsManager: settings, StreamFn: streamFn, Model: model,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := session.Session.Prompt(ctxpkg.Background(), "hello", nil); err != nil {
+			t.Fatal(err)
+		}
+		if captured == nil || captured.TimeoutMs == nil {
+			t.Fatalf("no request timeout captured for %s", settingsJSON)
+		}
+		return *captured.TimeoutMs
+	}
+
+	if got := requestTimeout(t, `{"httpIdleTimeoutMs":60000}`); got != 60_000 {
+		t.Fatalf("timeout = %d, want the configured 60000", got)
+	}
+	// "disabled" is the max-int32 sentinel: effectively no timeout.
+	if got := requestTimeout(t, `{"httpIdleTimeoutMs":"disabled"}`); got != 2147483647 {
+		t.Fatalf("disabled timeout = %d, want the no-timeout sentinel", got)
+	}
+}
+
 func TestCreateAgentSessionCacheWarmerStarts(t *testing.T) {
 	tempAgentDir(t)
 	runtime, err := CreateModelRuntime(CreateModelRuntimeOptions{

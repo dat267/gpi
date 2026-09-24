@@ -11,7 +11,8 @@ import (
 
 // A seam audit found func-typed wiring fields that no production code assigned.
 // Most were deliberate (test seams, host hooks, D41 vestiges) and are documented
-// where they live; one was a real gap, pinned here.
+// where they live, one (ConfigureHTTPIdleTimeout) was a dispatcher seam with
+// nothing safe to install (D40), and one was a real gap, pinned here.
 
 // The global debug key is the renderer's: upstream matches shift+ctrl+d in
 // tui.ts and interactive-mode.ts points ui.onDebug at handleDebugCommand, so the

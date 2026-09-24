@@ -215,25 +215,6 @@ func TestHTTPDispatcherHelpers(t *testing.T) {
 		t.Fatalf("proxy must not be overwritten: %q", os.Getenv("HTTP_PROXY"))
 	}
 	ApplyHTTPProxySettings("   ")
-
-	// Dispatcher configuration applies to the default transport.
-	if err := ConfigureHTTPDispatcher(30_000); err != nil {
-		t.Fatal(err)
-	}
-	transport, _ := http.DefaultTransport.(*http.Transport)
-	if transport == nil || transport.ResponseHeaderTimeout != 30*time.Second {
-		t.Fatalf("transport = %+v", transport)
-	}
-	if err := ConfigureHTTPDispatcher(0); err != nil {
-		t.Fatal(err)
-	}
-	transport, _ = http.DefaultTransport.(*http.Transport)
-	if transport.ResponseHeaderTimeout != 0 {
-		t.Fatalf("disabled timeout = %v", transport.ResponseHeaderTimeout)
-	}
-	if err := ConfigureHTTPDispatcher(DefaultHTTPIdleTimeoutMS); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestPiUserAgent(t *testing.T) {

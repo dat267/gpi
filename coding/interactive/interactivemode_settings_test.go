@@ -188,8 +188,6 @@ func TestSettingsCallbacks(t *testing.T) {
 	wiring.RebuildChatFromMessages = func() { rebuilt++ }
 	autocompleteSetups := 0
 	wiring.SetupAutocompleteProvider = func() { autocompleteSetups++ }
-	httpTimeouts := []int64{}
-	wiring.ConfigureHTTPIdleTimeout = func(timeoutMS int64) { httpTimeouts = append(httpTimeouts, timeoutMS) }
 	scrollbarApplied := 0
 	wiring.ApplyFullscreenScrollbarSetting = func() { scrollbarApplied++ }
 	hideThinking := false
@@ -211,9 +209,12 @@ func TestSettingsCallbacks(t *testing.T) {
 	if session.steering != "all" {
 		t.Fatal("steering not applied")
 	}
+	// The value is written, not installed into the transport: there is no
+	// dispatcher to reconfigure, and mutating the live one races (D40). It reaches
+	// the wire per request.
 	callbacks.OnHTTPIdleTimeoutMsChange(60000)
-	if len(httpTimeouts) != 1 || httpTimeouts[0] != 60000 {
-		t.Fatalf("http timeouts = %v", httpTimeouts)
+	if got, err := settings.GetHTTPIdleTimeoutMS(); err != nil || got != 60000 {
+		t.Fatalf("http idle timeout = %d, %v", got, err)
 	}
 	if statuses[len(statuses)-1] != "HTTP idle timeout: 1 min" {
 		t.Fatalf("statuses = %v", statuses)

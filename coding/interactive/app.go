@@ -530,9 +530,10 @@ func (a *App) Init(ctx context.Context) {
 }
 
 // applySettingsDependentUI re-applies the settings-derived state (upstream
-// applyRuntimeSettings, minus the terminal-capability overrides that have no port
-// counterpart). It runs after /reload and after a session switch re-points the
-// settings manager at another project.
+// applyRuntimeSettings, minus the terminal-capability and HTTP-dispatcher parts;
+// the latter is configured once before any request exists, D40). It runs after
+// /reload and after a session switch re-points the settings manager at another
+// project.
 func (a *App) applySettingsDependentUI() {
 	hidden := a.Settings.GetHideThinkingBlock()
 	pad := a.Settings.GetOutputPad()

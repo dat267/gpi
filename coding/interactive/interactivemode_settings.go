@@ -67,8 +67,6 @@ type SettingsWiring struct {
 	SwitchTuiMode func(mode string) bool
 	// ApplyFullscreenScrollbarSetting applies the scrollbar setting.
 	ApplyFullscreenScrollbarSetting func()
-	// ConfigureHTTPIdleTimeout applies the HTTP idle timeout.
-	ConfigureHTTPIdleTimeout func(timeoutMS int64)
 	// ShowStatus reports a status line.
 	ShowStatus func(message string)
 	// RequestRender requests a render.
@@ -224,10 +222,10 @@ func (w *SettingsWiring) BuildSettingsCallbacks(done func(), refresh func()) Set
 			settings.SetTransport(transport)
 		},
 		OnHTTPIdleTimeoutMsChange: func(timeoutMS int64) {
+			// The value is written here and applied at the next start, where the
+			// dispatcher is configured before any request exists (D40): Go's
+			// transport has no safe way to be reconfigured while in flight.
 			settings.SetHTTPIdleTimeoutMS(timeoutMS)
-			if w.ConfigureHTTPIdleTimeout != nil {
-				w.ConfigureHTTPIdleTimeout(timeoutMS)
-			}
 			w.showStatus("HTTP idle timeout: " + coding.FormatHTTPIdleTimeoutMS(timeoutMS))
 		},
 		OnCacheWarmingModeChange: func(mode string) {

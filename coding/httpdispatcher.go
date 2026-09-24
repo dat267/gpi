@@ -2,25 +2,32 @@ package coding
 
 import (
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
 	"strings"
-	"time"
 )
 
 // Port of core/http-dispatcher.ts. The undici-specific dispatcher (connection
-// pooling, H2, CONNECT tunnels) has no Go counterpart; Go's transport already
-// pools connections and reads the proxy environment.
+// pooling, H2, CONNECT tunnels, the auto-select-family connect tuning) has no Go
+// counterpart: Go's transport already pools connections and reads the proxy
+// environment, and its dialer handles connect tuning internally.
 //
-// D40: upstream's dispatcher sets both headersTimeout and bodyTimeout to the
-// idle timeout. Go's http.Transport exposes ResponseHeaderTimeout (the
-// headersTimeout equivalent) and IdleConnTimeout; there is no per-read body
-// timeout, so a stalled body is still bounded by the caller's context instead.
-
-// autoSelectFamilyAttemptTimeoutMS is kept for parity with the upstream
-// dispatcher's connect tuning (Go's dialer handles this internally).
-const autoSelectFamilyAttemptTimeoutMS int64 = 2_000
+// D40: upstream's dispatcher sets both headersTimeout and bodyTimeout to the idle
+// timeout and can be reconfigured at runtime. Go's http.Transport exposes
+// ResponseHeaderTimeout (the headersTimeout equivalent) and IdleConnTimeout, and
+// there is no per-read body timeout, so a stalled body stays bounded by the
+// caller's context instead. The configured timeout reaches the wire as the
+// per-request timeout: every provider request is built from the settings-backed
+// SimpleStreamOptions.TimeoutMs (coding/sdk.go), so changing the row in /settings
+// applies to the next request.
+//
+// There is deliberately no function here that installs the timeout into the
+// shared transport. http.DefaultTransport is process-wide and is read by net/http
+// while requests are in flight — its HTTP/2 transport reads ResponseHeaderTimeout
+// per stream — so writing those fields on a settings change is a data race
+// (go test -race flags it against an in-flight request; the idled keep-alive
+// goroutines of an earlier request are enough). Upstream can reconfigure its
+// dispatcher because its runtime is single-threaded; a Go port cannot, which is
+// why this port applies the timeout per request instead.
 
 // HTTPIdleTimeoutChoice is one selectable idle timeout.
 type HTTPIdleTimeoutChoice struct {
@@ -59,36 +66,4 @@ func ApplyHTTPProxySettings(httpProxy string) {
 	if os.Getenv("HTTPS_PROXY") == "" {
 		_ = os.Setenv("HTTPS_PROXY", proxy)
 	}
-}
-
-// ConfigureHTTPDispatcher installs the shared HTTP transport settings (the Go
-// equivalent of configuring the global dispatcher).
-func ConfigureHTTPDispatcher(timeoutMS int64) error {
-	normalized, ok := ParseHTTPIdleTimeoutMS(timeoutMS)
-	if !ok {
-		return fmt.Errorf("Invalid HTTP idle timeout: %v", timeoutMS)
-	}
-	transport, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		return nil
-	}
-	if normalized == 0 {
-		transport.ResponseHeaderTimeout = 0
-		transport.IdleConnTimeout = 0
-	} else {
-		duration := time.Duration(normalized) * time.Millisecond
-		transport.ResponseHeaderTimeout = duration
-		transport.IdleConnTimeout = duration
-	}
-	transport.Proxy = proxyFromEnvironmentOrDefault(transport.Proxy)
-	http.DefaultTransport = transport
-	return nil
-}
-
-// proxyFromEnvironmentOrDefault preserves an explicit Proxy function.
-func proxyFromEnvironmentOrDefault(existing func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {
-	if existing != nil {
-		return existing
-	}
-	return http.ProxyFromEnvironment
 }
