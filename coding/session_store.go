@@ -448,15 +448,38 @@ func SessionEntryToContextMessages(entry *SessionEntry) []ai.Message {
 		}
 		return []ai.Message{message}
 	case "custom_message":
-		return []ai.Message{CreateCustomMessage(entry.CustomType, string(entry.Content), entry.Display != nil && *entry.Display, 0)}
+		return []ai.Message{CreateCustomMessage(entry.CustomType, string(entry.Content), entry.Display != nil && *entry.Display, entryTimestampMS(entry))}
 	case "branch_summary":
 		if entry.Summary != "" {
-			return []ai.Message{CreateBranchSummaryMessage(entry.Summary, entry.FromID, 0)}
+			return []ai.Message{CreateBranchSummaryMessage(entry.Summary, entry.FromID, entryTimestampMS(entry))}
 		}
 	case "compaction":
-		return []ai.Message{CreateCompactionSummaryMessage(entry.Summary, entry.TokensBefore, 0)}
+		// The summary stands in for the entries it replaced, so it is stamped
+		// with the compaction's own time (upstream passes entry.timestamp to the
+		// message factory, which converts it).
+		summary := CreateCompactionSummaryMessage(entry.Summary, entry.TokensBefore, entryTimestampMS(entry))
+		// A compaction carries the system message its summary replaced (upstream
+		// appendCompaction records it), and the projection emits it first so a
+		// resumed session keeps the tool declarations.
+		if system := recordedSystemMessage(entry); system != nil {
+			return []ai.Message{system, summary}
+		}
+		return []ai.Message{summary}
 	}
 	return nil
+}
+
+// recordedSystemMessage reads the system message a compaction recorded. An
+// unreadable one is dropped; the summary is never lost with it.
+func recordedSystemMessage(entry *SessionEntry) *ai.SystemMessage {
+	if len(entry.SystemMessageJSON) == 0 {
+		return nil
+	}
+	message := &ai.SystemMessage{}
+	if err := json.Unmarshal(entry.SystemMessageJSON, message); err != nil {
+		return nil
+	}
+	return message
 }
 
 // BuildContextEntries builds the active, compaction-aware session entry
