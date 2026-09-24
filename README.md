@@ -181,9 +181,9 @@ Deliberately out of scope, with divergences recorded in code: the extension mech
 ## Build & test
 
 ```bash
-make build   # bin/pier: pure Go (CGO_ENABLED=0), the flags the release workflow uses
-make check   # gofmt + go vet + go test
-make help    # the other targets (install, test-race, clean)
+just build   # bin/pier: pure Go (CGO_ENABLED=0), the flags the release workflow uses
+just check   # gofmt + go vet + go test
+just --list  # the other recipes (install, test-race, clean)
 ```
 
 Plain Go works too. The CLI is the module root — `main.go` is a thin wrapper
@@ -196,17 +196,17 @@ go test ./...
 
 CI runs `go test -race ./...`, but **the race detector cannot run on
 android/arm64** — Go rejects it outright (`-race is not supported on
-android/arm64`) — so `make test-race` only fails on Termux. That check is
+android/arm64`) — so `just test-race` only fails on Termux. That check is
 CI-only, and it is the only one that cannot be reproduced locally.
 
 ## Install the CLI
 
 ```bash
-make install                 # into $(go env GOBIN), or $(go env GOPATH)/bin
-VERSION=1.2.3 make install   # stamps --version and the changelog comparison
+just install                 # into $(go env GOBIN), or $(go env GOPATH)/bin
+just VERSION=1.2.3 install   # stamps --version and the changelog comparison
 ```
 
-`make install` prints where it landed and warns if that directory is not on
+`just install` prints where it landed and warns if that directory is not on
 `PATH`. It is a thin wrapper over `go install .`, which you can run
 directly if you prefer. The binary derives its display name from its own file
 name, so a symlink named `pi` would show `pi`.

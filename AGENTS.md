@@ -63,6 +63,11 @@ go build -o bin/pier .
 ./bin/pier -r                       # resume the newest session
 ```
 
+A `justfile` wraps the commands above (`just`, `just check`, `just --list`;
+`just VERSION=1.2.3 install` stamps the version `make install` used to, and the
+recipe names match the old Makefile targets). The build stays plain Go, so the
+gate runs the `go` commands directly.
+
 The module root is the command: `main.go` is a thin wrapper over
 `cmd.Execute`, and the `cmd` package holds the flags, boot and session
 resolution. That makes `go install github.com/dat267/pier@latest` work and
