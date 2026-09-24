@@ -203,6 +203,12 @@ func (o *OutputAccumulator) appendDecodedText(text string) {
 	}
 	bytesCount := len(text)
 	o.totalDecodedBytes += bytesCount
+	// This copies the whole rolling tail (up to 2*maxRollingBytes) per call, so
+	// the cost is O(chunks), not O(bytes): the tools read their output through
+	// os.Pipe (StdoutPipe/StderrPipe above), which coalesces, so a 48 MB output
+	// costs ~1000 copies of ~100 KB. Per-line appends, which a pipe never
+	// produces, cost 6 minutes for 6M lines — a pty-backed read path would bring
+	// that closer, and would need a chunk list or byte window here instead.
 	o.tailText += text
 	o.tailBytes += bytesCount
 	if o.tailBytes > o.maxRollingBytes*2 {
