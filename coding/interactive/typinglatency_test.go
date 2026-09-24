@@ -199,6 +199,10 @@ func swapTerminalRender(t *testing.T, app *App, terminal tui.Terminal) func() {
 // 2713 allocations per chunk, upstream throttles to 100 ms), and the snapshot
 // itself built its tail window by prepending per line.
 func TestTypingLatencyDuringToolCall(t *testing.T) {
+	// The probe accumulator writes its full output to a temp file, and
+	// os.TempDir() follows TMPDIR: without this the suite leaves one
+	// pi-typing-probe-*.log per run in the shared /tmp (215 had accumulated).
+	t.Setenv("TMPDIR", t.TempDir())
 	app, cleanup := newTestApp(t)
 	defer cleanup()
 

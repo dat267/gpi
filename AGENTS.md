@@ -340,6 +340,10 @@ and a 121 ms frame after a transcript rebuild.
   this caused (editor submit, model selector, terminal↔screen scroll, stdin
   buffer exit). A re-entrancy/lock-order audit is worth re-running after any
   new locking code.
+- **Tests never write into the shared temp dir.** `os.TempDir()` follows
+  `TMPDIR`, so a test that exercises temp-file code paths pins it
+  (`t.Setenv("TMPDIR", t.TempDir())`). Two leaks came from ignoring this: 492
+  empty `pi-agent-dir*` directories, and 215 `pi-typing-probe-*.log` files.
 - **Render cost scales with content.** The loop is one goroutine, so a
   value-shaped loop on it is a freeze rather than a slowdown. `renderInlineTokens`
   accumulated a rendered message into a string with `result += ...` while looping
