@@ -10,7 +10,8 @@ import (
 
 // Port of core/timings.ts: central startup timing instrumentation, enabled with
 // PI_TIMING=1. Upstream reads the flag once at module load; the Go port reads it
-// per call so tests can toggle it (documented in D30).
+// per call so tests can toggle it (D30). `cmd` marks the boot phases with Time
+// and prints the table before entering the run loop, as upstream's main.ts does.
 
 // TimingNamespace groups timings ("main" and "extensions" upstream).
 type TimingNamespace string

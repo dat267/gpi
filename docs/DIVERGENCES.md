@@ -3,9 +3,14 @@
 Numbered **D-rows**: every place this port knowingly differs from upstream —
 usually because upstream relies on a JS or Node behaviour that has no direct Go
 equivalent, or because a defect upstream is fixed here. D-row numbers live in
-code comments at the point of divergence; this file is the log. The range is
-**D1–D160**.
+code comments at the point of divergence; this file is the log, and it is
+representative: the rows below carry a written-up rationale, while the rest live
+only as the code comment that introduced them. The range is **D1–D160**.
 
+- D30 — startup timings read `PI_TIMING` **per call** instead of once at module
+  load (upstream reads the flag when the timing module is first imported), so a
+  test can toggle the flag and observe the output without the process having to
+  restart. `SetTimingsEnabled` is the same override in test form.
 - D41 — extension mechanics are out of scope (extension discovery in the
   resource loader, the extension runner, package/tools managers); seams are
   function values or return nil. The resource loader's non-extension pieces are

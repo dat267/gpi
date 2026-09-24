@@ -51,7 +51,12 @@ var errAlreadyReported = errors.New("already reported")
 // Execute runs the CLI, exiting the process on a fatal error.
 func Execute() {
 	appName := executableName()
+	// Startup timing instrumentation (upstream's resetTimings + time("parseArgs")
+	// at the top of main). PI_TIMING=1 makes the boot's cost visible, which the
+	// UI-loop stall log cannot see; there is no work when it is off.
+	coding.ResetTimings(coding.TimingMain)
 	args := coding.ParseArgs(os.Args[1:])
+	coding.Time("parseArgs", coding.TimingMain)
 
 	// Parse diagnostics are reported before anything they would invalidate: an
 	// unusable flag value should not be followed by a run that ignores it, and
@@ -158,6 +163,7 @@ func run(appName string, args *coding.Args) error {
 	// keeps the named ones (upstream's noThemes). Project-local themes need the
 	// trust decision, so this happens again once it is made (applyThemeSources).
 	applyThemeSources(args, settings, agentDir, cwd, false)
+	coding.Time("initTheme", coding.TimingMain)
 
 	// Session manager: resume the newest session or start a fresh one. A metadata
 	// command (--list-models) resolves no session and writes nothing, which is
@@ -190,6 +196,7 @@ func run(appName string, args *coding.Args) error {
 		}
 		sessions = coding.NewSessionManager(cwd, options)
 	}
+	coding.Time("createSessionManager", coding.TimingMain)
 
 	// --name labels the session, recorded as a session_info entry — the same
 	// entry the /name command writes.
@@ -215,6 +222,7 @@ func run(appName string, args *coding.Args) error {
 	if err != nil {
 		return err
 	}
+	coding.Time("createRuntime", coding.TimingMain)
 
 	// --list-models is a metadata command: it prints the catalog and exits
 	// without starting the TUI or creating a session (upstream lists once the
@@ -248,6 +256,7 @@ func run(appName string, args *coding.Args) error {
 	if trustErr != nil {
 		return trustErr
 	}
+	coding.Time("resolveProjectTrust", coding.TimingMain)
 	settings = coding.NewSettingsManagerFromFiles(runtimeCwd, agentDir, coding.SettingsManagerCreateOptions{
 		ProjectTrusted: &trusted,
 	})
@@ -292,6 +301,7 @@ func run(appName string, args *coding.Args) error {
 	if err != nil {
 		return err
 	}
+	coding.Time("resolveModelScope", coding.TimingMain)
 	startupDiagnostics := make([]interactive.StartupDiagnostic, 0, len(scopeDiagnostics))
 	for _, diagnostic := range scopeDiagnostics {
 		startupDiagnostics = append(startupDiagnostics, interactive.StartupDiagnostic{
@@ -306,6 +316,7 @@ func run(appName string, args *coding.Args) error {
 	if err != nil {
 		return err
 	}
+	coding.Time("prepareInitialMessage", coding.TimingMain)
 	if len(initialPrompt.Images) > 0 {
 		// The interactive mode has no image-input path, so an @file image cannot
 		// be attached the way upstream attaches it. Say so rather than let the
@@ -352,6 +363,7 @@ func run(appName string, args *coding.Args) error {
 	if err != nil {
 		return err
 	}
+	coding.Time("createAgentSession", coding.TimingMain)
 
 	// --api-key pins the credential for this run. It needs a model to attach to,
 	// and upstream reports that requirement rather than ignoring the key (the
@@ -425,7 +437,12 @@ func run(appName string, args *coding.Args) error {
 			}
 		},
 	})
+	coding.Time("newApp", coding.TimingMain)
+	coding.PrintTimings()
 	app.Run(ctx)
+	// Upstream prints again as it stops, so the exit path's timings are visible
+	// too.
+	coding.PrintTimings()
 	return nil
 }
 
