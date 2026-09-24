@@ -71,7 +71,7 @@ func TestHandleReloadCommand(t *testing.T) {
 	if applied != 1 {
 		t.Fatalf("ApplyReloadedSettings calls = %d", applied)
 	}
-	if len(statuses) != 1 || !strings.Contains(statuses[0], "Reloaded keybindings, extensions, skills, prompts, themes, and context files") {
+	if len(statuses) != 1 || !strings.Contains(statuses[0], "Reloaded "+reloadedItems) {
 		t.Fatalf("statuses = %v", statuses)
 	}
 	if len(errorsShown) != 0 {
@@ -112,5 +112,23 @@ func TestHandleReloadCommand(t *testing.T) {
 	}
 	if wiring.EditorContainer.Children[0] != tui.Component(wiring.Editor) {
 		t.Fatal("editor not restored after failure")
+	}
+}
+
+// TestReloadNoticeListsWhatIsReloaded pins the /reload notice to the work the
+// port actually does. The notice came from upstream, extensions first — but
+// extension mechanics are out of scope (D41), so the mode swapped the editor
+// for a box announcing a reload that never happened. Everything else in the
+// list is real: the session's reload re-reads settings, queue modes, context
+// files, skills and the system/append prompt files, and the mode then re-reads
+// keybindings, trust and the theme.
+func TestReloadNoticeListsWhatIsReloaded(t *testing.T) {
+	if strings.Contains(strings.ToLower(reloadedItems), "extension") {
+		t.Fatalf("the /reload notice claims extensions: %q", reloadedItems)
+	}
+	for _, item := range []string{"keybindings", "skills", "prompts", "themes", "context files"} {
+		if !strings.Contains(reloadedItems, item) {
+			t.Errorf("the /reload notice no longer mentions %q: %q", item, reloadedItems)
+		}
 	}
 }

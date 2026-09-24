@@ -232,6 +232,15 @@ func (w *CommandWiring) HandleImportCommand(ctx context.Context, text string) {
 	})
 }
 
+// reloadedItems names what a reload re-reads, for the /reload notice. Upstream's
+// text leads with "extensions", which the port does not implement (D41) — the
+// box and the status line would announce a reload that never happens. The rest
+// is real: CommandWiring.ReloadNow re-reads settings, queue modes, context
+// files, skills and the system/append prompt files, re-reads keybindings and
+// saves implicit project trust, and App.applyReloadedSettings re-applies the
+// theme and the settings-dependent UI state.
+const reloadedItems = "keybindings, skills, prompts, themes, and context files"
+
 // HandleReloadCommand runs /reload (upstream handleReloadCommand): guard
 // streaming/compacting, swap the editor for a reload box, run the reload
 // work detached so the box paints, then re-apply settings-dependent state
@@ -253,8 +262,7 @@ func (w *CommandWiring) HandleReloadCommand() {
 	reloadBox := &tui.Container{}
 	reloadBox.AddChild(NewDynamicBorder(nil))
 	reloadBox.AddChild(tui.NewSpacer(1))
-	reloadBox.AddChild(tui.NewText(theme.Fg("muted",
-		"Reloading keybindings, extensions, skills, prompts, themes, and context files..."), 1, 0, nil))
+	reloadBox.AddChild(tui.NewText(theme.Fg("muted", "Reloading "+reloadedItems+"..."), 1, 0, nil))
 	reloadBox.AddChild(tui.NewSpacer(1))
 	reloadBox.AddChild(NewDynamicBorder(nil))
 
@@ -289,9 +297,9 @@ func (w *CommandWiring) HandleReloadCommand() {
 			w.showError("models.json error: " + modelsJSONError)
 		}
 		if savedTrust {
-			w.showStatus("Reloaded keybindings, extensions, skills, prompts, themes, and context files; saved project trust")
+			w.showStatus("Reloaded " + reloadedItems + "; saved project trust")
 		} else {
-			w.showStatus("Reloaded keybindings, extensions, skills, prompts, themes, and context files")
+			w.showStatus("Reloaded " + reloadedItems)
 		}
 		if w.ModelDefaultNotice != nil {
 			if message, warning := w.ModelDefaultNotice(); message != "" {

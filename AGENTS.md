@@ -424,8 +424,13 @@ summarized in the README scoreboard. The range is **D1–D156**. Representative:
   implicit project trust and UI re-application. Not reloaded: the extension
   runner and package manager (out of scope), the tool registry (built-in tools
   capture no settings-dependent state; the bash tool reads the shell settings
-  per call), and prompt templates/theme files (the port does not load them at
-  boot either).
+  per call), and extension-supplied prompt templates (the port does not load
+  them at boot either). Theme files are re-read — `applyReloadedSettings` calls
+  `ApplyFromSettings`, whose `SetTheme` reloads the named theme from disk — so
+  the `/reload` notice speaks of keybindings, skills, prompts, themes and
+  context files. It deliberately drops upstream's leading "extensions": nothing
+  in the port implements them (D41), so the notice would announce work that
+  never happens.
 - D133 — tool renderers always resolve to the built-in set (no extension
   definitions); `computeEditsPreview` is synchronous.
 - D140 — the user's provider extensions (hyper, commandcode) are compiled in as
