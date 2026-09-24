@@ -79,6 +79,13 @@ func usageCostBreakdown(entries []SessionEntry, cache *messageCache) []UsageCost
 				key = "Tools/summaries"
 				usage = entry.Usage
 			}
+		case "usage":
+			// Cache-warming usage never enters the context, but it is attributed
+			// to the model that reported it (upstream usage-totals.ts).
+			if entry.Usage != nil {
+				key = entry.Provider + "/" + entry.Model
+				usage = entry.Usage
+			}
 		}
 		if key == "" || usage == nil {
 			continue

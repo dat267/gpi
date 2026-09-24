@@ -194,6 +194,11 @@ type cacheCandidate struct {
 	usage         *ai.Usage
 	responseModel *string
 	toolCalls     int
+	// usageEntry marks a `usage` record (cache warming): its tokens count in the
+	// session totals and its key is the provider/model that reported it, but it is
+	// not a message.
+	usageEntry bool
+	usageKey   string
 	// entryID resolves the entry later, for the memoized message the transcript
 	// keys its notices by.
 	entryID string
@@ -208,6 +213,12 @@ func (s *cacheScanState) consume(entry *SessionEntry) {
 	record := cacheCandidate{index: index, entryID: entry.ID}
 
 	switch entry.Type {
+	case "usage":
+		record.usageEntry = true
+		record.usage = entry.Usage
+		record.usageKey = entry.Provider + "/" + entry.Model
+		s.candidates = append(s.candidates, record)
+		return
 	case "compaction", "branch_summary":
 		// The context legitimately changed; the next turn's prompt is new
 		// content, not re-billed content. Model switches are NOT exempt: they
@@ -437,6 +448,8 @@ func (m *SessionManager) UsageCostBreakdown() []UsageCostBreakdownEntry {
 	for i := range candidates {
 		candidate := &candidates[i]
 		switch {
+		case candidate.usageEntry:
+			add(candidate.usageKey, candidate.usage)
 		case candidate.reset, candidate.role == "toolResult":
 			add("Tools/summaries", candidate.usage)
 		case candidate.role == "assistant":
