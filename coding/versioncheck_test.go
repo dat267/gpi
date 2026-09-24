@@ -3,14 +3,12 @@ package coding
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -263,7 +261,7 @@ func TestSemverComparison(t *testing.T) {
 		{"1.0.0-beta.2", "1.0.0-beta.11", -1, true},
 		{"1.0.0-rc.1", "1.0.0-beta.11", 1, true},
 		{"1.0.0+build.1", "1.0.0+build.2", 0, true},
-		{"v1.2.3", "1.2.3", 0, false},
+		{"v1.2.3", "1.2.3", 0, true},
 		{"1.2", "1.2.0", 0, false},
 		{"1.2.3.4", "1.2.3", 0, false},
 		{"01.2.3", "1.2.3", 0, false},
@@ -292,57 +290,33 @@ func TestSemverComparison(t *testing.T) {
 	}
 }
 
-func TestFormatVersionCheckError(t *testing.T) {
-	// A wrapped syscall errno is reported in parentheses.
-	wrapped := fmt.Errorf("fetch failed: %w", &os.PathError{Op: "dial", Path: "tcp", Err: syscall.ECONNREFUSED})
-	formatted := FormatVersionCheckError(wrapped)
-	if !strings.Contains(formatted, "fetch failed") || !strings.Contains(formatted, "connection refused") {
-		t.Fatalf("formatted = %q", formatted)
-	}
-	// Without a code the cause message is used.
-	formatted = FormatVersionCheckError(fmt.Errorf("outer: %w", errors.New("inner detail")))
-	if formatted != "outer: inner detail (cause: inner detail)" && !strings.Contains(formatted, "inner detail") {
-		t.Fatalf("formatted = %q", formatted)
-	}
-	if got := FormatVersionCheckError(errors.New("plain")); got != "plain" {
-		t.Fatalf("formatted = %q", got)
-	}
-	if got := FormatVersionCheckError(nil); got != "" {
-		t.Fatalf("formatted = %q", got)
-	}
-}
-
-func TestVersionCheck(t *testing.T) {
+func TestPortReleaseCheck(t *testing.T) {
 	var payload atomic.Value
-	payload.Store(`{"version":"1.2.4","packageName":" @earendil-works/pi ","note":" fixed bugs "}`)
+	payload.Store(`{"Version":"v1.2.4","Time":"2026-09-24T07:02:54Z","Origin":{"VCS":"git"}}`)
 	var seenAgent string
 	var seenAccept string
 	var mu sync.Mutex
+	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		mu.Lock()
 		seenAgent = request.Header.Get("User-Agent")
 		seenAccept = request.Header.Get("accept")
+		requests++
 		mu.Unlock()
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(payload.Load().(string)))
 	}))
 	defer server.Close()
 
-	// PI_OFFLINE short-circuits.
-	t.Setenv("PI_OFFLINE", "1")
-	if release, err := GetLatestPiRelease(context.Background(), "1.0.0", nil); err != nil || release != nil {
-		t.Fatalf("release = %+v err = %v", release, err)
-	}
-	t.Setenv("PI_OFFLINE", "")
-	os.Unsetenv("PI_OFFLINE")
-
-	// The URL is fixed upstream; exercise the parsing through a local server by
-	// pointing the request at it with an explicit helper.
-	release, err := getLatestPiReleaseFrom(context.Background(), server.URL, "1.0.0", nil, server.Client())
+	// The URL is fixed to this module's proxy path; exercise the parsing through
+	// a local server with the explicit helper.
+	release, err := getLatestPortReleaseFrom(context.Background(), server.URL, "1.0.0", server.Client())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if release == nil || release.Version != "1.2.4" || release.PackageName != "@earendil-works/pi" || release.Note != "fixed bugs" {
+	// The proxy reports Go module versions, so a tag keeps its "v" prefix, which
+	// the semver subset now accepts like npm's `valid`.
+	if release == nil || release.Version != "v1.2.4" {
 		t.Fatalf("release = %+v", release)
 	}
 	mu.Lock()
@@ -352,31 +326,61 @@ func TestVersionCheck(t *testing.T) {
 		t.Fatalf("headers = %q %q", agent, accept)
 	}
 
+	// Only a strictly newer version is a newer release; the port's built-in
+	// version is 0.0.0 unless stamped, and a pseudo-version of 0.0.0 sorts older
+	// than it, so an unstamped build is not nagged.
+	if !IsNewerPackageVersion("v1.2.4", "1.0.0") {
+		t.Fatal("v1.2.4 must be newer than 1.0.0")
+	}
+	if IsNewerPackageVersion("v0.0.0-20260924070254-653430a6a54c", "0.0.0") {
+		t.Fatal("a pseudo-version of 0.0.0 must not look newer than 0.0.0")
+	}
+	if release := checkForLatestPortReleaseFrom(context.Background(), server.URL, "1.2.4", server.Client()); release != nil {
+		t.Fatalf("equal versions must not notify: %+v", release)
+	}
+	if release := checkForLatestPortReleaseFrom(context.Background(), server.URL, "1.0.0", server.Client()); release == nil {
+		t.Fatal("1.0.0 < v1.2.4 must notify")
+	}
+
 	// Missing or non-string versions yield nothing.
-	for _, body := range []string{`{"version":""}`, `{"version":42}`, `{}`, `{"version":"  "}`} {
+	for _, body := range []string{`{"Version":""}`, `{"Version":42}`, `{}`, `{"Version":"  "}`} {
 		payload.Store(body)
-		release, err := getLatestPiReleaseFrom(context.Background(), server.URL, "1.0.0", nil, server.Client())
+		release, err := getLatestPortReleaseFrom(context.Background(), server.URL, "1.0.0", server.Client())
 		if err != nil || release != nil {
 			t.Fatalf("body %s: release = %+v err = %v", body, release, err)
 		}
 	}
-	// A non-2xx response yields nothing.
-	failing := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		writer.WriteHeader(http.StatusInternalServerError)
+	// A module that is not published answers 404, which is not an error.
+	missing := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusNotFound)
 	}))
-	defer failing.Close()
-	if release, err := getLatestPiReleaseFrom(context.Background(), failing.URL, "1.0.0", nil, failing.Client()); err != nil || release != nil {
+	defer missing.Close()
+	if release, err := getLatestPortReleaseFrom(context.Background(), missing.URL, "1.0.0", missing.Client()); err != nil || release != nil {
 		t.Fatalf("release = %+v err = %v", release, err)
 	}
 	// Invalid JSON is an error.
 	payload.Store("not json")
-	if _, err := getLatestPiReleaseFrom(context.Background(), server.URL, "1.0.0", nil, server.Client()); err == nil {
+	if _, err := getLatestPortReleaseFrom(context.Background(), server.URL, "1.0.0", server.Client()); err == nil {
 		t.Fatal("invalid JSON must error")
 	}
 
-	// CheckForNewPiVersion honors the skip flag.
+	// Offline and the skip flag both short-circuit before any request.
+	mu.Lock()
+	before := requests
+	mu.Unlock()
+	t.Setenv("PI_OFFLINE", "1")
+	if release, err := GetLatestPortRelease(context.Background(), "1.0.0"); err != nil || release != nil {
+		t.Fatalf("offline: release = %+v err = %v", release, err)
+	}
+	t.Setenv("PI_OFFLINE", "")
 	t.Setenv("PI_SKIP_VERSION_CHECK", "1")
-	if release := CheckForNewPiVersion(context.Background(), "1.0.0"); release != nil {
-		t.Fatalf("release = %+v", release)
+	if release := CheckForLatestPortRelease(context.Background(), "1.0.0"); release != nil {
+		t.Fatalf("skip flag: release = %+v", release)
+	}
+	mu.Lock()
+	after := requests
+	mu.Unlock()
+	if after != before {
+		t.Fatalf("offline/skip made %d requests", after-before)
 	}
 }

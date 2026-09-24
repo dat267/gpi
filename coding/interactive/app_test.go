@@ -251,6 +251,7 @@ func TestAppWiringCompleteness(t *testing.T) {
 		{"Runner.OnSignal", app.Runner.OnSignal != nil},
 		{"Runner.Prompt", app.Runner.Prompt != nil},
 		{"Runner.RefreshModelCatalogs", app.Runner.RefreshModelCatalogs != nil},
+		{"Runner.CheckVersion", app.Runner.CheckVersion != nil},
 		{"Runner.TakeCrash", app.Runner.TakeCrash != nil},
 		{"Runner.ShowError", app.Runner.ShowError != nil},
 		{"Runner.RequestRender", app.Runner.RequestRender != nil},

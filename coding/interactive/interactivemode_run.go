@@ -23,10 +23,11 @@ import (
 // Divergences: the collaborators are injected function values (D124); the
 // extension/resource seams stay out of scope (D41).
 
-// LatestRelease is the new-version notification payload.
+// LatestRelease is the new-version notification payload. It carries a version
+// and nothing else: the module proxy this port checks reports only that, while
+// upstream's feed also carries release notes (D41).
 type LatestRelease struct {
 	Version string
-	Note    string
 }
 
 // RunWiring drives init and the main loop.
@@ -81,8 +82,6 @@ type RunWiring struct {
 	RefreshModelCatalogs func(ctx context.Context) error
 	// CheckVersion checks for a new release.
 	CheckVersion func(version string) (*LatestRelease, bool)
-	// CheckPackageUpdates checks for package updates.
-	CheckPackageUpdates func() []string
 	// CheckTmux returns the tmux warning ("" when fine).
 	CheckTmux func() string
 	// TakeCrash returns the unnotified crash record.
@@ -222,39 +221,7 @@ func (w *RunWiring) ShowNewVersionNotification(release LatestRelease, hyperlinks
 	w.Chat.AddChild(tui.NewSpacer(1))
 	w.Chat.AddChild(NewDynamicBorder(warningBorder))
 	w.Chat.AddChild(tui.NewText(theme.Bold(theme.Fg("warning", "Update Available"))+"\n"+updateInstruction, 1, 0, nil))
-	if note := strings.TrimSpace(release.Note); note != "" {
-		w.Chat.AddChild(tui.NewSpacer(1))
-		w.Chat.AddChild(tui.NewMarkdown(note, 1, 0, w.markdownTheme(),
-			&tui.DefaultTextStyle{Color: func(text string) string { return theme.Fg("muted", text) }},
-			tui.MarkdownOptions{}))
-		w.Chat.AddChild(tui.NewSpacer(1))
-	}
 	w.Chat.AddChild(tui.NewText(changelogLine, 1, 0, nil))
-	w.Chat.AddChild(NewDynamicBorder(warningBorder))
-	w.requestRender()
-}
-
-// ShowPackageUpdateNotification renders the package-update card.
-func (w *RunWiring) ShowPackageUpdateNotification(packages []string) {
-	if w.Chat == nil {
-		return
-	}
-	theme := ActiveTheme()
-	// Upstream says "Run <app> update --extensions". The port has no package
-	// manager and no update command (D41), and its subject — extension packages —
-	// has no equivalent here, so the card states the list without inventing an
-	// action to take.
-	lines := make([]string, 0, len(packages))
-	for _, pkg := range packages {
-		lines = append(lines, "- "+pkg)
-	}
-	packageLines := strings.Join(lines, "\n")
-
-	warningBorder := func(text string) string { return theme.Fg("warning", text) }
-	w.Chat.AddChild(tui.NewSpacer(1))
-	w.Chat.AddChild(NewDynamicBorder(warningBorder))
-	w.Chat.AddChild(tui.NewText(theme.Bold(theme.Fg("warning", "Package Updates Available"))+"\n"+
-		theme.Fg("muted", "Packages:")+"\n"+packageLines, 1, 0, nil))
 	w.Chat.AddChild(NewDynamicBorder(warningBorder))
 	w.requestRender()
 }
@@ -436,27 +403,8 @@ func (w *RunWiring) Run(ctx context.Context, options InitOptions, runOptions Run
 			}
 		}()
 	}
-	if w.CheckVersion != nil {
-		go func() {
-			if release, ok := w.CheckVersion(w.Version); ok && release != nil {
-				w.ShowNewVersionNotification(*release, runOptions.Hyperlinks)
-			}
-		}()
-	}
-	if w.CheckPackageUpdates != nil {
-		go func() {
-			if updates := w.CheckPackageUpdates(); len(updates) > 0 {
-				w.ShowPackageUpdateNotification(updates)
-			}
-		}()
-	}
-	if w.CheckTmux != nil {
-		go func() {
-			if warning := w.CheckTmux(); warning != "" {
-				w.showWarning(warning)
-			}
-		}()
-	}
+	go w.notifyNewVersion(runOptions.Hyperlinks)
+	go w.notifyTmuxWarning()
 
 	// Startup warnings (in upstream order).
 	for _, diagnostic := range runOptions.StartupDiagnostics {
@@ -962,7 +910,8 @@ func newRunWiring(app *App) *RunWiring {
 			_, err := RefreshModelCatalogs(ctx, app.Runtime)
 			return err
 		},
-		CheckTmux: func() string { return app.Startup.CheckTmuxKeyboardSetup(os.Getenv("TMUX") != "") },
+		CheckVersion: checkForNewVersionNotification,
+		CheckTmux:    func() string { return app.Startup.CheckTmuxKeyboardSetup(os.Getenv("TMUX") != "") },
 		TakeCrash: func() *coding.CrashRecord {
 			return coding.TakeUnnotifiedCrash(coding.GetCrashLogPath(app.options.AgentDir), time.Now().UnixMilli())
 		},
@@ -978,6 +927,59 @@ func newRunWiring(app *App) *RunWiring {
 		},
 		RequestRender: func() { app.UI.RequestRender(false) },
 	}
+}
+
+// notifyNewVersion runs the release check and reports the result on the UI loop.
+func (w *RunWiring) notifyNewVersion(hyperlinks bool) {
+	if w.CheckVersion == nil {
+		return
+	}
+	release, ok := w.CheckVersion(w.Version)
+	if !ok || release == nil {
+		return
+	}
+	w.runOnUI(func() { w.ShowNewVersionNotification(*release, hyperlinks) })
+}
+
+// notifyTmuxWarning runs the tmux keyboard check and reports the result on the
+// UI loop.
+func (w *RunWiring) notifyTmuxWarning() {
+	if w.CheckTmux == nil {
+		return
+	}
+	if warning := w.CheckTmux(); warning != "" {
+		w.runOnUI(func() { w.showWarning(warning) })
+	}
+}
+
+// runOnUI marshals a mutation onto the UI loop: the checks above run on their
+// own goroutines and every touch of the chat tree has to happen on the loop that
+// renders it and routes input (upstream's checks run on its single-threaded
+// event loop). A headless wiring has no loop, and runs the work inline.
+func (w *RunWiring) runOnUI(fn func()) {
+	if w.UI != nil {
+		w.UI.Post(fn)
+		return
+	}
+	fn()
+}
+
+// checkForNewVersionNotification adapts the release check to the wiring seam:
+// only a strictly newer release of this module becomes a notification (the
+// check compares semver and swallows its own errors). The request is bounded by
+// the check's own timeout rather than the run context, which upstream's check
+// does not take either, and it is skipped when offline.
+func checkForNewVersionNotification(version string) (*LatestRelease, bool) {
+	return versionNotification(coding.CheckForLatestPortRelease(context.Background(), version))
+}
+
+// versionNotification is the seam's contract: no release (offline, no newer
+// version, or a failed check) means no card.
+func versionNotification(release *coding.LatestRelease) (*LatestRelease, bool) {
+	if release == nil {
+		return nil, false
+	}
+	return &LatestRelease{Version: release.Version}, true
 }
 
 // stallLogThreshold reads PIER_STALL_MS: zero (the default) disables the log.

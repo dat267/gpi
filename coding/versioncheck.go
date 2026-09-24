@@ -3,75 +3,29 @@ package coding
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 // Port of utils/version-check.ts, including the semver `valid`/`compare`
 // subset the release check needs (the Go port has no semver dependency).
 
-// LatestVersionURL is the release metadata endpoint.
-const LatestVersionURL = "https://pi.dev/api/latest-version"
+// PortReleaseURL is where this module's own releases are published: the Go
+// module proxy, which is what `go install github.com/dat267/pier@latest`
+// resolves. Upstream asks pi's release feed (utils/version-check.ts), whose
+// versions are pi's, not this port's.
+const PortReleaseURL = "https://proxy.golang.org/github.com/dat267/pier/@latest"
 
 // DefaultVersionCheckTimeoutMS bounds the version request.
 const DefaultVersionCheckTimeoutMS int64 = 10_000
 
-// LatestPiRelease is the published release info.
-type LatestPiRelease struct {
-	Version     string
-	PackageName string
-	Note        string
-}
-
-// FormatVersionCheckError includes the useful errno details hidden behind a
-// generic transport error.
-func FormatVersionCheckError(err error) string {
-	if err == nil {
-		return ""
-	}
-	rootMessage := err.Error()
-	codes := []string{}
-	var aggregate interface{ Unwrap() []error }
-	if errors.As(err, &aggregate) {
-		for _, inner := range aggregate.Unwrap() {
-			if code := errorCode(inner); code != "" {
-				codes = append(codes, code)
-			}
-		}
-	} else if cause := errors.Unwrap(err); cause != nil {
-		if code := errorCode(cause); code != "" {
-			codes = append(codes, code)
-		} else if cause.Error() != "" {
-			return fmt.Sprintf("%s (cause: %s)", rootMessage, cause.Error())
-		}
-	}
-	if len(codes) > 0 {
-		seen := map[string]bool{}
-		var unique []string
-		for _, code := range codes {
-			if !seen[code] {
-				seen[code] = true
-				unique = append(unique, code)
-			}
-		}
-		return fmt.Sprintf("%s (%s)", rootMessage, strings.Join(unique, ", "))
-	}
-	return rootMessage
-}
-
-// errorCode extracts an errno-style code from a wrapped error, if any.
-func errorCode(err error) string {
-	var errno syscall.Errno
-	if errors.As(err, &errno) {
-		return errno.Error()
-	}
-	return ""
+// LatestRelease is the published release info. The module proxy carries only a
+// version (no changelog note, unlike upstream's feed).
+type LatestRelease struct {
+	Version string
 }
 
 // ComparePackageVersions compares two semver strings; ok is false when either
@@ -111,6 +65,11 @@ func parseSemver(value string) (semver, bool) {
 		return semver{}, false
 	}
 	main := value
+	// npm's semver accepts one leading "v" and strips it (`valid("v1.2.3")` is
+	// "1.2.3"), which matters because Go module versions keep the tag's prefix.
+	if strings.HasPrefix(main, "v") {
+		main = main[1:]
+	}
 	if index := strings.Index(main, "+"); index >= 0 {
 		build := main[index+1:]
 		if build == "" || !validBuildIdentifiers(build) {
@@ -262,19 +221,21 @@ func compareInts(left, right int) int {
 	}
 }
 
-// GetLatestPiRelease fetches the published release, or nil when offline or the
-// endpoint reports nothing usable.
-func GetLatestPiRelease(ctx context.Context, currentVersion string, options *VersionCheckOptions) (*LatestPiRelease, error) {
+// GetLatestPortRelease fetches this module's latest published version, or nil
+// when offline or the proxy has nothing to report (a module with no tags or no
+// published version answers 404).
+func GetLatestPortRelease(ctx context.Context, currentVersion string) (*LatestRelease, error) {
 	if os.Getenv("PI_OFFLINE") != "" {
 		return nil, nil
 	}
-	return getLatestPiReleaseFrom(ctx, LatestVersionURL, currentVersion, options, http.DefaultClient)
+	return getLatestPortReleaseFrom(ctx, PortReleaseURL, currentVersion, http.DefaultClient)
 }
 
-// getLatestPiReleaseFrom fetches and parses release metadata from a URL.
-func getLatestPiReleaseFrom(ctx context.Context, url, currentVersion string, options *VersionCheckOptions, client *http.Client) (*LatestPiRelease, error) {
-	if options == nil {
-		options = &VersionCheckOptions{}
+// getLatestPortReleaseFrom fetches and parses a module proxy @latest document
+// from a URL.
+func getLatestPortReleaseFrom(ctx context.Context, url, currentVersion string, client *http.Client) (*LatestRelease, error) {
+	if client == nil {
+		client = http.DefaultClient
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -283,16 +244,7 @@ func getLatestPiReleaseFrom(ctx context.Context, url, currentVersion string, opt
 	request.Header.Set("User-Agent", PiUserAgent(currentVersion))
 	request.Header.Set("accept", "application/json")
 	timeoutMS := DefaultVersionCheckTimeoutMS
-	if options.TimeoutMS != nil {
-		timeoutMS = *options.TimeoutMS
-	}
-	retries := 0
-	if options.Retry {
-		retries = 2
-	}
-	response, err := FetchWithRetry(ctx, request, http.DefaultClient, FetchRetryOptions{
-		MaxRetries: &retries, TimeoutMS: &timeoutMS,
-	})
+	response, err := FetchWithRetry(ctx, request, client, FetchRetryOptions{TimeoutMS: &timeoutMS})
 	if err != nil {
 		return nil, err
 	}
@@ -305,9 +257,7 @@ func getLatestPiReleaseFrom(ctx context.Context, url, currentVersion string, opt
 		return nil, err
 	}
 	var payload struct {
-		PackageName any `json:"packageName"`
-		Version     any `json:"version"`
-		Note        any `json:"note"`
+		Version any `json:"Version"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, err
@@ -316,38 +266,13 @@ func getLatestPiReleaseFrom(ctx context.Context, url, currentVersion string, opt
 	if !ok || strings.TrimSpace(version) == "" {
 		return nil, nil
 	}
-	release := &LatestPiRelease{Version: strings.TrimSpace(version)}
-	if name, ok := payload.PackageName.(string); ok && strings.TrimSpace(name) != "" {
-		release.PackageName = strings.TrimSpace(name)
-	}
-	if note, ok := payload.Note.(string); ok && strings.TrimSpace(note) != "" {
-		release.Note = strings.TrimSpace(note)
-	}
-	return release, nil
+	return &LatestRelease{Version: strings.TrimSpace(version)}, nil
 }
 
-// VersionCheckOptions configure the release check.
-type VersionCheckOptions struct {
-	TimeoutMS *int64
-	Retry     bool
-}
-
-// GetLatestPiVersion returns just the published version.
-func GetLatestPiVersion(ctx context.Context, currentVersion string, options *VersionCheckOptions) (string, error) {
-	release, err := GetLatestPiRelease(ctx, currentVersion, options)
-	if err != nil || release == nil {
-		return "", err
-	}
-	return release.Version, nil
-}
-
-// CheckForNewPiVersion returns a newer release, or nil (errors are swallowed
-// like upstream).
-func CheckForNewPiVersion(ctx context.Context, currentVersion string) *LatestPiRelease {
-	if os.Getenv("PI_SKIP_VERSION_CHECK") != "" {
-		return nil
-	}
-	release, err := GetLatestPiRelease(ctx, currentVersion, nil)
+// checkForLatestPortReleaseFrom is the check over an explicit endpoint, so a
+// test can point it at a local server.
+func checkForLatestPortReleaseFrom(ctx context.Context, url, currentVersion string, client *http.Client) *LatestRelease {
+	release, err := getLatestPortReleaseFrom(ctx, url, currentVersion, client)
 	if err != nil || release == nil {
 		return nil
 	}
@@ -355,4 +280,13 @@ func CheckForNewPiVersion(ctx context.Context, currentVersion string) *LatestPiR
 		return release
 	}
 	return nil
+}
+
+// CheckForLatestPortRelease returns a newer release of this module, or nil
+// (errors are swallowed like upstream).
+func CheckForLatestPortRelease(ctx context.Context, currentVersion string) *LatestRelease {
+	if os.Getenv("PI_SKIP_VERSION_CHECK") != "" {
+		return nil
+	}
+	return checkForLatestPortReleaseFrom(ctx, PortReleaseURL, currentVersion, http.DefaultClient)
 }

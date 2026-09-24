@@ -63,10 +63,10 @@ func TestRunChatStatuses(t *testing.T) {
 // TestRunNotifications covers the update cards.
 func TestRunNotifications(t *testing.T) {
 	wiring, _ := newRunTestWiring(t)
-	wiring.ShowNewVersionNotification(LatestRelease{Version: "1.1.0", Note: "**Big** release"}, false)
+	wiring.ShowNewVersionNotification(LatestRelease{Version: "v1.1.0"}, false)
 	lines := strings.Join(wiring.Chat.Render(80), "\n")
-	if !strings.Contains(lines, "Update Available") || !strings.Contains(lines, "New version 1.1.0 is available") ||
-		!strings.Contains(lines, "Big") || !strings.Contains(lines, "https://pi.dev/changelog") {
+	if !strings.Contains(lines, "Update Available") || !strings.Contains(lines, "New version v1.1.0 is available") ||
+		!strings.Contains(lines, "https://pi.dev/changelog") {
 		t.Fatalf("notification = %q", lines)
 	}
 
@@ -77,12 +77,10 @@ func TestRunNotifications(t *testing.T) {
 		t.Fatalf("hyperlink missing: %q", got)
 	}
 
-	// Both cards used to tell the user to run `<app> update [--extensions]`:
-	// upstream's command, which ships with its package manager. The port has no
-	// package manager and no update command (D41), so the version card names the
-	// way this module is actually installed, and the package card — whose whole
-	// subject, extension packages, does not exist here — states the list without
-	// inventing an action to take.
+	// The card used to tell the user to run `<app> update`: upstream's command,
+	// which ships with its package manager. The port has no package manager and
+	// no update command (D41), so the card names the way this module is actually
+	// installed instead.
 	version, _ := newRunTestWiring(t)
 	version.ShowNewVersionNotification(LatestRelease{Version: "1.1.0"}, false)
 	got := strings.Join(version.Chat.Render(80), "\n")
@@ -92,15 +90,55 @@ func TestRunNotifications(t *testing.T) {
 	if !strings.Contains(got, "go install github.com/dat267/pier@latest") {
 		t.Fatalf("version card lost its upgrade path: %q", got)
 	}
+}
 
-	packages, _ := newRunTestWiring(t)
-	packages.ShowPackageUpdateNotification([]string{"a", "b"})
-	got = strings.Join(packages.Chat.Render(80), "\n")
-	if strings.Contains(got, packages.AppName+" update") {
-		t.Fatalf("package card instructs a command the port does not have: %q", got)
+// The new-version seam answers "is there a card to show", so a check that found
+// nothing — offline, no newer release, or a failed request — must stay silent
+// rather than render an empty card.
+func TestVersionNotificationOnlyForARelease(t *testing.T) {
+	if release, ok := versionNotification(nil); ok || release != nil {
+		t.Fatalf("no release produced %+v, %v", release, ok)
 	}
-	if !strings.Contains(got, "Package Updates Available") || !strings.Contains(got, "- a") || !strings.Contains(got, "- b") {
-		t.Fatalf("package notification = %q", got)
+	release, ok := versionNotification(&coding.LatestRelease{Version: "v9.9.9"})
+	if !ok || release == nil || release.Version != "v9.9.9" {
+		t.Fatalf("release = %+v, %v", release, ok)
+	}
+}
+
+// The startup checks run on their own goroutines, so whatever they render has to
+// be built on the UI loop (upstream's checks run on its single-threaded event
+// loop). Headless wirings have no loop and render inline.
+func TestRunChecksRenderOnTheUILoop(t *testing.T) {
+	wiring, _ := newRunTestWiring(t)
+	checked := make(chan struct{}, 1)
+	wiring.CheckVersion = func(string) (*LatestRelease, bool) {
+		select {
+		case checked <- struct{}{}:
+		default:
+		}
+		return &LatestRelease{Version: "v9.9.9"}, true
+	}
+	go wiring.notifyNewVersion(false)
+	<-checked
+	// Posted, not rendered: the queue is only drained on the loop's next pass.
+	rendered := func() string { return strings.Join(wiring.Chat.Render(80), "\n") }
+	if strings.Contains(rendered(), "Update Available") {
+		t.Fatal("the release card was rendered off the UI loop")
+	}
+	wiring.UI.RenderNow(true)
+	if !strings.Contains(rendered(), "Update Available") {
+		t.Fatal("the release card never reached the loop")
+	}
+
+	// Headless: no loop to post to, so the work runs where it is.
+	headless, _ := newRunTestWiring(t)
+	headless.UI = nil
+	headless.CheckVersion = func(string) (*LatestRelease, bool) {
+		return &LatestRelease{Version: "v9.9.9"}, true
+	}
+	headless.notifyNewVersion(false)
+	if !strings.Contains(strings.Join(headless.Chat.Render(80), "\n"), "Update Available") {
+		t.Fatal("the headless wiring must render inline")
 	}
 }
 

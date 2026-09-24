@@ -24,9 +24,22 @@ code comments at the point of divergence; this file is the log. The range is
   in the port implements them (D41), so the notice would announce work that
   never happens. The same rule covers the other extension-flavoured user-visible
   text: the update card names the module's install path instead of `<app>
-  update` (there is no package manager and no update command), the package card
-  lists its packages without inventing an action, and the trust row's
-  description says "when no saved trust decision decides project trust".
+  update` (there is no package manager and no update command), the trust row's
+  description says "when no saved trust decision decides project trust", and
+  the package-update card is gone: its only caller upstream asks the package
+  manager about the extension packages it installed, which this port has no
+  equivalent of.  The update card is reachable: the release check runs at startup off the UI
+  loop and reports on it, and it asks **this module's** release feed — the Go
+  module proxy path for the module, which is what the card's `go install …@latest`
+  line resolves — rather than pi's own feed, whose versions are pi's. A tag keeps
+  its `v` prefix (Go module versions do), so the semver subset accepts the one
+  leading `v` npm's `valid` accepts. Upstream's feed also carries release notes
+  and a package name, and the card rendered them; the proxy carries a version
+  only, so the card carries a version only. Nothing is reported for an unstamped
+  build: its version is `0.0.0`, and a proxy pseudo-version of `0.0.0` sorts
+  older than `0.0.0`. Offline, nothing is checked: upstream folds `--offline`
+  and a truthy `PI_OFFLINE` into `PI_OFFLINE` and `PI_SKIP_VERSION_CHECK` for
+  the whole process, and `cmd` does the same (`applyOfflineMode`).
 - D133 — tool renderers always resolve to the built-in set (no extension
   definitions); `computeEditsPreview` is synchronous.
 - D140 — the user's provider extensions (hyper, commandcode) are compiled in as

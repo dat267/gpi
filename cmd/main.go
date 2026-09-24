@@ -102,8 +102,22 @@ func Execute() {
 	}
 }
 
+// applyOfflineMode mirrors upstream main.ts, which folds --offline and a truthy
+// PI_OFFLINE into the environment before anything reads it. Offline is
+// process-wide there: the model runtime and the version check consult the
+// environment, not the parsed arguments, and an unset variable would leave the
+// release check free to reach the network under --offline.
+func applyOfflineMode(args *coding.Args) {
+	if !args.Offline && !coding.IsTruthyEnvFlag(os.Getenv("PI_OFFLINE")) {
+		return
+	}
+	_ = os.Setenv("PI_OFFLINE", "1")
+	_ = os.Setenv("PI_SKIP_VERSION_CHECK", "1")
+}
+
 func run(appName string, args *coding.Args) error {
 	ctx := context.Background()
+	applyOfflineMode(args)
 	// Bounds the create-time catalog refresh (upstream leaves it unbounded; the
 	// Go refresh is synchronous, so it needs a ceiling).
 	modelRefreshTimeoutMS := int64(15000)
