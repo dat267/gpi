@@ -3,6 +3,7 @@ package interactive
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/dat267/pier/coding"
@@ -465,6 +466,10 @@ func (w *SubmitWiring) HandleSubmit(ctx context.Context, text string) {
 	addHistory(text)
 }
 
+// pasteInFlight drops an image paste while a previous clipboard read is still
+// running: each read can take seconds, and overlapping inserts would interleave.
+var pasteInFlight atomic.Bool
+
 // newKeyWiring assembles the KeyWiring (port of the corresponding InteractiveMode wiring).
 func newKeyWiring(app *App) *KeyWiring {
 	wiring := &KeyWiring{
@@ -474,12 +479,24 @@ func newKeyWiring(app *App) *KeyWiring {
 			// Upstream handleClipboardPaste pastes a clipboard image first and
 			// falls back to text; image transports are out of scope (D41
 			// scope note in AGENTS.md), so the text path is ported.
-			text, err := readClipboardText()
-			if err != nil || text == "" {
+			// The clipboard read runs a subprocess with up to a 5s timeout per
+			// paste command, so it happens off the loop and the insert marshals
+			// back; the in-flight flag drops overlapping pastes instead of
+			// interleaving their inserts.
+			if !pasteInFlight.CompareAndSwap(false, true) {
 				return
 			}
-			app.DefaultEditor.InsertTextAtCursor(text)
-			app.UI.RequestRender(false)
+			go func() {
+				defer pasteInFlight.Store(false)
+				text, err := readClipboardText()
+				if err != nil || text == "" {
+					return
+				}
+				app.UI.Post(func() {
+					app.DefaultEditor.InsertTextAtCursor(text)
+					app.UI.RequestRender(false)
+				})
+			}()
 		},
 		Settings: app.Settings,
 		UI:       app.UI,

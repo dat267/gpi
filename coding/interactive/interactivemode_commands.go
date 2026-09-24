@@ -768,9 +768,16 @@ func newCommandWiring(app *App) *CommandWiring {
 		},
 
 		CopyToClipboard: func(text string) (bool, string) {
-			if err := coding.CopyTextToClipboard(text); err != nil {
-				return false, err.Error()
-			}
+			// The clipboard subprocess can hang for up to its timeout (xclip
+			// serving a selection, a wedged clipboard daemon), so it runs off
+			// the loop; the command confirms optimistically and failures are
+			// marshaled back through the error seam.
+			coding.CopyTextToClipboardAsync(text, func(err error) {
+				if err == nil {
+					return
+				}
+				app.UI.Post(func() { app.showError(err.Error()) })
+			})
 			return true, ""
 		},
 		WriteDebugLog:   WriteDebugLogFile,

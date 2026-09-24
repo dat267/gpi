@@ -35,6 +35,11 @@ type CopySelectionFn func(text string) (bool, string)
 
 var clipboardCopier CopySelectionFn
 
+// clipboardScreen holds the screen created by createInteractiveTui so the
+// async clipboard failure can flash through Post. Written once during startup,
+// before any copy goroutine can read it (the go statement orders it).
+var clipboardScreen tui.TUI
+
 // SetClipboardCopier installs the clipboard copier (D106).
 func SetClipboardCopier(copier CopySelectionFn) { clipboardCopier = copier }
 
@@ -59,11 +64,21 @@ func readClipboardText() (string, error) {
 // internal timer is replaced by the tick channel (stage 2).
 func CreateInteractiveTui(options InteractiveTuiOptions) tui.TUI {
 	// The selection copier is a process-wide seam (D106); wire the real
-	// clipboard implementation once.
+	// clipboard implementation once. The subprocess can hang for up to its
+	// timeout, so it runs off the loop: the selection flashes "Copied!"
+	// optimistically and a failure is marshaled back through Post to flash in
+	// place of the error message the synchronous form would have shown.
 	SetClipboardCopier(func(text string) (bool, string) {
-		if err := coding.CopyTextToClipboard(text); err != nil {
-			return false, err.Error()
-		}
+		coding.CopyTextToClipboardAsync(text, func(err error) {
+			if err == nil || clipboardScreen == nil {
+				return
+			}
+			clipboardScreen.Post(func() {
+				if altscreen, isAlt := clipboardScreen.(*tui.AltScreen); isAlt {
+					altscreen.Flash(err.Error(), 0)
+				}
+			})
+		})
 		return true, ""
 	})
 	return withRenderTicks(createInteractiveTui(options))
@@ -124,10 +139,12 @@ func createInteractiveTui(options InteractiveTuiOptions) tui.TUI {
 			},
 		})
 		installDebugKey(screen.Renderer, options.OnDebug)
+		clipboardScreen = screen
 		return screen
 	}
 	screen := tui.NewMainScreen(terminal, options.ShowHardwareCursor, options.LogDirectory)
 	installDebugKey(screen.Renderer, options.OnDebug)
+	clipboardScreen = screen
 	return screen
 }
 

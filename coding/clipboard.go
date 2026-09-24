@@ -146,6 +146,16 @@ func CopyTextToClipboard(text string) error {
 	return nil
 }
 
+// CopyTextToClipboardAsync copies on its own goroutine and reports the outcome
+// to onDone (nil on success). The clipboard subprocess can hang for up to its
+// timeout — xclip serving a selection, a wedged clipboard daemon — so callers
+// on the UI goroutine use this form and confirm optimistically.
+func CopyTextToClipboardAsync(text string, onDone func(error)) {
+	go func() {
+		onDone(CopyTextToClipboard(text))
+	}()
+}
+
 // ReadClipboardText reads plain text from the system clipboard (upstream
 // readClipboardText; the native clipboard fallback has no Go counterpart).
 // Empty text returns ("", nil) like upstream's null.
