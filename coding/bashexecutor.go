@@ -97,6 +97,8 @@ func ExecuteBashWithOperations(ctx context.Context, command, cwd string, operati
 		}
 		tempFile = file
 		flushedChunks = 0
+		// D161: bound the scratch this leaves behind (tempoutput.go).
+		sweepTempOutputFiles(filepath.Dir(tempFilePath), tempFilePath, tempOutputBudgetBytes)
 		return nil
 	}
 

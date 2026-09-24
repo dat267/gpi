@@ -286,6 +286,8 @@ func (o *OutputAccumulator) ensureTempFileLocked() error {
 		}
 	}
 	o.rawChunks = nil
+	// D161: bound the scratch this leaves behind (tempoutput.go).
+	sweepTempOutputFiles(filepath.Dir(path), path, tempOutputBudgetBytes)
 	return nil
 }
 

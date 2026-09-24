@@ -493,3 +493,16 @@ only as the code comment that introduced them. The range is **D1–D160**.
   `TestApiKeyLoginRunsOffTheUILoop` models production's single loop goroutine —
   dispatch, then render and route input — and fails ("the login flow is running
   on the UI loop") instead of hanging when the dispatch blocks.
+
+- D161 — **the port sweeps its own temp output files**. Full tool output over the
+  truncation limits is written to `<tmpdir>/pi-bash-<id>.log` — the shared
+  accumulator's `pi-output` and the PowerShell tool's `pi-powershell` prefixes
+  likewise — and handed to the model as "[Output truncated. Full output: <path>]".
+  Upstream never deletes those files, leaving them to the OS (systemd-tmpfiles, a
+  reboot). On a host where `/tmp` is tmpfs that scratch is RAM, and one 174 MB
+  command sits there for days: measured on this project's host, 230 files /
+  442 MB after three days, none of it read again. The port sweeps its own files,
+  oldest first, down to a 256 MB budget, at the moment a temp file is created —
+  exactly when the pile grows — and never touches the file being written, another
+  tool's log, or a directory whose name happens to match. `TestSweepTempOutputFiles`
+  pins that, including the oldest-first order.
