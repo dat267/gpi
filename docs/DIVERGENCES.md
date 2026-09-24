@@ -31,7 +31,10 @@ code comments at the point of divergence; this file is the log. The range is
   extensions), and
   the package-update card is gone: its only caller upstream asks the package
   manager about the extension packages it installed, which this port has no
-  equivalent of.  The update card is reachable: the release check runs at startup off the UI
+  equivalent of. The `pi config` resource-manager TUI went for the same reason:
+  it exists to enable and disable package resources, and with no package manager
+  there is nothing for it to list — it was 1,315 lines reachable only from its own
+  golden test.  The update card is reachable: the release check runs at startup off the UI
   loop and reports on it, and it asks **this module's** release feed — the Go
   module proxy path for the module, which is what the card's `go install …@latest`
   line resolves — rather than pi's own feed, whose versions are pi's. A tag keeps

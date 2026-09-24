@@ -337,8 +337,12 @@ func validThinkingLevelStrings() []string {
 
 // PrintHelp returns the CLI help text (upstream printHelp without ANSI color).
 //
-// Extension CLI flags are out of scope, so the extension flag section is
-// omitted. The extension-related options and help lines are kept verbatim.
+// Upstream's Commands table is gone: it lists install/remove/uninstall/update/
+// list/config/auth, and this port implements none of them (there is no package
+// manager and no extension mechanics, D41 — the one-time resource-manager TUI
+// went with them). A word the parser does not know is not an error either; it
+// becomes the first message to the model, so the table was advertising commands
+// that silently turn into prompts. The option lines are otherwise upstream's.
 func PrintHelp() string { return PrintHelpNamed(AppName) }
 
 // PrintHelpNamed renders the help text with the invoked binary name.
@@ -349,14 +353,6 @@ func PrintHelpNamed(appName string) string {
 	var builder strings.Builder
 	builder.WriteString(appName + " - AI coding assistant with read, bash, edit, write tools\n\n")
 	builder.WriteString("Usage:\n  " + appName + " [options] [--] [@files...] [messages...]\n\n")
-	builder.WriteString("Commands:\n")
-	builder.WriteString("  " + appName + " install <source> [-l]     Install extension source and add to settings\n")
-	builder.WriteString("  " + appName + " remove <source> [-l]      Remove extension source from settings\n")
-	builder.WriteString("  " + appName + " uninstall <source> [-l]   Alias for remove\n")
-	builder.WriteString("  " + appName + " update [source|self|pi]   Update pi, extensions, or model catalogs\n")
-	builder.WriteString("  " + appName + " list                      List installed extensions from settings\n")
-	builder.WriteString("  " + appName + " config [-l]               Open TUI to enable/disable package resources (Tab switches scope)\n")
-	builder.WriteString("  " + appName + " auth <command>            Print credentials or check provider readiness\n\n")
 	builder.WriteString("Options:\n")
 	for _, line := range helpOptionLines() {
 		builder.WriteString(line + "\n")
