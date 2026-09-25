@@ -655,7 +655,11 @@ func (w *RunWiring) armAnimation(timer *time.Timer, deadline *time.Time) <-chan 
 	// nothing must not pay for the walk (D164). A walk that reported no animator
 	// stays valid until the next paint; a walk with a deadline stays valid until
 	// that deadline passes, which is when the owner must ask again.
-	if w.animationScanValid && !w.animationScanNeeds && deadline.IsZero() {
+	// A cached "no animator" is only trustworthy when no turn is running: a tool
+	// with a live timer can be built between the scan and the next paint, and the
+	// paint is the only thing that invalidates the cache. While work is active the
+	// fallback below must run, so do not short-circuit here.
+	if w.animationScanValid && !w.animationScanNeeds && deadline.IsZero() && !w.work.active {
 		return nil
 	}
 	if w.animationScanValid && w.animationScanNeeds && !deadline.IsZero() && time.Now().Before(*deadline) {

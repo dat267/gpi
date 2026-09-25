@@ -333,6 +333,10 @@ func TestArmAnimationFindsARunningToolInTheLayout(t *testing.T) {
 func TestArmAnimationTicksWhileWorkIsActive(t *testing.T) {
 	wiring, _ := newRunTestWiring(t)
 	wiring.work.active = true
+	// Simulate a stale walk (a scan ran before the tool appeared; only a paint
+	// invalidates it). The fallback must still arm the tick.
+	wiring.animationScanValid = true
+	wiring.animationScanNeeds = false
 
 	timer := time.NewTimer(time.Hour)
 	timer.Stop()
