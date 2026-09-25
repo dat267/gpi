@@ -298,6 +298,23 @@ into narrow, injectable wirings (all in `coding/interactive`):
   process-wide `http.DefaultTransport` — a data race against in-flight requests —
   and the setting already reached the wire per request (D40).
 
+**Theme auto-sync is listener-driven** (D165). The port cannot run a synchronous
+terminal query on the UI loop: the loop is what dispatches the reply, so
+`QueryTerminalColorScheme`/`QueryTerminalBackgroundColor` would always time out.
+`App` wires the controller's `Detector`/`Env` (which must reach the renderer
+through `*tui.TuiReference`, so the reference forwards the color-scheme surface),
+`ApplyFromSettings` applies only the fast `COLORFGBG` result and sends
+non-blocking requests, and the persistent color-scheme/background listeners
+apply the reply on the loop. A `CSI ? 997` report wins over the OSC 11 fallback
+and stops the background poll (which covers terminals without OSC 2031).
+`Lifecycle.SwitchTuiMode` calls `OnTuiModeSwitched` → `Theme.RebindTUI` because
+the swapped-out renderer's listener registry is gone. `TestAppWiringCompleteness`
+pins the `Detector`/`Env`/`OnTuiModeSwitched` wiring. On a **committed** theme
+change the controller's `OnChanged` runs `App.rebuildForTheme`, which rebuilds
+the header, the loaded-resource sections and the transcript: the port bakes
+theme colours at construction where upstream resolves its `theme` Proxy at
+render, so invalidating alone left the old colours on screen.
+
 `tui/render.go` (+ `mainscreen.go`, `altscreen.go`, `terminal.go`,
 `stdinbuffer.go`) is the differential renderer core. Its lock discipline is
 load-bearing (see below).
@@ -568,7 +585,7 @@ snapshot under and deliver outside.
 Where upstream relies on JSON/JS semantics Go has no equivalent for, or where
 upstream has a defect, the port diverges deliberately: a numbered **D-row** in a
 code comment at the point of divergence, with the reproducing scenario, and an
-entry in `docs/DIVERGENCES.md` (range **D1–D163**). Prefer a D-row over silently
+entry in `docs/DIVERGENCES.md` (range **D1–D165**). Prefer a D-row over silently
 approximating upstream.
 
 ## Out of scope (documented)
