@@ -4,6 +4,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -150,9 +151,10 @@ type RawInputTerminal interface {
 // bytes through FeedInput and drives flushing via NextInputFlushDeadline /
 // FlushPendingInput, so the stdin buffer and the keyboard-protocol
 // negotiation state are loop-owned and lock-free. The protocol flags are
-// atomics. The one retained lock is writeMu: it serializes terminal writes
-// and raw-mode transitions between the progress keepalive goroutine, the
-// loop, and the shutdown path — pure I/O serialization, no UI state.
+// atomics. writeMu serializes raw-mode transitions and the ordering of
+// enqueued mode sequences between the progress keepalive goroutine, the loop
+// and the shutdown path — it never holds a console write. Output itself runs
+// on the writer goroutine (writesMu), so no caller blocks on the console.
 type ProcessTerminal struct {
 	stdin  *os.File
 	stdout *os.File
@@ -172,6 +174,19 @@ type ProcessTerminal struct {
 	progressInterval                  *time.Ticker
 	progressDone                      chan struct{}
 	writeLogPath                      string
+
+	// Console writes run on a dedicated goroutine (writesMu/writes/writesCond).
+	// The UI loop must never make a console write itself: on Windows the
+	// terminal stops draining the pty while a mouse drag-selection is active, so
+	// a synchronous write would park the loop for the whole duration of the
+	// drag. Writes are appended in submission order and the goroutine drains
+	// them in that order (so ordering is preserved); writeFn is a test seam.
+	writesMu      sync.Mutex
+	writesCond    *sync.Cond
+	writes        []string
+	writesStarted bool
+	inFlight      bool
+	writeFn       func(string)
 
 	// cols/rows cache the terminal size. Terminal size is queried with a
 	// console API (GetConsoleScreenBufferInfo on Windows), and that call can
@@ -193,7 +208,9 @@ func NewProcessTerminal(stdin *os.File, stdout *os.File) *ProcessTerminal {
 	if stdout == nil {
 		stdout = os.Stdout
 	}
-	return &ProcessTerminal{stdin: stdin, stdout: stdout, writeLogPath: resolveWriteLogPath()}
+	terminal := &ProcessTerminal{stdin: stdin, stdout: stdout, writeLogPath: resolveWriteLogPath()}
+	terminal.writesCond = sync.NewCond(&terminal.writesMu)
+	return terminal
 }
 
 func resolveWriteLogPath() string {
@@ -644,6 +661,10 @@ func (t *ProcessTerminal) Stop() {
 	t.setInputHandler(nil)
 	stopResizeWatcher()
 
+	// Drain the queued disable sequences before restoring the terminal, so no
+	// escape sequence is left to run after the mode is restored.
+	t.flushWrites()
+
 	// Restore raw mode state. The stdin buffer and the negotiation state are
 	// owned by the input consumer (the loop) and are left alone here: the
 	// closed flag stops all further input processing.
@@ -661,7 +682,30 @@ func (t *ProcessTerminal) disableModifyOtherKeysLocked() {
 	t.modifyOtherKeysActive.Store(false)
 }
 
+// writeLocked enqueues data for the writer goroutine (see the writesMu
+// comment). It never touches the console, so a paused terminal cannot block
+// the caller.
 func (t *ProcessTerminal) writeLocked(data string) {
+	if data == "" {
+		return
+	}
+	t.writesMu.Lock()
+	t.writes = append(t.writes, data)
+	if !t.writesStarted {
+		t.writesStarted = true
+		go t.writeLoop()
+	}
+	t.writesCond.Signal()
+	t.writesMu.Unlock()
+}
+
+// writeDirect writes one batch to the console. Only the writer goroutine calls
+// it, so no other goroutine is ever blocked in a console write.
+func (t *ProcessTerminal) writeDirect(data string) {
+	if t.writeFn != nil {
+		t.writeFn(data)
+		return
+	}
 	_, _ = t.stdout.WriteString(data)
 	if t.writeLogPath != "" {
 		f, err := os.OpenFile(t.writeLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
@@ -669,6 +713,38 @@ func (t *ProcessTerminal) writeLocked(data string) {
 			_, _ = f.WriteString(data)
 			_ = f.Close()
 		}
+	}
+}
+
+// writeLoop drains the pending writes in order, joining each batch into one
+// console write. A blocked console parks only this goroutine.
+func (t *ProcessTerminal) writeLoop() {
+	for {
+		t.writesMu.Lock()
+		for len(t.writes) == 0 {
+			t.writesCond.Wait()
+		}
+		batch := t.writes
+		t.writes = nil
+		t.inFlight = true
+		t.writesMu.Unlock()
+
+		t.writeDirect(strings.Join(batch, ""))
+
+		t.writesMu.Lock()
+		t.inFlight = false
+		t.writesCond.Broadcast()
+		t.writesMu.Unlock()
+	}
+}
+
+// flushWrites blocks until every queued write has reached the console. Stop
+// calls it before restoring the terminal so no escape sequence is left queued.
+func (t *ProcessTerminal) flushWrites() {
+	t.writesMu.Lock()
+	defer t.writesMu.Unlock()
+	for len(t.writes) > 0 || t.inFlight {
+		t.writesCond.Wait()
 	}
 }
 

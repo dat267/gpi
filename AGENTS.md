@@ -178,7 +178,12 @@ Stage 3 (input and signals on the loop) has landed:
   make the console query itself — on Windows that query is slow and blocks
   during a mouse selection, which stalled every paint 100–400 ms. Windows has
   no SIGWINCH, so its resize watcher is a 200 ms poller (off the loop); a
-  refresh repaints only when the size actually changed.
+  refresh repaints only when the size actually changed. Console **writes** run
+  on their own goroutine too: `Write` appends to a FIFO the goroutine drains,
+  so no caller blocks. Windows Terminal stops draining the pty while a mouse
+  drag-selection is active, and a synchronous write parked the UI loop for the
+  whole duration of the drag; `Stop` flushes the queue before restoring the
+  terminal.
 - The `DrainInput` last-input tracking is an atomic stamp written by the reader
   instead of an `OnData` swap from another goroutine (one lock retired).
 - **`/compact` no longer blocks the UI**: the command is split into
