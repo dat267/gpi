@@ -33,6 +33,12 @@ func (r *recordingTerminal) hasWrite(sub string) bool {
 	return false
 }
 
+func (r *recordingTerminal) joinedWrites() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return strings.Join(r.writes, "")
+}
+
 // TestBackgroundProbeRoundTripThroughRenderer drives the real renderer through
 // the safe detection path: the color-scheme notification toggle is deferred
 // until Start, the OSC 11 probe writes the query without blocking, and a reply

@@ -284,3 +284,64 @@ func TestRunLoop(t *testing.T) {
 	}
 	_ = time.Second
 }
+
+// animationProbe is a leaf that always requests an animation frame.
+type animationProbe struct {
+	tui.Component
+	frames int
+}
+
+func (a *animationProbe) AnimationFrame(time.Time) (bool, time.Duration) {
+	a.frames++
+	return true, time.Second
+}
+func (a *animationProbe) Render(int) []string { return nil }
+func (a *animationProbe) Invalidate()         {}
+
+// TestArmAnimationFindsARunningToolInTheLayout pins that the loop's animation
+// scan reaches a component under the fullscreen layout (VStack -> ScrollView ->
+// DocumentContainer -> Chat), so the elapsed timer arms.
+func TestArmAnimationFindsARunningToolInTheLayout(t *testing.T) {
+	wiring, _ := newRunTestWiring(t)
+	probe := &animationProbe{}
+	wiring.Chat.AddChild(probe)
+
+	document := &tui.Container{}
+	document.AddChild(wiring.Chat)
+	transcript := tui.NewScrollView(document, tui.ScrollViewOptions{Follow: "end", Primary: true})
+	root := tui.NewVStack(nil, tui.StackOptions{})
+	root.AddChild(transcript)
+
+	screen := tui.NewAltScreen(&fakeRendererTerminal{width: 80, height: 24}, false, t.TempDir(), tui.AltScreenOptions{})
+	screen.SetLayoutRoot(root)
+	wiring.UI = screen
+
+	timer := time.NewTimer(time.Hour)
+	timer.Stop()
+	var deadline time.Time
+	ch := wiring.armAnimation(timer, &deadline)
+	if ch == nil || deadline.IsZero() {
+		t.Fatalf("animation not armed: ch=%v deadline=%v (probe frames=%d)", ch, deadline, probe.frames)
+	}
+	if probe.frames == 0 {
+		t.Fatal("animation probe was not visited")
+	}
+}
+
+// TestArmAnimationTicksWhileWorkIsActive pins the fallback that keeps a running
+// tool's elapsed label live even when the animation walk does not reach it.
+func TestArmAnimationTicksWhileWorkIsActive(t *testing.T) {
+	wiring, _ := newRunTestWiring(t)
+	wiring.work.active = true
+
+	timer := time.NewTimer(time.Hour)
+	timer.Stop()
+	var deadline time.Time
+	ch := wiring.armAnimation(timer, &deadline)
+	if ch == nil || deadline.IsZero() {
+		t.Fatalf("animation not armed while work is active: ch=%v deadline=%v", ch, deadline)
+	}
+	if delay := time.Until(deadline); delay <= 0 || delay > 2*time.Second {
+		t.Fatalf("tick delay = %v", delay)
+	}
+}

@@ -662,6 +662,13 @@ func (w *RunWiring) armAnimation(timer *time.Timer, deadline *time.Time) <-chan 
 		return timer.C
 	}
 	needs, delay := w.UI.NextAnimation()
+	// A running turn can hold a live timer (the shell elapsed label) even when
+	// the animation walk did not report one: the walk descends through wrappers
+	// and may not reach a freshly built component before the next paint. Tick at
+	// least once a second while work is active so such a label cannot freeze.
+	if w.work.active && (!needs || delay > time.Second) {
+		needs, delay = true, time.Second
+	}
 	w.animationScanValid = true
 	w.animationScanNeeds = needs
 	if !needs {
