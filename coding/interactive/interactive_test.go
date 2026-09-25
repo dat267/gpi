@@ -295,9 +295,6 @@ type fakeThemeUI struct {
 	renders       int
 	notifications bool
 	listener      func(TerminalTheme)
-	bgListener    func(RgbColor)
-	schemeReqs    int
-	bgReqs        int
 }
 
 func (f *fakeThemeUI) Invalidate() {
@@ -331,34 +328,6 @@ func (f *fakeThemeUI) emit(theme TerminalTheme) {
 	f.mu.Unlock()
 	if listener != nil {
 		listener(theme)
-	}
-}
-
-func (f *fakeThemeUI) OnTerminalBackgroundColorChange(listener func(rgb RgbColor)) func() {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.bgListener = listener
-	return func() {}
-}
-
-func (f *fakeThemeUI) RequestTerminalColorScheme() {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.schemeReqs++
-}
-
-func (f *fakeThemeUI) RequestTerminalBackgroundColor() {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.bgReqs++
-}
-
-func (f *fakeThemeUI) emitBackground(rgb RgbColor) {
-	f.mu.Lock()
-	listener := f.bgListener
-	f.mu.Unlock()
-	if listener != nil {
-		listener(rgb)
 	}
 }
 
@@ -583,88 +552,4 @@ func TestThemeSettingAppliesOnTheQueue(t *testing.T) {
 	if CurrentThemeName() != "light" {
 		t.Fatalf("preview = %q", CurrentThemeName())
 	}
-}
-
-// TestThemeControllerAutoRequestsTerminalTheme pins the listener-driven auto
-// path: ApplyFromSettings must not block on a query, it must ask the terminal,
-// and the reply must switch the light/dark pair. A scheme report wins over the
-// background fallback.
-func TestThemeControllerAutoRequestsTerminalTheme(t *testing.T) {
-	SetCustomThemesDir(t.TempDir())
-	SetRegisteredThemes(nil)
-	ui := &fakeThemeUI{}
-	auto := "light/dark"
-	settings := &fakeThemeSettings{setting: &auto}
-	controller := NewInteractiveThemeController(ThemeControllerOptions{
-		UI:                 ui,
-		GetSettingsManager: func() ThemeSettings { return settings },
-		TimeoutMS:          1,
-		Env:                func(string) string { return "" },
-	})
-	controller.ApplyFromSettings()
-	if CurrentThemeName() != "dark" {
-		t.Fatalf("provisional theme = %q, want dark", CurrentThemeName())
-	}
-	if ui.schemeReqs == 0 || ui.bgReqs == 0 {
-		t.Fatalf("terminal not queried: scheme=%d background=%d", ui.schemeReqs, ui.bgReqs)
-	}
-	if !ui.notifications {
-		t.Fatal("color-scheme notifications not enabled for auto")
-	}
-
-	ui.emit(TerminalThemeLight)
-	if CurrentThemeName() != "light" {
-		t.Fatalf("theme after a light scheme report = %q", CurrentThemeName())
-	}
-	ui.emitBackground(RgbColor{R: 20, G: 20, B: 20})
-	if CurrentThemeName() != "light" {
-		t.Fatalf("background overrode the scheme report: %q", CurrentThemeName())
-	}
-	controller.Dispose()
-}
-
-// TestThemeControllerAutoFollowsBackgroundFallback covers terminals that never
-// answer the color-scheme query: the OSC 11 background classifies the theme.
-func TestThemeControllerAutoFollowsBackgroundFallback(t *testing.T) {
-	SetCustomThemesDir(t.TempDir())
-	SetRegisteredThemes(nil)
-	ui := &fakeThemeUI{}
-	auto := "light/dark"
-	settings := &fakeThemeSettings{setting: &auto}
-	controller := NewInteractiveThemeController(ThemeControllerOptions{
-		UI:                 ui,
-		GetSettingsManager: func() ThemeSettings { return settings },
-		TimeoutMS:          1,
-		Env:                func(string) string { return "" },
-	})
-	controller.ApplyFromSettings()
-	ui.emitBackground(RgbColor{R: 250, G: 250, B: 250})
-	if CurrentThemeName() != "light" {
-		t.Fatalf("theme after a light background = %q", CurrentThemeName())
-	}
-	controller.Dispose()
-}
-
-// TestThemeControllerUnsetAdoptsBackground covers the no-setting path: the
-// detected theme is adopted and persisted once the terminal answers.
-func TestThemeControllerUnsetAdoptsBackground(t *testing.T) {
-	SetCustomThemesDir(t.TempDir())
-	SetRegisteredThemes(nil)
-	ui := &fakeThemeUI{}
-	settings := &fakeThemeSettings{}
-	controller := NewInteractiveThemeController(ThemeControllerOptions{
-		UI:                 ui,
-		GetSettingsManager: func() ThemeSettings { return settings },
-		TimeoutMS:          1,
-		Env:                func(string) string { return "" },
-	})
-	controller.ApplyFromSettings()
-	ui.emitBackground(RgbColor{R: 255, G: 255, B: 255})
-	if CurrentThemeName() != "light" {
-		t.Fatalf("theme after a white background = %q", CurrentThemeName())
-	}
-	if len(settings.setCalls) == 0 || settings.setCalls[len(settings.setCalls)-1] != "light" {
-		t.Fatalf("detected theme not persisted: %v", settings.setCalls)
-	}
-	controller.Dispose()
 }

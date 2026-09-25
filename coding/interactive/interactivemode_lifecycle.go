@@ -64,9 +64,6 @@ type LifecycleOptions struct {
 	KillDetachedChildren func()
 	// DisableThemeAutoSync stops the theme auto-sync.
 	DisableThemeAutoSync func()
-	// OnTuiModeSwitched runs after SwitchTuiMode installs a new renderer (the
-	// theme controller rebinds its terminal listeners against it).
-	OnTuiModeSwitched func()
 	// DisposeRuntime disposes the runtime host.
 	DisposeRuntime func()
 	// ResumeCommand builds the resume command ("" to skip).
@@ -230,9 +227,6 @@ func (l *Lifecycle) SwitchTuiMode(mode string, restoreProgress bool, startRender
 	l.MountInteractiveTui(nextUI, components, l.layoutRoot())
 	nextUI.Invalidate()
 	nextUI.SetFocus(focus)
-	if l.options.OnTuiModeSwitched != nil {
-		l.options.OnTuiModeSwitched()
-	}
 	if !startRenderer {
 		return true
 	}

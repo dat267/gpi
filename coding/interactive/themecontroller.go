@@ -1,11 +1,6 @@
 package interactive
 
-import (
-	"sync/atomic"
-	"time"
-
-	"github.com/dat267/pier/internal/offloop"
-)
+import "github.com/dat267/pier/internal/offloop"
 
 // Port of src/modes/interactive/theme/theme-controller.ts: the settings-driven
 // theme controller with terminal auto-sync.
@@ -16,13 +11,6 @@ type ThemeControllerUI interface {
 	RequestRender()
 	SetTerminalColorSchemeNotifications(enabled bool)
 	OnTerminalColorSchemeChange(listener func(theme TerminalTheme)) (unsubscribe func())
-	// OnTerminalBackgroundColorChange subscribes to OSC 11 background replies,
-	// the fallback for terminals that do not report a color scheme.
-	OnTerminalBackgroundColorChange(listener func(rgb RgbColor)) (unsubscribe func())
-	// RequestTerminalColorScheme/BackgroundColor send the queries without
-	// blocking; the replies arrive through the listeners on the owner goroutine.
-	RequestTerminalColorScheme()
-	RequestTerminalBackgroundColor()
 }
 
 // ThemeSettings is the settings surface the controller needs.
@@ -76,14 +64,8 @@ type InteractiveThemeController struct {
 	activeThemeName     string
 	autoSyncEnabled     bool
 	unsubscribe         func()
-	backgroundUnsub     func()
 	marshal             func(func())
 	themeQueue          *offloop.Queue
-
-	// schemeReportSeen records that the terminal answered a color-scheme query;
-	// it wins over the OSC 11 background fallback and stops the background poll.
-	schemeReportSeen atomic.Bool
-	pollStop         chan struct{}
 }
 
 // NewInteractiveThemeController creates and initializes the controller.
@@ -113,7 +95,7 @@ func NewInteractiveThemeController(options ThemeControllerOptions) *InteractiveT
 		controller.activeThemeName = name
 	}
 	InitTheme(controller.activeThemeName, true)
-	controller.bindTerminalListeners()
+	controller.bindTerminalColorSchemeListener()
 	return controller
 }
 
@@ -123,26 +105,13 @@ func (c *InteractiveThemeController) RebindTUI() {
 		c.unsubscribe()
 		c.unsubscribe = nil
 	}
-	if c.backgroundUnsub != nil {
-		c.backgroundUnsub()
-		c.backgroundUnsub = nil
-	}
-	c.bindTerminalListeners()
+	c.bindTerminalColorSchemeListener()
 	if c.ui != nil {
 		c.ui.SetTerminalColorSchemeNotifications(c.autoSyncEnabled)
 	}
-	if c.autoSyncEnabled {
-		c.requestTerminalTheme()
-	}
 }
 
-// ApplyFromSettings applies the theme from the current settings. In the
-// interactive wiring it never blocks on a terminal query: the terminal is
-// asked asynchronously and its reply arrives through the color-scheme/background
-// listeners (a synchronous query cannot complete on the UI loop, which is what
-// dispatches the reply). The env/COLORFGBG result is applied immediately so the
-// first paint is themed. Headless callers (no Marshal seam, so no loop to
-// dispatch a reply) use the synchronous detector instead.
+// ApplyFromSettings applies the theme from the current settings.
 func (c *InteractiveThemeController) ApplyFromSettings() {
 	themeSetting := c.currentThemeSetting
 	if themeSetting == nil && c.getSettings != nil {
@@ -150,12 +119,8 @@ func (c *InteractiveThemeController) ApplyFromSettings() {
 	}
 
 	if light, dark, ok := ParseAutoThemeSetting(themeSetting); ok {
+		c.terminalTheme = DetectTerminalThemeForAuto(c.detector, c.timeoutMS, c.env)
 		c.setAutoSync(true)
-		if c.marshal == nil {
-			c.terminalTheme = DetectTerminalThemeForAuto(c.detector, c.timeoutMS, c.env)
-		} else {
-			c.terminalTheme = DetectTerminalBackgroundFromEnv(c.env).Theme
-		}
 		name := dark
 		if c.terminalTheme == TerminalThemeLight {
 			name = light
@@ -170,10 +135,7 @@ func (c *InteractiveThemeController) ApplyFromSettings() {
 		return
 	}
 
-	detection := DetectTerminalBackgroundFromEnv(c.env)
-	if c.marshal == nil {
-		detection = DetectTerminalBackgroundTheme(c.detector, c.timeoutMS, c.env)
-	}
+	detection := DetectTerminalBackgroundTheme(c.detector, c.timeoutMS, c.env)
 	c.terminalTheme = detection.Theme
 	if !c.applyThemeName(string(detection.Theme), false).Success {
 		return
@@ -183,8 +145,6 @@ func (c *InteractiveThemeController) ApplyFromSettings() {
 		settings.SetTheme(string(detection.Theme))
 		settings.Flush()
 	}
-	// Even with a fixed env result, ask the terminal to refine the choice.
-	c.requestTerminalTheme()
 }
 
 // GetThemeSelection returns the active theme selection.
@@ -310,10 +270,6 @@ func (c *InteractiveThemeController) Dispose() {
 		c.unsubscribe()
 		c.unsubscribe = nil
 	}
-	if c.backgroundUnsub != nil {
-		c.backgroundUnsub()
-		c.backgroundUnsub = nil
-	}
 }
 
 // GetTerminalTheme returns the detected terminal theme.
@@ -366,116 +322,38 @@ func (c *InteractiveThemeController) setAutoSync(enabled bool) {
 	if c.ui != nil {
 		c.ui.SetTerminalColorSchemeNotifications(enabled)
 	}
-	if enabled {
-		c.requestTerminalTheme()
-		c.startBackgroundPoll()
-		return
-	}
-	c.stopBackgroundPoll()
 }
 
-// requestTerminalTheme asks the terminal for its scheme and background without
-// blocking; the replies reach the listeners on the owner goroutine. D165: the
-// port cannot query synchronously on the UI loop, which is what dispatches the
-// reply, so it requests and listens instead of awaiting a result.
-func (c *InteractiveThemeController) requestTerminalTheme() {
-	if c.ui == nil {
-		return
-	}
-	// A fresh request cycle: until a scheme reply arrives, the background
-	// fallback (and its poll) is authoritative.
-	c.schemeReportSeen.Store(false)
-	c.ui.RequestTerminalColorScheme()
-	c.ui.RequestTerminalBackgroundColor()
-}
-
-// startBackgroundPoll re-requests the background while the terminal never
-// answered a color-scheme query, so a profile switch still gets noticed on
-// terminals without OSC 2031. It runs off the loop and marshals the request.
-func (c *InteractiveThemeController) startBackgroundPoll() {
-	if c.ui == nil || c.marshal == nil || c.pollStop != nil {
-		return
-	}
-	stop := make(chan struct{})
-	c.pollStop = stop
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				if c.schemeReportSeen.Load() {
-					return
-				}
-				c.onUI(func() {
-					if c.ui != nil {
-						c.ui.RequestTerminalBackgroundColor()
-					}
-				})
-			}
-		}
-	}()
-}
-
-func (c *InteractiveThemeController) stopBackgroundPoll() {
-	if c.pollStop != nil {
-		close(c.pollStop)
-		c.pollStop = nil
-	}
-}
-
-func (c *InteractiveThemeController) bindTerminalListeners() {
+func (c *InteractiveThemeController) bindTerminalColorSchemeListener() {
 	if c.ui == nil {
 		return
 	}
 	c.unsubscribe = c.ui.OnTerminalColorSchemeChange(func(terminalTheme TerminalTheme) {
-		c.schemeReportSeen.Store(true)
 		c.applyTerminalTheme(terminalTheme)
-	})
-	c.backgroundUnsub = c.ui.OnTerminalBackgroundColorChange(func(rgb RgbColor) {
-		if c.schemeReportSeen.Load() {
-			return
-		}
-		c.applyTerminalTheme(GetThemeForRgbColor(rgb))
 	})
 }
 
-// applyTerminalTheme applies a detected light/dark classification. With an
-// auto setting it switches the pair; with no setting it adopts and persists the
-// detected theme; with a fixed setting it is ignored.
 func (c *InteractiveThemeController) applyTerminalTheme(terminalTheme TerminalTheme) {
+	if !c.autoSyncEnabled {
+		return
+	}
+	c.terminalTheme = terminalTheme
 	setting := c.currentThemeSetting
 	if setting == nil && c.getSettings != nil {
 		setting = c.getSettings().GetThemeSetting()
 	}
-	if light, dark, ok := ParseAutoThemeSetting(setting); ok {
-		if !c.autoSyncEnabled {
-			return
-		}
-		c.terminalTheme = terminalTheme
-		themeName := dark
-		if terminalTheme == TerminalThemeLight {
-			themeName = light
-		}
-		if themeName != c.activeThemeName {
-			c.applyThemeName(themeName, false)
-		}
+	light, dark, ok := ParseAutoThemeSetting(setting)
+	if !ok {
+		c.setAutoSync(false)
 		return
 	}
-	if setting != nil {
-		return
+	themeName := dark
+	if terminalTheme == TerminalThemeLight {
+		name := light
+		themeName = name
 	}
-	if c.activeThemeName == string(terminalTheme) && c.terminalTheme == terminalTheme {
-		return
-	}
-	c.terminalTheme = terminalTheme
-	c.applyThemeName(string(terminalTheme), false)
-	if c.getSettings != nil {
-		settings := c.getSettings()
-		settings.SetTheme(string(terminalTheme))
-		settings.Flush()
+	if themeName != c.activeThemeName {
+		c.applyThemeName(themeName, false)
 	}
 }
 
