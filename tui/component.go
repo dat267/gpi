@@ -219,6 +219,29 @@ type mouseChild struct {
 // childComponents implements childrenHolder.
 func (c *Container) childComponents() []Component { return c.Children }
 
+// Preparer warms a component's render caches without producing output, so an
+// off-loop worker can pre-render the expensive parts (markdown lex + styling)
+// before the UI loop paints. The loop's later Render at the same width is then
+// a cache hit. Components with no cacheable subtree do not implement it, and a
+// warmer type-asserts and skips them.
+//
+// Prepare must be safe to call on a component that is not attached to the
+// rendered tree: it may only touch the component's own captured state (never
+// the process-wide theme), because the UI loop keeps running while it runs on
+// another goroutine.
+type Preparer interface {
+	Prepare(width int)
+}
+
+// Prepare warms every child that implements Preparer.
+func (c *Container) Prepare(width int) {
+	for _, child := range c.Children {
+		if p, ok := child.(Preparer); ok {
+			p.Prepare(width)
+		}
+	}
+}
+
 // AddChild appends a child component.
 func (c *Container) AddChild(component Component) {
 	c.Children = append(c.Children, component)

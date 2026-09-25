@@ -889,7 +889,9 @@ type StartupDiagnostic struct {
 func newRunWiring(app *App) *RunWiring {
 	return &RunWiring{
 		OnBeat: func() {
-			app.Transcript.MaterializeDeferred()
+			if app.Transcript.HasDeferred() {
+				app.Transcript.MaterializeDeferred(app.terminalWidth())
+			}
 			app.Queue.MaterializeThinkingChunk()
 		},
 		RawTerminal:     app.rawTerminal,

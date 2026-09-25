@@ -215,6 +215,15 @@ func (m *Markdown) Invalidate() {
 	m.cacheWidth = 0
 }
 
+// Prepare warms the render cache for width without returning the lines, so an
+// off-loop worker can pre-render a large message before the loop paints it.
+// Render reads only the component's own captured theme, text and transform, so
+// calling it here is safe as long as the component is not attached to the
+// rendered tree (the loop must not Render the same instance concurrently).
+func (m *Markdown) Prepare(width int) {
+	_ = m.Render(width)
+}
+
 // Render renders the markdown at the given width.
 func (m *Markdown) Render(width int) []string {
 	if m.hasCachedLines && m.hasCachedText && m.cachedText == m.Text && m.hasCachedWidth && m.cachedWidth == width {

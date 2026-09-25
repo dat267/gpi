@@ -183,6 +183,10 @@ type App struct {
 	loopInputsClosed chan struct{}
 	loopInputsOnce   sync.Once
 	initialized      bool
+
+	// prerenderQueue warms deferred transcript components off the UI loop.
+	// Stopped in StopMode so a warm cannot touch the renderer after teardown.
+	prerenderQueue *offloop.Queue
 }
 
 // NewApp builds the interactive-mode object graph.
@@ -341,6 +345,8 @@ func NewApp(options AppOptions) *App {
 	app.UIState.WorkingMessage = app.UIState.DefaultWorkingMessage
 
 	app.Transcript = NewTranscriptRenderer(app.Chat, app.UI, app.Settings, app.Session, app.SessionMgr)
+	app.prerenderQueue = offloop.New()
+	app.Transcript.PrerenderQueue = app.prerenderQueue
 	app.Transcript.Footer = app.Footer
 	app.Transcript.Editor = app.DefaultEditor
 	app.Transcript.Display = app.Display
@@ -744,6 +750,19 @@ func (a *App) currentRenderer() tui.TUI {
 	return a.initialUI
 }
 
+// terminalWidth is the current terminal width for the deferred-transcript
+// pre-render. It is read on the loop (the same call the screen makes when it
+// renders); a missing terminal falls back to 80.
+func (a *App) terminalWidth() int {
+	if a.UI == nil {
+		return 80
+	}
+	if terminal := a.UI.GetTerminal(); terminal != nil {
+		return terminal.Columns()
+	}
+	return 80
+}
+
 // StopMode tears the whole mode down (upstream's stop()): the active selector,
 // terminal progress, the status indicator, extension terminal input listeners,
 // the footer and its data provider, the session-event subscription, the
@@ -757,6 +776,9 @@ func (a *App) StopMode(fullscreenExitOutput string) {
 	}
 	if a.SessionMgr != nil {
 		a.SessionMgr.FlushWrites()
+	}
+	if a.prerenderQueue != nil {
+		a.prerenderQueue.Stop()
 	}
 	if a.Commands == nil {
 		// Teardown before Init finished: stop the renderer only.

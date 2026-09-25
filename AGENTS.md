@@ -282,8 +282,14 @@ made seeding cost 500 ms.
 session eagerly below 400 items; above the threshold it collects the items into
 a collector container and attaches only the trailing window (120 components),
 materializing the rest 64 per loop beat via `RunWiring.OnBeat` →
-`MaterializeDeferred` (`Container.InsertChildAt`). A 30 MB / 15k-entry session
-paints its first frame in ~20 ms instead of ~400 ms. Resizing a huge session
+`MaterializeDeferred` (`Container.InsertChildAt`). Each chunk's render caches
+are warmed off the UI loop by `TranscriptRenderer.PrerenderQueue`
+(`internal/offloop`): a large entry's markdown lex + styling is the last long
+beat, so `tui.Preparer.Prepare` renders the chunk ahead of the attach and the
+loop only inserts an already-warmed chunk (a width change discards a chunk
+warmed for the old width; nil queue keeps the synchronous path). A 30 MB /
+15k-entry session paints its first frame in ~20 ms instead of ~400 ms.
+Resizing a huge session
 still costs ~350–430 ms per new width because the layout renders the whole
 attached scroll content at the content width (`ScrollContentLines` calls the
 component render) — this matches upstream `layout.ts` and is deliberately not

@@ -2,9 +2,11 @@ package interactive
 
 import (
 	"encoding/json"
+	"sync"
 
 	"github.com/dat267/pier/ai"
 	"github.com/dat267/pier/coding"
+	"github.com/dat267/pier/internal/offloop"
 	"github.com/dat267/pier/tui"
 )
 
@@ -84,6 +86,28 @@ type TranscriptRenderer struct {
 	// multi-hundred-millisecond full-transcript render. Touched only on the
 	// loop goroutine (render/entry paths and loop beats all run there).
 	deferredComponents []tui.Component
+
+	// PrerenderQueue warms the deferred components' render caches off the UI
+	// loop (internal/offloop): a large entry's markdown lex + styling is the
+	// last long beat, so the worker renders it ahead of the attach and the loop
+	// only inserts an already-warmed chunk. nil keeps the synchronous path
+	// (tests, one-shot renders).
+	PrerenderQueue *offloop.Queue
+	// pre is the warm-ahead handoff between the loop and the worker; every
+	// field is guarded by pre.mu. The rest of the renderer is loop-only.
+	pre prerenderState
+}
+
+// prerenderState is the warm-ahead handoff between the loop and the worker.
+// The loop reads and writes it from MaterializeDeferred; the worker writes it
+// once a warm finishes.
+type prerenderState struct {
+	mu    sync.Mutex
+	ready bool // a warmed chunk is waiting to attach
+	width int  // the width it was warmed for
+	count int  // how many components it holds
+	busy  bool // a warm is running
+	gen   int  // bumped when a warmed chunk is discarded, so a stale warm is ignored
 }
 
 // NewTranscriptRenderer creates the renderer.
@@ -347,7 +371,7 @@ func (r *TranscriptRenderer) RenderSessionItems(items []RenderSessionItem, updat
 	// the rest drains through MaterializeDeferred. Small renders attach
 	// directly, exactly as before.
 	if populateHistory && len(items) >= lazyTranscriptThresholdItems {
-		r.deferredComponents = nil
+		r.resetDeferred()
 		collector := &tui.Container{}
 		realChat := r.Chat
 		r.Chat = collector
@@ -366,7 +390,7 @@ func (r *TranscriptRenderer) RenderSessionItems(items []RenderSessionItem, updat
 		r.requestRender()
 		return
 	}
-	r.deferredComponents = nil
+	r.resetDeferred()
 	r.renderSessionItems(items, updateFooter, populateHistory)
 }
 
@@ -382,27 +406,108 @@ const lazyTranscriptWindowComponents = 120
 // loop beat (kept small: the next paint renders each newly attached child).
 const lazyTranscriptChunkComponents = 64
 
-// MaterializeDeferred attaches one chunk of deferred transcript components.
-// It returns true while work remains; the UI loop calls it from its beat
-// until it returns false. The chunk is small because the NEXT paint renders
-// every newly attached child (~0.2ms each): a too-large chunk would just
-// move the freeze into that frame, so the work is amortized over frames.
-func (r *TranscriptRenderer) MaterializeDeferred() bool {
+// MaterializeDeferred attaches one chunk of deferred transcript components at
+// the given render width. It returns true while work remains; the UI loop
+// calls it from its beat until it returns false. The chunk is small because
+// the NEXT paint renders every newly attached child (~0.2ms each): a too-large
+// chunk would just move the freeze into that frame, so the work is amortized
+// over frames.
+//
+// With PrerenderQueue wired the chunk's render caches are warmed off the UI
+// loop first (a large entry's markdown lex + styling is the last long beat).
+// A call then either attaches an already-warmed chunk or hands the next one to
+// the worker — never both — so a beat stays cheap.
+func (r *TranscriptRenderer) MaterializeDeferred(width int) bool {
 	if len(r.deferredComponents) == 0 {
 		return false
 	}
-	for n := 0; n < lazyTranscriptChunkComponents && len(r.deferredComponents) > 0; n++ {
+	if r.PrerenderQueue == nil {
+		// Synchronous fallback (tests, one-shot renders): warm in place, then
+		// attach, exactly as before the pre-render worker existed.
+		count := min(lazyTranscriptChunkComponents, len(r.deferredComponents))
+		warmComponents(r.deferredComponents[len(r.deferredComponents)-count:], width)
+		r.attachDeferredTail(count)
+		return len(r.deferredComponents) > 0
+	}
+
+	r.pre.mu.Lock()
+	if r.pre.ready {
+		if r.pre.width == width {
+			count := r.pre.count
+			r.pre.ready = false
+			r.pre.mu.Unlock()
+			r.attachDeferredTail(count)
+			return len(r.deferredComponents) > 0
+		}
+		// Warmed for a width the terminal no longer has: the cache is keyed by
+		// width, so the loop would miss it anyway. Discard and warm again; the
+		// bump makes the stale warm ignore itself when it finishes.
+		r.pre.ready = false
+		r.pre.gen++
+	}
+	if r.pre.busy {
+		r.pre.mu.Unlock()
+		return true
+	}
+	count := min(lazyTranscriptChunkComponents, len(r.deferredComponents))
+	components := r.deferredComponents[len(r.deferredComponents)-count:]
+	gen := r.pre.gen
+	r.pre.busy = true
+	r.pre.mu.Unlock()
+
+	r.PrerenderQueue.Go(func() {
+		warmComponents(components, width)
+		r.pre.mu.Lock()
+		if r.pre.gen == gen {
+			r.pre.ready = true
+			r.pre.width = width
+			r.pre.count = count
+		}
+		r.pre.busy = false
+		r.pre.mu.Unlock()
+		// Wake the loop so the next beat attaches the warmed chunk.
+		r.requestRender()
+	})
+	return true
+}
+
+// HasDeferred reports whether deferred components are still waiting to attach.
+func (r *TranscriptRenderer) HasDeferred() bool {
+	return len(r.deferredComponents) > 0
+}
+
+// attachDeferredTail attaches up to count components from the tail of the
+// deferred queue. Components are stored oldest-first; attaching from the end
+// at the top of the chat keeps the transcript order (older entries land above
+// the already-attached tail and any live messages).
+func (r *TranscriptRenderer) attachDeferredTail(count int) {
+	for n := 0; n < count && len(r.deferredComponents) > 0; n++ {
 		last := len(r.deferredComponents) - 1
 		component := r.deferredComponents[last]
 		r.deferredComponents[last] = nil
 		r.deferredComponents = r.deferredComponents[:last]
-		// Components are stored oldest-first; attaching from the end at the
-		// top of the chat keeps the transcript order (older entries land
-		// above the already-attached tail and any live messages).
 		r.Chat.InsertChildAt(0, component)
 	}
 	r.requestRender()
-	return len(r.deferredComponents) > 0
+}
+
+// resetDeferred drops the deferred queue and invalidates any in-flight warm so
+// its result cannot land in the rebuilt transcript.
+func (r *TranscriptRenderer) resetDeferred() {
+	r.deferredComponents = nil
+	r.pre.mu.Lock()
+	r.pre.ready = false
+	r.pre.gen++
+	r.pre.mu.Unlock()
+}
+
+// warmComponents pre-renders every component in the list at width.
+func warmComponents(components []tui.Component, width int) {
+	for _, component := range components {
+		if p, ok := component.(tui.Preparer); ok {
+			p.Prepare(width)
+		}
+	}
 }
 
 func (r *TranscriptRenderer) renderSessionItems(items []RenderSessionItem, updateFooter bool, populateHistory bool) {
