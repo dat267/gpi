@@ -77,7 +77,12 @@ matches the layout of `github.com/dat267/min`.
 
 The gate runs with `GOTRACEBACK=all` in CI so a hung test prints every
 goroutine. The PTY watchdogs reuse a prebuilt binary via `PIER_TEST_BIN`
-(CI builds `.` first); locally they fall back to `./bin/pier`.
+(CI builds `.` first); locally they fall back to `./bin/pier`. The test job
+builds only linux/amd64, so a second CI job cross-builds and cross-`vet`s the
+port for Windows, macOS (both arches), the BSDs, Solaris, DragonFly and AIX —
+`vet` also compiles every `_test.go`. That matrix is the guard against
+`syscall` code that exists on only some OSes (`SysProcAttr{Setpgid}`,
+`syscall.Kill`, `Stat_t.Ctim`) reaching a user's `go install`.
 
 Keep the suite quick — the race detector slows every path 5-10x, and the gate
 runs each test twice (`-p 8` overlaps the test-binary builds; the whole gate is

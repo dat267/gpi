@@ -39,3 +39,43 @@ jobs:
         # budget. At 60s the suite sat at ~55s (ai) and ~35s
         # (coding/interactive), so any added test tripped it.
         run: go test -race -count=2 -timeout 300s ./...
+
+  # The port is pure Go and targets Windows and the BSDs, but the test job only
+  # builds linux/amd64. A GOOS/GOARCH matrix over build and vet (vet also
+  # compiles every _test.go) catches platform-specific use of syscall before a
+  # user's `go install` does — the Setpgid / syscall.Kill / Stat_t.Ctim class.
+  # The unix members also pin the Ctim-vs-Ctimespec split.
+  cross-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: windows, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: freebsd, goarch: amd64 }
+          - { goos: openbsd, goarch: amd64 }
+          - { goos: netbsd, goarch: amd64 }
+          - { goos: dragonfly, goarch: amd64 }
+          - { goos: solaris, goarch: amd64 }
+          - { goos: aix, goarch: ppc64 }
+    name: ${{ matrix.goos }}/${{ matrix.goarch }}
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+      # No cgo anywhere in the port (the release builds the same way).
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+
+      - name: build
+        run: go build ./...
+
+      - name: vet
+        run: go vet ./...

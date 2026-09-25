@@ -55,8 +55,19 @@ fmt:
 vet:
 	go vet ./...
 
-# What CI runs, minus -race.
+# What CI runs, minus -race (the test and cross-build jobs).
 check: fmt vet test
+
+# Cross-build and cross-vet every OS the port targets (mirrors the CI matrix).
+cross:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	for pair in windows/amd64 darwin/arm64 darwin/amd64 linux/arm64 \
+		freebsd/amd64 openbsd/amd64 netbsd/amd64 dragonfly/amd64 solaris/amd64 aix/ppc64; do
+		echo "$pair"
+		CGO_ENABLED=0 GOOS="${pair%/*}" GOARCH="${pair#*/}" go build ./...
+		CGO_ENABLED=0 GOOS="${pair%/*}" GOARCH="${pair#*/}" go vet ./...
+	done
 
 # Remove build output.
 clean:
