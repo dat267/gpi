@@ -143,6 +143,13 @@ type RawInputTerminal interface {
 	NextInputFlushDeadline() (time.Time, bool)
 	// FlushPendingInput flushes expired deadlines and returns the sequences.
 	FlushPendingInput() []string
+	// MarkInputRead stamps the next committed frame with the keystroke's read
+	// time (latency instrumentation; see SetInputLatencyObserver).
+	MarkInputRead(readAt time.Time)
+	// LastInputAt reports when the reader last read stdin bytes.
+	LastInputAt() time.Time
+	// SetInputLatencyObserver installs the frame-flush latency observer.
+	SetInputLatencyObserver(fn InputLatencyObserver)
 }
 
 // ProcessTerminal is the Terminal implementation over os.Stdin/os.Stdout.
@@ -196,6 +203,14 @@ type ProcessTerminal struct {
 	// to ingest all at once on release.
 	frameDepth int
 	frameBuf   strings.Builder
+
+	// pendingInputReadAt tags the next committed frame with the keystroke's read
+	// time (MarkInputRead, loop goroutine); EndFrame consumes it. Stale stamps
+	// are dropped so an unrelated frame cannot inherit them. Guarded by writesMu.
+	pendingInputReadAt time.Time
+	// inputLatencyObserver, when set, is called on the writer goroutine after a
+	// tagged frame reaches the console. Nil disables it. Guarded by writesMu.
+	inputLatencyObserver InputLatencyObserver
 
 	// cols/rows cache the terminal size. Terminal size is queried with a
 	// console API (GetConsoleScreenBufferInfo on Windows), and that call can
@@ -695,6 +710,11 @@ func (t *ProcessTerminal) disableModifyOtherKeysLocked() {
 type terminalWrite struct {
 	data  string
 	frame bool
+	// inputReadAt/inputPaintAt tag a frame whose bytes came from a keystroke
+	// (MarkInputRead). They flow through to the writer so it can report the
+	// end-to-end latency without a per-keystroke goroutine.
+	inputReadAt  time.Time
+	inputPaintAt time.Time
 }
 
 // writeLocked buffers data for the writer goroutine (see the writesMu
@@ -725,6 +745,44 @@ func (t *ProcessTerminal) enqueueLocked(item terminalWrite) {
 	t.writesCond.Signal()
 }
 
+// InputLatencyObserver is invoked on the writer goroutine once a frame tagged
+// by MarkInputRead has reached the console. readAt is when the reader read the
+// bytes, paintAt when the loop committed the frame, writtenAt when the console
+// accepted it. It exists to bisect a slow terminal (Windows ConPTY) without a
+// per-keystroke goroutine.
+type InputLatencyObserver func(readAt, paintAt, writtenAt time.Time)
+
+// inputLatencyMaxAge bounds how old a MarkInputRead stamp may be before the
+// next frame stops inheriting it (a keystroke that produced no frame must not
+// attach its stamp to an unrelated later paint).
+const inputLatencyMaxAge = 2 * time.Second
+
+// SetInputLatencyObserver installs the observer (nil disables it). Call before
+// the terminal is driven.
+func (t *ProcessTerminal) SetInputLatencyObserver(fn InputLatencyObserver) {
+	t.writesMu.Lock()
+	t.inputLatencyObserver = fn
+	t.writesMu.Unlock()
+}
+
+// MarkInputRead stamps the next committed frame with the time the keystroke's
+// bytes were read. The UI loop calls it just before painting the input.
+func (t *ProcessTerminal) MarkInputRead(readAt time.Time) {
+	t.writesMu.Lock()
+	t.pendingInputReadAt = readAt
+	t.writesMu.Unlock()
+}
+
+// LastInputAt reports when the reader last read stdin bytes (zero before the
+// first read).
+func (t *ProcessTerminal) LastInputAt() time.Time {
+	nanos := t.lastInputAt.Load()
+	if nanos == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nanos)
+}
+
 // BeginFrame opens a renderer paint; its writes accumulate in the frame buffer.
 func (t *ProcessTerminal) BeginFrame() {
 	t.writesMu.Lock()
@@ -746,8 +804,19 @@ func (t *ProcessTerminal) EndFrame() {
 	data := t.frameBuf.String()
 	t.frameBuf.Reset()
 	if data == "" {
+		t.pendingInputReadAt = time.Time{}
 		t.writesMu.Unlock()
 		return
+	}
+	readAt := t.pendingInputReadAt
+	t.pendingInputReadAt = time.Time{}
+	var paintAt time.Time
+	if !readAt.IsZero() {
+		if time.Since(readAt) > inputLatencyMaxAge {
+			readAt = time.Time{}
+		} else {
+			paintAt = time.Now()
+		}
 	}
 	kept := t.writes[:0]
 	for _, item := range t.writes {
@@ -757,7 +826,7 @@ func (t *ProcessTerminal) EndFrame() {
 		kept = append(kept, item)
 	}
 	t.writes = kept
-	t.enqueueLocked(terminalWrite{data: data, frame: true})
+	t.enqueueLocked(terminalWrite{data: data, frame: true, inputReadAt: readAt, inputPaintAt: paintAt})
 	t.writesMu.Unlock()
 }
 
@@ -788,14 +857,23 @@ func (t *ProcessTerminal) writeLoop() {
 			t.writesCond.Wait()
 		}
 		batch.Reset()
+		var taggedReadAt, taggedPaintAt time.Time
 		for _, item := range t.writes {
 			batch.WriteString(item.data)
+			if !item.inputReadAt.IsZero() {
+				taggedReadAt, taggedPaintAt = item.inputReadAt, item.inputPaintAt
+			}
 		}
 		t.writes = nil
 		t.inFlight = true
+		observer := t.inputLatencyObserver
 		t.writesMu.Unlock()
 
 		t.writeDirect(batch.String())
+
+		if observer != nil && !taggedReadAt.IsZero() {
+			observer(taggedReadAt, taggedPaintAt, time.Now())
+		}
 
 		t.writesMu.Lock()
 		t.inFlight = false

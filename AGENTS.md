@@ -150,6 +150,15 @@ invented to bridge that gap). Stage 1 has landed:
   test run competes with the UI goroutine and looks like a freeze. It was opt-in first, but both post-fix freezes struck
   sessions started without the variable, so the default flipped — a capture
   that requires remembering to set an env var does not survive real usage.
+- **Keystroke latency is logged separately** to `<agentDir>/pier-input-latency.log`
+  when a round trip exceeds `PIER_INPUT_LAT_MS` (default 50 ms; `0` disables).
+  The terminal reader stamps the read (`ProcessTerminal.MarkInputRead`), the loop
+  tags the frame it paints (`RunWiring.markInputRead`), and the writer reports
+  the flush (`tui.InputLatencyObserver`), so a record splits the delay into
+  `read` (before the app) and `write` (console) rather than blaming a phase. It
+  exists to bisect a slow terminal (Windows ConPTY pauses while a selection is
+  active) in one run; the render itself is sub-millisecond warm on a large
+  session (`BenchmarkScrollWarmDiff`).
 - The loop calls a **watchdog beat** once per iteration
   (`RunWiring.LoopBeats`, exposed as `App.LoopBeats`): a stalled loop stops
   advancing it, so a watchdog can detect a hang.

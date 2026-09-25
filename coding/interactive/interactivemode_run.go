@@ -800,6 +800,7 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 				}()
 			}
 			w.drainReadyEvents()
+			w.markInputRead()
 			paint()
 		case data, ok := <-w.InputEvents:
 			if !ok {
@@ -864,6 +865,18 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 	}
 }
 
+// markInputRead tags the coming frame with when the terminal read the
+// keystroke, so the writer can report the end-to-end latency (see
+// inputLatencyRecorder). No-op without a raw terminal or instrumentation.
+func (w *RunWiring) markInputRead() {
+	if w.RawTerminal == nil {
+		return
+	}
+	if readAt := w.RawTerminal.LastInputAt(); !readAt.IsZero() {
+		w.RawTerminal.MarkInputRead(readAt)
+	}
+}
+
 // RunOptions are the run orchestration inputs.
 type RunOptions struct {
 	Offline              bool
@@ -887,6 +900,7 @@ type StartupDiagnostic struct {
 
 // newRunWiring assembles the RunWiring (port of the corresponding InteractiveMode wiring).
 func newRunWiring(app *App) *RunWiring {
+	installInputLatencyObserver(app)
 	return &RunWiring{
 		OnBeat: func() {
 			if app.Transcript.HasDeferred() {
