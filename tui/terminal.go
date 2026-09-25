@@ -172,6 +172,16 @@ type ProcessTerminal struct {
 	progressInterval                  *time.Ticker
 	progressDone                      chan struct{}
 	writeLogPath                      string
+
+	// cols/rows cache the terminal size. Terminal size is queried with a
+	// console API (GetConsoleScreenBufferInfo on Windows), and that call can
+	// block for the whole duration of a mouse selection — so the render path
+	// must never make it. The cache is filled at Start and refreshed by the
+	// resize watcher (a poller on Windows, which has no SIGWINCH); Columns/
+	// Rows only touch the cache. sizeFn is a test seam for the query.
+	cols   atomic.Int64
+	rows   atomic.Int64
+	sizeFn func() (int, int)
 }
 
 // NewProcessTerminal creates a terminal over the given files (os.Stdin and
@@ -231,14 +241,19 @@ func (t *ProcessTerminal) Start(onInput func(data string), onResize func()) {
 	t.writeLocked("\x1b[?2004h")
 	t.writeMu.Unlock()
 
-	// Set up the resize handler immediately.
+	// Set up the resize handler immediately and prime the size cache.
+	// Populating the cache before the first render keeps the console size
+	// query off the render path: on Windows a size query can block while a
+	// mouse selection is active, and the render path must never block.
+	t.refreshSize()
 	if onResize != nil {
-		startResizeWatcher(onResize)
+		startResizeWatcher(func() {
+			// Only a real change repaints; the poller (Windows) fires often.
+			if t.refreshSize() {
+				onResize()
+			}
+		})
 	}
-
-	// Refresh terminal dimensions: they may be stale after suspend/resume
-	// (SIGWINCH is lost while the process is stopped).
-	RefreshTerminalDimensions()
 
 	if t.useRawInput {
 		// The reader forwards raw chunks to the input handler (the UI loop);
@@ -664,26 +679,60 @@ func (t *ProcessTerminal) Write(data string) {
 	t.writeLocked(data)
 }
 
-// Columns returns the terminal width.
+// Columns returns the terminal width from the cache (see the cols/rows
+// comment); it queries once if the cache has not been primed (Start does).
 func (t *ProcessTerminal) Columns() int {
-	if width, _, err := term.GetSize(int(t.stdout.Fd())); err == nil && width != 0 {
-		return width
+	if t.cols.Load() == 0 {
+		t.refreshSize()
 	}
-	if columns, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && columns != 0 {
-		return columns
-	}
-	return 80
+	return int(t.cols.Load())
 }
 
-// Rows returns the terminal height.
+// Rows returns the terminal height from the cache.
 func (t *ProcessTerminal) Rows() int {
-	if _, height, err := term.GetSize(int(t.stdout.Fd())); err == nil && height != 0 {
-		return height
+	if t.rows.Load() == 0 {
+		t.refreshSize()
 	}
-	if lines, err := strconv.Atoi(os.Getenv("LINES")); err == nil && lines != 0 {
-		return lines
+	return int(t.rows.Load())
+}
+
+// refreshSize queries the terminal size, stores it, and reports whether it
+// changed. It is called at Start and by the resize watcher, never from the
+// render path.
+func (t *ProcessTerminal) refreshSize() bool {
+	width, height := t.querySize()
+	changed := int64(width) != t.cols.Load() || int64(height) != t.rows.Load()
+	t.cols.Store(int64(width))
+	t.rows.Store(int64(height))
+	return changed
+}
+
+// querySize reads the terminal size, falling back to COLUMNS/LINES and then
+// 80x24 (upstream's resolveTerminalSize defaults).
+func (t *ProcessTerminal) querySize() (int, int) {
+	width, height := 0, 0
+	if t.sizeFn != nil {
+		width, height = t.sizeFn()
+	} else if w, h, err := term.GetSize(int(t.stdout.Fd())); err == nil {
+		width, height = w, h
 	}
-	return 24
+	if width == 0 {
+		if columns, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && columns != 0 {
+			width = columns
+		}
+	}
+	if height == 0 {
+		if lines, err := strconv.Atoi(os.Getenv("LINES")); err == nil && lines != 0 {
+			height = lines
+		}
+	}
+	if width == 0 {
+		width = 80
+	}
+	if height == 0 {
+		height = 24
+	}
+	return width, height
 }
 
 // MoveBy moves the cursor up (negative) or down (positive) by N lines.

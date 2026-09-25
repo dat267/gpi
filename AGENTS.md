@@ -173,6 +173,12 @@ Stage 3 (input and signals on the loop) has landed:
   in `App.newLoopTui`, so renderer swaps keep it) stops the renderer from
   dispatching input inline; the run loop calls `HandleTerminalInput`, renders
   on resize, and runs the signal shutdown work on its own goroutine.
+  `ProcessTerminal` caches the terminal size (`Start` primes it, the watcher
+  refreshes it): the render path calls `Columns()`/`Rows()` and must never
+  make the console query itself — on Windows that query is slow and blocks
+  during a mouse selection, which stalled every paint 100–400 ms. Windows has
+  no SIGWINCH, so its resize watcher is a 200 ms poller (off the loop); a
+  refresh repaints only when the size actually changed.
 - The `DrainInput` last-input tracking is an atomic stamp written by the reader
   instead of an `OnData` swap from another goroutine (one lock retired).
 - **`/compact` no longer blocks the UI**: the command is split into
