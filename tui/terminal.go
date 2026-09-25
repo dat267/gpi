@@ -886,6 +886,12 @@ func (t *ProcessTerminal) flushWrites() {
 	}
 }
 
+// FlushWrites blocks until every queued write has reached the console. Stop
+// flushes internally; the renderer calls this again after its post-stop hook,
+// whose alt-screen exit would otherwise still be queued when the caller writes
+// the resume hint straight to stdout.
+func (t *ProcessTerminal) FlushWrites() { t.flushWrites() }
+
 // Write writes output to the terminal.
 func (t *ProcessTerminal) Write(data string) {
 	t.writeMu.Lock()

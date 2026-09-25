@@ -13,6 +13,8 @@ type fakeTerminal struct {
 	// mu guards writes: queries and render timers write from other goroutines.
 	mu     sync.Mutex
 	writes []string
+	// onFlush observes FlushWrites for stop-ordering tests.
+	onFlush func()
 }
 
 func (f *fakeTerminal) appendWrite(data string) {
@@ -62,6 +64,15 @@ func (f *fakeTerminal) ClearFromCursor()                            {}
 func (f *fakeTerminal) ClearScreen()                                {}
 func (f *fakeTerminal) SetTitle(title string)                       {}
 func (f *fakeTerminal) SetProgress(active bool)                     {}
+
+func (f *fakeTerminal) FlushWrites() {
+	f.mu.Lock()
+	onFlush := f.onFlush
+	f.mu.Unlock()
+	if onFlush != nil {
+		onFlush()
+	}
+}
 
 // staticComponent renders fixed lines padded to the width.
 type staticComponent struct {
@@ -537,3 +548,28 @@ func TestOverlayBoundsAndGetBounds(t *testing.T) {
 }
 
 func intPtr(v int) *int { return &v }
+
+// TestRendererStopFlushesAfterThePostStopHook pins the exit ordering: the
+// post-stop hook queues the alt-screen exit on the async writer, and a caller
+// that then writes the resume hint straight to stdout would race it. Stop must
+// flush after the hook, so the screen is restored before the hint lands on it
+// (the mangled resume-hint bug).
+func TestRendererStopFlushesAfterThePostStopHook(t *testing.T) {
+	terminal := &fakeTerminal{width: 80, height: 24}
+	var order []string
+	terminal.onFlush = func() { order = append(order, "flush") }
+
+	renderer := NewRenderer(terminal)
+	renderer.OnAfterTerminalStop = func(TuiStopOptions) {
+		order = append(order, "hook")
+		renderer.Terminal.Write("exit-sequence")
+	}
+	renderer.Stop(TuiStopOptions{PreserveScreen: true})
+
+	if len(order) != 2 || order[0] != "hook" || order[1] != "flush" {
+		t.Fatalf("stop order = %v, want [hook flush]", order)
+	}
+	if !terminal.hasWrite("exit-sequence") {
+		t.Fatal("the post-stop hook's write was not delivered")
+	}
+}

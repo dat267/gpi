@@ -194,7 +194,12 @@ Stage 3 (input and signals on the loop) has landed:
   so no caller blocks. Windows Terminal stops draining the pty while a mouse
   drag-selection is active, and a synchronous write parked the UI loop for the
   whole duration of the drag; `Stop` flushes the queue before restoring the
-  terminal. The renderer brackets each paint (`BeginFrame`/`EndFrame`) so a
+  terminal, and `Renderer.Stop` flushes **again** after its post-stop hook, which
+  enqueues the alt-screen exit: the resume hint is written straight to stdout, so
+  without that flush it raced the writer and landed on the still-active alt
+  screen, mangled into the last frame (pinned by
+  `TestRendererStopFlushesAfterThePostStopHook`). The renderer brackets each
+  paint (`BeginFrame`/`EndFrame`) so a
   paint's writes are submitted as one ordered batch. Frames are **not dropped**
   when superseded: the screens are differential, so a queued frame is still
   needed to reach the state the next diff was computed against. Dropping one

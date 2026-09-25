@@ -324,6 +324,13 @@ func (t *Renderer) Stop(options TuiStopOptions) {
 	if t.OnAfterTerminalStop != nil {
 		t.OnAfterTerminalStop(options)
 	}
+	// The post-stop hook can enqueue the alt-screen exit; flush it before
+	// returning. A caller that then writes to stdout (the resume hint) is a
+	// direct synchronous write, so it races the async writer otherwise and the
+	// hint lands on the still-active alt screen, mangled into the last frame.
+	if flusher, ok := t.Terminal.(interface{ FlushWrites() }); ok {
+		flusher.FlushWrites()
+	}
 }
 
 // Hooks for the concrete screens (upstream's protected lifecycle methods are
