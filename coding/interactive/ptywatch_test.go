@@ -382,6 +382,39 @@ func TestPTYEditorSubmitNoMutexDeadlock(t *testing.T) {
 	assertNoMutexBlocked(t, dump)
 }
 
+// TestPTYBackgroundProbeNoInputCorruption drives the D165 flow against the real
+// binary: the auto theme's OSC 11 query is written after startup, the terminal
+// reply is consumed (not typed into the editor), and input still works.
+func TestPTYBackgroundProbeNoInputCorruption(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode")
+	}
+	session := startPierConfigured(t, func(agentDir string) {
+		settings := `{"theme":"light/dark"}`
+		if err := os.WriteFile(filepath.Join(agentDir, "settings.json"), []byte(settings), 0o644); err != nil {
+			t.Fatalf("write settings: %v", err)
+		}
+	})
+	if !session.waitForOutput("v0.0.0", 10*time.Second) {
+		t.Fatalf("pier did not start:\n%.600s", session.output())
+	}
+	if !session.waitForOutput("]11;?", 5*time.Second) {
+		t.Fatalf("the OSC 11 probe was not written:\n%.600s", session.output())
+	}
+	// Answer the way a terminal would; the reply must be consumed, not editor
+	// input, and must not freeze the loop.
+	session.send("\x1b]11;#ffffff\x07")
+	time.Sleep(300 * time.Millisecond)
+	session.typeAndSubmit("hello after the background reply")
+	time.Sleep(1500 * time.Millisecond)
+
+	dump, exited := session.quitAndDump(5 * time.Second)
+	if exited {
+		t.Fatalf("pier exited before SIGQUIT after the reply; output:\n%.1500s", stripAnsiForLog(session.output()))
+	}
+	assertNoMutexBlocked(t, dump)
+}
+
 // TestPTYModelSelectorNoMutexDeadlock drives the D137 flow: open the model
 // selector, move the selection, cancel.
 func TestPTYModelSelectorNoMutexDeadlock(t *testing.T) {
