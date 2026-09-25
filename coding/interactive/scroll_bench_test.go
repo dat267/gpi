@@ -20,7 +20,34 @@ func BenchmarkScrollLongTranscript(b *testing.B) {
 	screen, _ := app.initialUI.(*tui.AltScreen)
 	screen.Start()
 	screen.DisableAutoRender()
+	buildScrollTranscript(b, app)
 
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		app.UI.RenderNow(true)
+	}
+}
+
+// BenchmarkScrollWarmDiff measures a warm incremental frame, which is what a
+// keystroke triggers: no forced reset, so Container/Markdown caches are reused.
+func BenchmarkScrollWarmDiff(b *testing.B) {
+	app, cleanup := newTestAppB(b)
+	defer cleanup()
+
+	screen, _ := app.initialUI.(*tui.AltScreen)
+	screen.Start()
+	screen.DisableAutoRender()
+	buildScrollTranscript(b, app)
+	app.UI.RenderNow(false) // warm every cache
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		app.UI.RenderNow(false)
+	}
+}
+
+func buildScrollTranscript(b *testing.B, app *App) {
+	b.Helper()
 	for i := 0; i < benchmarkMessageCount; i++ {
 		app.Events.HandleEvent(&coding.SessionEvent{
 			Type: coding.SessionMessageStart,
@@ -38,11 +65,6 @@ func BenchmarkScrollLongTranscript(b *testing.B) {
 		app.Events.HandleEvent(&coding.SessionEvent{
 			Type: coding.SessionMessageEnd, Agent: agentEvent("message_end", assistant),
 		})
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		app.UI.RenderNow(true)
 	}
 }
 
