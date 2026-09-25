@@ -410,7 +410,27 @@ next optimization is a persistent subtree cache (or a per-component dirty/versio
 signal propagated on `Invalidate`) so an unchanged transcript subtree is not
 walked; the open question is making that invalidation discipline complete, since
 components currently change state (e.g. `Text.SetText`) without telling the
-parent. `AppendCompaction` had the
+parent.
+
+**The flatten, not the walk, is what makes a streaming frame stall.** Reproduced
+on the live 61 MB session (25.4k attached children): a warm frame is 11 ms, but
+streaming a message made frames **100–190 ms** (52 `render` stall records across
+the log, all in the width/wrap/tokenize leaves, keystroke latency entirely
+`read`). `Container.Render` re-concatenated **every** child's lines into a fresh
+slice whenever any child changed; during streaming the last child changes every
+frame, so the whole transcript was re-flattened (and re-allocated) 60 times a
+second. It now finds the first changed child, keeps the unchanged prefix, and
+rewrites only the suffix **in place** (growing geometrically), which took the
+worst streaming frame 122 ms → 23 ms. Because the returned slice can now change
+contents while keeping its backing array, slice identity is no longer a valid
+change signal; `Container` carries a `version` bumped on every rebuild and
+exposes `RenderVersion`, and `firstChangedChild`/`zoneMarkedLines` compare it
+(the `MouseRegion` pass-through and the message/tool components that return a
+container's lines forward the revision). `TestContainerRenderReusesPrefixOnTailChange`
+and `TestContainerRenderDetectsInPlaceChildChange` pin both halves. The
+remaining cost is the O(components) walk above.
+
+`AppendCompaction` had the
 same shape: its entry records the projected system message, and the port
 resolved that from `buildSessionContextLocked` **while holding the session
 mutex** — 247 ms on a 45 MB session, so every UI read waited. It now projects

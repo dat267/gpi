@@ -678,6 +678,15 @@ func NewMouseRegion(child Component, onMouse MouseRegionHandler) *MouseRegion {
 // Render renders the child.
 func (m *MouseRegion) Render(width int) []string { return m.child.Render(width) }
 
+// RenderVersion forwards the wrapped child's revision so a parent can detect a
+// change in a reused backing array; false when the child is not versioned.
+func (m *MouseRegion) RenderVersion() (uint64, bool) {
+	if versioned, ok := m.child.(renderVersioner); ok {
+		return versioned.RenderVersion()
+	}
+	return 0, false
+}
+
 // HandleMouse forwards to the child first, then the region handler.
 func (m *MouseRegion) HandleMouse(event TuiMouseEvent) *TuiMouseDispatchResult {
 	if result := DispatchMouseEvent(m.child, event); result != nil {

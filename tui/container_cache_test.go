@@ -86,3 +86,57 @@ func BenchmarkContainerWarmRender(b *testing.B) {
 		_ = container.Render(40)
 	}
 }
+
+// TestContainerRenderReusesPrefixOnTailChange pins the streaming fix: a change
+// to the last child must rewrite only the suffix in place, not re-flatten (and
+// re-allocate) the whole transcript. A streaming message changes only the last
+// child, which is what made a long session stutter for ~100 ms a frame.
+func TestContainerRenderReusesPrefixOnTailChange(t *testing.T) {
+	container := &Container{}
+	for i := 0; i < 100; i++ {
+		container.AddChild(NewText(fmt.Sprintf("child %d", i), 0, 0, nil))
+	}
+	tail := NewText("tail", 0, 0, nil)
+	container.AddChild(tail)
+	first := container.Render(40)
+
+	tail.SetText("tail\ngrown")
+	second := container.Render(40)
+
+	if len(second) != len(first)+1 {
+		t.Fatalf("render has %d lines, want %d", len(second), len(first)+1)
+	}
+	if &first[0] != &second[0] {
+		t.Fatal("tail change rebuilt the whole line slice instead of rewriting the suffix")
+	}
+	if second[len(second)-1] != "grown"+strings.Repeat(" ", 40-len("grown")) {
+		t.Fatalf("last line = %q, want the grown tail", second[len(second)-1])
+	}
+}
+
+// TestContainerRenderDetectsInPlaceChildChange is the version-contract guard:
+// a child Container that rewrites its suffix in place returns the same backing
+// array, so slice identity alone would leave the parent serving stale lines.
+func TestContainerRenderDetectsInPlaceChildChange(t *testing.T) {
+	inner := &Container{}
+	inner.AddChild(NewText("stable", 0, 0, nil))
+	tail := NewText("before", 0, 0, nil)
+	inner.AddChild(tail)
+
+	outer := &Container{}
+	outer.AddChild(inner)
+	outer.Render(40)
+
+	tail.SetText("after!") // same length: identity is unchanged, content is not
+	got := outer.Render(40)
+
+	found := false
+	for _, line := range got {
+		if strings.TrimRight(line, " ") == "after!" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("outer returned stale lines after an in-place child change: %q", got)
+	}
+}

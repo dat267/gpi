@@ -143,7 +143,14 @@ func (c *AssistantMessageComponent) Render(width int) []string {
 	if c.hasToolCalls {
 		return lines
 	}
-	return c.zones.get(lines)
+	version, _ := c.Container.RenderVersion()
+	return c.zones.get(lines, version)
+}
+
+// RenderVersion forwards the content container's revision so a parent can
+// detect an in-place change (the has-tool-calls path returns its lines).
+func (c *AssistantMessageComponent) RenderVersion() (uint64, bool) {
+	return c.Container.RenderVersion()
 }
 
 // UpdateContent rebuilds the content for a message.

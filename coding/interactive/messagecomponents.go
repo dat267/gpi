@@ -20,15 +20,19 @@ const (
 // markers on every paint — so the marked lines are cached and rebuilt only when
 // the container hands back a different slice.
 type zoneMarkedLines struct {
-	marked []string
-	source []string
+	marked        []string
+	source        []string
+	sourceVersion uint64
 }
 
-func (z *zoneMarkedLines) get(lines []string) []string {
+// get applies the zone markers. version is the source container's render
+// revision: a Container can reuse the same backing array across renders, so
+// slice identity alone would return stale marked lines.
+func (z *zoneMarkedLines) get(lines []string, version uint64) []string {
 	if len(lines) == 0 {
 		return lines
 	}
-	if len(z.source) == len(lines) && len(lines) > 0 && &z.source[0] == &lines[0] {
+	if len(z.source) == len(lines) && z.sourceVersion == version {
 		return z.marked
 	}
 	marked := make([]string, len(lines))
@@ -37,6 +41,7 @@ func (z *zoneMarkedLines) get(lines []string) []string {
 	marked[len(marked)-1] = osc133ZoneEnd + osc133ZoneFinal + marked[len(marked)-1]
 	z.marked = marked
 	z.source = lines
+	z.sourceVersion = version
 	return marked
 }
 
@@ -98,7 +103,14 @@ func (c *UserMessageComponent) rebuild() {
 
 // Render renders the message with the OSC 133 zone markers.
 func (c *UserMessageComponent) Render(width int) []string {
-	return c.zones.get(c.Container.Render(width))
+	lines := c.Container.Render(width)
+	version, _ := c.Container.RenderVersion()
+	return c.zones.get(lines, version)
+}
+
+// RenderVersion forwards the content container's revision.
+func (c *UserMessageComponent) RenderVersion() (uint64, bool) {
+	return c.Container.RenderVersion()
 }
 
 // EntryRenderer renders a custom session entry (extension surface; the

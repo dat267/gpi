@@ -203,6 +203,16 @@ type Container struct {
 	// to decide whether cacheLines is still current.
 	cacheChildren [][]string
 	cacheWidth    int
+	// cacheOffsets[i] is the line index in cacheLines where child i starts, so a
+	// tail change can rewrite only the changed suffix in place.
+	cacheOffsets []int
+	// cacheChildVersions holds each child's render revision at the cached pass,
+	// for children whose Render reuses its backing array (see renderVersioner).
+	cacheChildVersions []uint64
+	// version increments whenever cacheLines is rebuilt. Render may return the
+	// same backing array with new contents, so a parent cannot rely on slice
+	// identity alone; this is the explicit change signal it compares instead.
+	version uint64
 
 	// frame scratch, reused across renders so a frame does not allocate for
 	// every child and every line.
@@ -355,45 +365,118 @@ func (c *Container) Render(width int) []string {
 	}
 	c.mouseLayoutWidth = width
 
-	if c.matchRenderCache(width) {
+	firstChanged := c.firstChangedChild(width)
+	if firstChanged < 0 {
 		return c.cacheLines
 	}
+	c.version++
 
-	c.lineScratch = c.lineScratch[:0]
+	total := 0
 	for _, childLines := range c.childRenders {
-		c.lineScratch = append(c.lineScratch, childLines...)
+		total += len(childLines)
 	}
-	lines := make([]string, len(c.lineScratch))
-	copy(lines, c.lineScratch)
 
-	c.cacheLines = lines
+	if firstChanged > 0 {
+		// Rebuild from the first changed child and reuse the prefix already in
+		// cacheLines. A streaming message changes only the last child, so
+		// re-flattening (and re-allocating) the whole transcript every frame is
+		// what made a long session stutter. Grow geometrically so monotonic
+		// growth does not reallocate on every frame.
+		if cap(c.cacheLines) < total {
+			grown := make([]string, len(c.cacheLines), max(total, 2*cap(c.cacheLines)))
+			copy(grown, c.cacheLines)
+			c.cacheLines = grown
+		}
+		lines := c.cacheLines[:total]
+		position := c.cacheOffsets[firstChanged]
+		for index := firstChanged; index < len(c.childRenders); index++ {
+			position += copy(lines[position:], c.childRenders[index])
+		}
+		c.cacheLines = lines
+	} else {
+		c.lineScratch = c.lineScratch[:0]
+		for _, childLines := range c.childRenders {
+			c.lineScratch = append(c.lineScratch, childLines...)
+		}
+		lines := make([]string, len(c.lineScratch), max(len(c.lineScratch)+len(c.lineScratch)/8, 8))
+		copy(lines, c.lineScratch)
+		c.cacheLines = lines
+	}
+
 	c.cacheChildren = append(c.cacheChildren[:0], c.childRenders...)
+	c.cacheChildVersions = c.cacheChildVersions[:0]
+	for _, child := range c.childrenSnapshot {
+		version := uint64(0)
+		if versioned, ok := child.(renderVersioner); ok {
+			if value, has := versioned.RenderVersion(); has {
+				version = value
+			}
+		}
+		c.cacheChildVersions = append(c.cacheChildVersions, version)
+	}
 	c.cacheWidth = width
-	return lines
+	c.recomputeCacheOffsets()
+	return c.cacheLines
 }
 
-// matchRenderCache reports whether cacheLines still describes the children's
-// current lines.
-func (c *Container) matchRenderCache(width int) bool {
-	if c.cacheLines == nil || c.cacheWidth != width || len(c.cacheChildren) != len(c.childRenders) {
-		return false
+// renderVersioner is implemented by components whose Render can return the same
+// backing array with changed contents (Container reuses its prefix in place). A
+// parent compares the revision instead of slice identity.
+//
+// The second result is false for a forwarding component whose child is not
+// itself versioned, so the parent falls back to slice identity.
+type renderVersioner interface {
+	RenderVersion() (uint64, bool)
+}
+
+// RenderVersion reports the revision of the current rendered lines.
+func (c *Container) RenderVersion() (uint64, bool) { return c.version, true }
+
+// firstChangedChild reports the first child whose rendered lines differ from
+// the cached pass, or -1 when cacheLines still describes every child.
+func (c *Container) firstChangedChild(width int) int {
+	if c.cacheLines == nil || c.cacheWidth != width || len(c.cacheChildren) != len(c.childRenders) || len(c.cacheChildVersions) != len(c.childRenders) {
+		return 0
 	}
-	for i, cached := range c.cacheChildren {
-		lines := c.childRenders[i]
+	for index, cached := range c.cacheChildren {
+		lines := c.childRenders[index]
+		if versioned, ok := c.childrenSnapshot[index].(renderVersioner); ok {
+			if version, has := versioned.RenderVersion(); has {
+				if c.cacheChildVersions[index] != version {
+					return index
+				}
+				continue
+			}
+		}
 		if len(cached) != len(lines) {
-			return false
+			return index
 		}
 		// A child that reuses its slice is unchanged by definition.
 		if len(lines) > 0 && &cached[0] == &lines[0] {
 			continue
 		}
-		for j, line := range lines {
-			if cached[j] != line {
-				return false
+		for lineIndex, line := range lines {
+			if cached[lineIndex] != line {
+				return index
 			}
 		}
 	}
-	return true
+	return -1
+}
+
+// recomputeCacheOffsets records where each child starts in cacheLines.
+func (c *Container) recomputeCacheOffsets() {
+	needed := len(c.childRenders) + 1
+	if cap(c.cacheOffsets) < needed {
+		c.cacheOffsets = make([]int, needed)
+	}
+	c.cacheOffsets = c.cacheOffsets[:needed]
+	position := 0
+	for index, childLines := range c.childRenders {
+		c.cacheOffsets[index] = position
+		position += len(childLines)
+	}
+	c.cacheOffsets[len(c.childRenders)] = position
 }
 
 // MouseLayout returns the layout recorded by the last Render.

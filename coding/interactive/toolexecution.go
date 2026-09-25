@@ -271,6 +271,16 @@ func (c *ToolExecutionComponent) Render(width int) []string {
 	return c.Container.Render(width)
 }
 
+// RenderVersion forwards the content container's revision. The self-render
+// shell returns a freshly built slice, so it reports no version and the parent
+// falls back to slice identity.
+func (c *ToolExecutionComponent) RenderVersion() (uint64, bool) {
+	if c.hasRendererDefinition() && c.renderShell() == "self" {
+		return 0, false
+	}
+	return c.Container.RenderVersion()
+}
+
 // HandleMouse forwards mouse events for the self-render shell.
 func (c *ToolExecutionComponent) HandleMouse(event tui.TuiMouseEvent) *tui.TuiMouseDispatchResult {
 	if !c.hasRendererDefinition() || c.renderShell() != "self" {
