@@ -5,7 +5,7 @@ usually because upstream relies on a JS or Node behaviour that has no direct Go
 equivalent, or because a defect upstream is fixed here. D-row numbers live in
 code comments at the point of divergence; this file is the log, and it is
 representative: the rows below carry a written-up rationale, while the rest live
-only as the code comment that introduced them. The range is **D1–D164**.
+only as the code comment that introduced them. The range is **D1–D165**.
 
 - D30 — startup timings read `PI_TIMING` **per call** instead of once at module
   load (upstream reads the flag when the timing module is first imported), so a
@@ -559,3 +559,48 @@ only as the code comment that introduced them. The range is **D1–D164**.
   324 B/op on a styled tool-output line). Tests:
   `TestMouseMotionBurstDoesNotRepaint`, `TestAnimationScanCacheIsDroppedByAPaint`,
   `TestAltScreenMouseMoveRequestsNoRender`, `TestVisibleWidthStyledTextMatchesPlainText`.
+
+- D165 — **terminal theme detection is listener-driven, not an awaited query**.
+  Upstream `applyFromSettings` `await`s the OSC 11 / DSR queries on its event
+  loop; the Go port's UI loop is the only dispatcher of terminal replies, so a
+  synchronous `QueryTerminalColorScheme`/`QueryTerminalBackgroundColor` on that
+  loop can never see its own reply and always times out. The interactive wiring
+  therefore sends the queries with `RequestTerminalColorScheme` /
+  `RequestTerminalBackgroundColor` and applies the theme from the persistent
+  `OnTerminalColorSchemeChange` / `OnTerminalBackgroundColorChange` listeners on
+  the loop; `ApplyFromSettings` only applies the fast `COLORFGBG` result so the
+  first paint is themed. Upstream's scheme-first ordering is kept: once a `CSI ?
+  997` report is seen, background reports are ignored and a background poll
+  (which covers terminals without OSC 2031) stops. Headless callers (no Marshal
+  seam, so no loop to dispatch a reply) keep the synchronous detector. This was
+  a real production bug: `ThemeControllerOptions.Detector`/`Env` were never
+  wired and `themeUIAdapter` wrapped `*tui.TuiReference`, which did not forward
+  the renderer's color-scheme surface, so both type assertions silently
+  no-opped and every automatic/unset theme resolved to `dark` (terrible
+  contrast on a light terminal). Tests: `TestTuiReferenceForwardsThemeQueries`,
+  `TestRendererNotifiesBackgroundListeners`,
+  `TestThemeControllerAutoRequestsTerminalTheme`,
+  `TestThemeControllerAutoFollowsBackgroundFallback`,
+  `TestThemeControllerUnsetAdoptsBackground`,
+  `TestThemeAdapterDrivesDetectionFromTheRenderer`. Two follow-ups from a real
+  launch regression over SSH: the color queries are written only **after** the
+  renderer's terminal enters raw mode (`MarkTerminalStarted`, wired through
+  `RunWiring.OnTerminalStarted`) and a further 150 ms later so the first frame has
+  painted, because writing them earlier let the line discipline echo/buffer the
+  replies and interleave them with the Kitty negotiation (pinned by
+  `TestThemeControllerAutoRequestsTerminalTheme`'s pre-start assertions); a
+  theme change is panic-guarded (`safeThemeChange`, and `App.rebuildForTheme`
+  reports and keeps the screen) so it can never take the TUI down; and a large
+  replay's lazy path is no longer gated on `populateHistory`, since the theme
+  rebuild passes false and used to eagerly attach the whole session on the UI
+  loop (pinned by `TestLazyTranscriptDefersWithoutPopulatingHistory`).
+
+  A committed switch also rebuilds the themed containers (`App.rebuildForTheme`
+  via the controller's `OnChanged`): the port's components bake theme colours at
+  construction where upstream resolves its `theme` Proxy at render, so
+  invalidating alone left the old colours on screen (the header, the
+  `[Context]`/skills sections and the transcript). The rebuild uses the existing
+  `RebuildChatFromMessages`/`RebuildStartupHeader`/`ShowLoadedResources` paths
+  and is guarded to run only after `App.Init` has mounted; live previews still
+  only invalidate, matching the pre-existing (imperfect) port behaviour. Pinned
+  by `TestRebuildForThemeRepopulatesThemedContainers`.

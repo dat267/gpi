@@ -43,6 +43,10 @@ type RunWiring struct {
 	HeaderContainer *tui.Container
 	// BuiltInHeader is the constructed startup header.
 	BuiltInHeader tui.Component
+	// scopedModels/quietStartup record the init inputs so the header can be
+	// rebuilt on a committed theme change (its styles are baked at build time).
+	scopedModels []coding.ScopedModel
+	quietStartup bool
 	// Chat is the transcript container.
 	Chat *tui.Container
 	// Display is the shared display options (error padding, header expansion).
@@ -58,6 +62,10 @@ type RunWiring struct {
 	SetupKeyHandlers func()
 	// SetupSubmitHandler enables the submit handler.
 	SetupSubmitHandler func()
+	// OnTerminalStarted runs once the renderer's terminal has entered raw mode;
+	// the theme controller sends its color queries here (writing them earlier
+	// broke launching over SSH).
+	OnTerminalStarted func()
 	// RebindSession rebinds the session (extensions/resources).
 	RebindSession func(ctx context.Context) error
 	// RenderInitialMessages renders the initial transcript.
@@ -305,6 +313,8 @@ func (w *RunWiring) Init(ctx context.Context, scopedModels []coding.ScopedModel,
 	if w.initialized {
 		return
 	}
+	w.scopedModels = scopedModels
+	w.quietStartup = quietStartup
 	if registerSignals != nil {
 		registerSignals()
 	}
@@ -315,6 +325,9 @@ func (w *RunWiring) Init(ctx context.Context, scopedModels []coding.ScopedModel,
 		w.UI.Start()
 	}
 	w.initialized = true
+	if w.OnTerminalStarted != nil {
+		w.OnTerminalStarted()
+	}
 
 	// Header (unless silenced).
 	if w.HeaderContainer != nil {
@@ -470,6 +483,25 @@ func (w *RunWiring) Run(ctx context.Context, options InitOptions, runOptions Run
 	initial = append(initial, runOptions.InitialMessages...)
 
 	w.runLoop(ctx, initial)
+}
+
+// RebuildStartupHeader rebuilds the header with the active theme. The header's
+// styled strings are baked at construction, so a committed theme change must
+// rebuild it (the port reads the theme at construction, unlike upstream's Proxy).
+func (w *RunWiring) RebuildStartupHeader() {
+	if w.HeaderContainer == nil {
+		return
+	}
+	w.HeaderContainer.Clear()
+	if w.Verbose || !w.quietStartup {
+		w.BuiltInHeader = w.BuildStartupHeader(w.scopedModels)
+		w.HeaderContainer.AddChild(tui.NewSpacer(1))
+		w.HeaderContainer.AddChild(w.BuiltInHeader)
+		w.HeaderContainer.AddChild(tui.NewSpacer(1))
+		return
+	}
+	w.BuiltInHeader = w.BuildMinimalHeader()
+	w.HeaderContainer.AddChild(w.BuiltInHeader)
 }
 
 // renderTicks returns the active renderer's tick channel (nil when the
@@ -1011,6 +1043,7 @@ func newRunWiring(app *App) *RunWiring {
 
 		SetupKeyHandlers:      app.KeySetup,
 		SetupSubmitHandler:    app.SubmitSetup,
+		OnTerminalStarted:     func() { app.Theme.MarkTerminalStarted() },
 		RenderInitialMessages: func() { app.Transcript.RenderInitialMessages() },
 		ShowLoadedResources:   app.ShowLoadedResources,
 		OnThemeChange: func(callback func()) func() {
