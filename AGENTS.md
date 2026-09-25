@@ -192,10 +192,13 @@ Stage 3 (input and signals on the loop) has landed:
   so no caller blocks. Windows Terminal stops draining the pty while a mouse
   drag-selection is active, and a synchronous write parked the UI loop for the
   whole duration of the drag; `Stop` flushes the queue before restoring the
-  terminal. The renderer brackets each paint (`BeginFrame`/`EndFrame`), so a
-  frame still queued behind the pause is replaced by the newer one instead of
-  piling up (the backlog the terminal would otherwise ingest all at once on
-  release).
+  terminal. The renderer brackets each paint (`BeginFrame`/`EndFrame`) so a
+  paint's writes are submitted as one ordered batch. Frames are **not dropped**
+  when superseded: the screens are differential, so a queued frame is still
+  needed to reach the state the next diff was computed against. Dropping one
+  lost its content (the startup trust prompt vanished this way, caught by
+  `TestResumedSessionAsksTrustForItsOwnProject`); the async writer, not frame
+  dropping, is what keeps a paused console from blocking the loop.
 - The `DrainInput` last-input tracking is an atomic stamp written by the reader
   instead of an `OnData` swap from another goroutine (one lock retired).
 - **`/compact` no longer blocks the UI**: the command is split into

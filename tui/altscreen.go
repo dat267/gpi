@@ -146,6 +146,12 @@ type AltScreen struct {
 	lastDocument         []string
 	previousScreenWidth  int
 	previousScreenHeight int
+	// previousCursor* record what the last frame set, so a low-bandwidth frame
+	// whose rows and cursor are unchanged can be skipped entirely.
+	previousCursorRow   int
+	previousCursorCol   int
+	previousCursorHas   bool
+	previousCursorValid bool
 	// layoutRoot is atomic: mountedRoots is called while the renderer lock is
 	// held, so it must not take the alt-screen lock (lock order: screen ->
 	// renderer).
@@ -475,6 +481,7 @@ func (s *AltScreen) resetRenderState() {
 func (s *AltScreen) resetRenderStateLocked() {
 	s.previousScreen = nil
 	s.previousScreenWidth = 0
+	s.previousCursorValid = false
 	s.previousScreenHeight = 0
 	s.currentLayout = nil
 }
@@ -2144,6 +2151,13 @@ func (s *AltScreen) doRender() {
 	}
 	redrawImages := fullRedraw || imagesNeedRedraw
 
+	if LowBandwidth() && !fullRedraw && !imagesNeedRedraw && s.rowsAndCursorUnchanged(screen, row, col, hasCursor) {
+		// Nothing to say: skip the synchronized-output frame entirely (the
+		// cursor, if shown, was already positioned by the previous frame).
+		s.currentLayout = &nextLayout
+		return
+	}
+
 	var builder strings.Builder
 	builder.WriteString(beginSynchronizedOutput)
 	if fullRedraw {
@@ -2212,7 +2226,31 @@ func (s *AltScreen) doRender() {
 	s.previousScreen = screen
 	s.previousScreenWidth = width
 	s.previousScreenHeight = height
+	s.previousCursorRow = row
+	s.previousCursorCol = col
+	s.previousCursorHas = hasCursor
+	s.previousCursorValid = true
 	s.currentLayout = &nextLayout
+}
+
+// rowsAndCursorUnchanged reports whether screen and the cursor match the last
+// frame (used by the low-bandwidth no-op skip).
+func (s *AltScreen) rowsAndCursorUnchanged(screen []string, row, col int, hasCursor bool) bool {
+	if len(screen) != len(s.previousScreen) {
+		return false
+	}
+	for i := range screen {
+		if screen[i] != s.previousScreen[i] {
+			return false
+		}
+	}
+	if !s.previousCursorValid {
+		return false
+	}
+	if hasCursor != s.previousCursorHas {
+		return false
+	}
+	return !hasCursor || (row == s.previousCursorRow && col == s.previousCursorCol)
 }
 
 func containsImageLine(lines []string) bool {

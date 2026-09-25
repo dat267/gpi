@@ -197,10 +197,9 @@ type ProcessTerminal struct {
 
 	// frameDepth/frameBuf bracket a renderer paint (BeginFrame/EndFrame). While
 	// a frame is open its writes accumulate here; on EndFrame the frame is
-	// queued as one item, replacing any frame still queued behind a paused
-	// console. Without this a terminal that stops draining (a Windows drag
-	// selection) makes the renderer pile up frames, which the terminal then has
-	// to ingest all at once on release.
+	// queued as one ordered item. Frames are never dropped: the screens are
+	// differential, so a superseded frame is still needed to reach the state the
+	// next diff was computed against.
 	frameDepth int
 	frameBuf   strings.Builder
 
@@ -790,8 +789,11 @@ func (t *ProcessTerminal) BeginFrame() {
 	t.writesMu.Unlock()
 }
 
-// EndFrame commits the paint as one coalescable write, dropping any frame that
-// is still queued (superseded) while keeping durable writes in order.
+// EndFrame commits the paint as one ordered write. Frames are never dropped:
+// the screens are differential (each paint carries only what changed since the
+// previous one), so a queued frame that is superseded is still needed to bring
+// the terminal to the state the next diff was computed against. Dropping it
+// lost the content (the startup trust prompt went missing this way).
 func (t *ProcessTerminal) EndFrame() {
 	t.writesMu.Lock()
 	if t.frameDepth > 0 {
@@ -818,14 +820,6 @@ func (t *ProcessTerminal) EndFrame() {
 			paintAt = time.Now()
 		}
 	}
-	kept := t.writes[:0]
-	for _, item := range t.writes {
-		if item.frame {
-			continue // superseded by this frame
-		}
-		kept = append(kept, item)
-	}
-	t.writes = kept
 	t.enqueueLocked(terminalWrite{data: data, frame: true, inputReadAt: readAt, inputPaintAt: paintAt})
 	t.writesMu.Unlock()
 }

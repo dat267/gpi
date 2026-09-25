@@ -90,11 +90,12 @@ func TestProcessTerminalFlushWaitsForAPausedWriter(t *testing.T) {
 	}
 }
 
-// A frame is a whole renderer paint. While a terminal is paused, a newer frame
-// must replace an earlier queued one instead of piling up behind it — that
-// backlog is what the terminal has to ingest all at once on release.
+// A frame is a whole renderer paint. Frames must never be dropped: the screens
+// are differential, so a queued frame is still needed to bring the terminal to
+// the state the next diff was computed against (dropping the startup trust
+// prompt was the bug). Order is preserved and durable writes interleave.
 
-func TestProcessTerminalCoalescesQueuedFrames(t *testing.T) {
+func TestProcessTerminalKeepsQueuedFrames(t *testing.T) {
 	terminal := NewProcessTerminal(nil, nil)
 	release := make(chan struct{})
 	started := make(chan struct{})
@@ -124,8 +125,8 @@ func TestProcessTerminalCoalescesQueuedFrames(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if got.String() != "setupframe-B" {
-		t.Fatalf("got %q, want %q (frame-A must be dropped)", got.String(), "setupframe-B")
+	if got.String() != "setupframe-Aframe-B" {
+		t.Fatalf("got %q, want both frames in order", got.String())
 	}
 }
 
@@ -160,8 +161,8 @@ func TestProcessTerminalFrameCoalescingKeepsDurableWrites(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	// frame-A is dropped, the durable write survives, in order.
-	if got.String() != "setupmodeframe-B" {
-		t.Fatalf("got %q, want %q", got.String(), "setupmodeframe-B")
+	// Every write survives, in submission order.
+	if got.String() != "setupframe-Amodeframe-B" {
+		t.Fatalf("got %q, want setupframe-Amodeframe-B", got.String())
 	}
 }

@@ -437,9 +437,9 @@ func (t *Renderer) doRender() {
 }
 
 // frameCoalescer is implemented by terminals whose writes run off the caller
-// (ProcessTerminal): the renderer brackets a paint so that, while an earlier
-// frame is still queued behind a paused console, a newer frame replaces it
-// instead of piling up behind it.
+// (ProcessTerminal): the renderer brackets a paint so the paint's writes are
+// submitted as one ordered batch. Frames are not dropped (the screens are
+// differential; see ProcessTerminal.EndFrame).
 type frameCoalescer interface {
 	BeginFrame()
 	EndFrame()
@@ -1215,14 +1215,37 @@ func sortOverlaysByFocusOrder(entries []*overlayEntry) {
 	}
 }
 
-// ApplyLineResets appends the segment reset to every non-image line.
+// ApplyLineResets appends the segment reset to every non-image line. In
+// low-bandwidth mode a line with no hyperlink needs only the SGR reset, so the
+// 7-byte OSC 8 close is dropped.
 func (t *Renderer) ApplyLineResets(lines []string) []string {
 	for i, line := range lines {
 		if !IsImageLine(line) {
-			lines[i] = NormalizeTerminalOutput(line) + segmentReset
+			reset := segmentReset
+			if LowBandwidth() && !lineHasHyperlink(line) {
+				reset = "\x1b[0m"
+			}
+			lines[i] = NormalizeTerminalOutput(line) + reset
 		}
 	}
 	return lines
+}
+
+// lineHasHyperlink reports whether the line opens an OSC 8 hyperlink (a
+// non-empty URL after the `ESC ] 8 ; ;` prefix). The close form uses an empty
+// URL and does not need the trailing close appended by ApplyLineResets.
+func lineHasHyperlink(line string) bool {
+	const prefix = "\x1b]8;;"
+	for {
+		i := strings.Index(line, prefix)
+		if i < 0 {
+			return false
+		}
+		line = line[i+len(prefix):]
+		if line != "" && line[0] != '\a' && line[0] != '\x1b' {
+			return true
+		}
+	}
 }
 
 // ExtractCursorPosition finds and extracts the cursor position from rendered
