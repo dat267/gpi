@@ -9,7 +9,7 @@ from upstream source, not inferred. The porting rules live in `AGENTS.md`.
 
 | What | Value |
 |---|---|
-| Repository | https://github.com/earendil-works/pi (cloned at `../pi`) |
+| Repository | https://github.com/earendil-works/pi (cloned at `./pi`, gitignored) |
 | Pin | `16787ad5b` — Release v0.87.0 |
 | Stale upstream test | `packages/ai/test/faux-provider.test.ts` "estimates prompt and output tokens" still expects pre-`9e05370b2` faux serialization; source wins |
 
