@@ -156,7 +156,8 @@ func scanSessionLine(line []byte) (sessionLineMeta, bool) {
 	}
 	i++
 	first := true
-	seen := map[string]bool{}
+	var sawType, sawID, sawTimestamp, sawParentID, sawMessage bool
+	var idVal, tsVal []byte
 	for {
 		skipSpace()
 		if i >= len(line) {
@@ -176,18 +177,12 @@ func scanSessionLine(line []byte) (sessionLineMeta, bool) {
 				return meta, false // trailing comma: not valid JSON
 			}
 		}
-		key, n, ok := scanJSONStringBytes(line[i:])
-		if !ok || strings.IndexByte(key, '\\') >= 0 {
-			// An escaped key decodes to a name the switch would miss, leaving
-			// a field silently unset in the shell; reject the fast path.
+		// The scanner only accepts escape-free strings, so keys can be
+		// compared in place: no per-line map, no key allocation.
+		key, n, ok := scanPlainStringBytes(line[i:])
+		if !ok {
 			return meta, false
 		}
-		if seen[key] {
-			// The v2 decoder rejects duplicate members, so the scanner must
-			// not shell out a line the decode would drop.
-			return meta, false
-		}
-		seen[key] = true
 		i += n
 		skipSpace()
 		if i >= len(line) || line[i] != ':' {
@@ -195,34 +190,59 @@ func scanSessionLine(line []byte) (sessionLineMeta, bool) {
 		}
 		i++
 		skipSpace()
-		switch key {
-		case "type", "id", "timestamp":
-			val, n, ok := scanJSONStringBytes(line[i:])
-			if !ok || strings.IndexByte(val, '\\') >= 0 {
+		switch {
+		case bytes.Equal(key, []byte("type")):
+			if sawType {
+				return meta, false // duplicate member: the decoder rejects it
+			}
+			sawType = true
+			val, n, ok := scanPlainStringBytes(line[i:])
+			if !ok {
 				return meta, false
 			}
-			switch key {
-			case "type":
-				meta.typ = val
-			case "id":
-				meta.id = val
-			case "timestamp":
-				meta.timestamp = val
+			meta.typ = string(val)
+			i += n
+		case bytes.Equal(key, []byte("id")):
+			if sawID {
+				return meta, false
+			}
+			sawID = true
+			idVal, n, ok = scanPlainStringBytes(line[i:])
+			if !ok {
+				return meta, false
 			}
 			i += n
-		case "parentId":
+		case bytes.Equal(key, []byte("timestamp")):
+			if sawTimestamp {
+				return meta, false
+			}
+			sawTimestamp = true
+			tsVal, n, ok = scanPlainStringBytes(line[i:])
+			if !ok {
+				return meta, false
+			}
+			i += n
+		case bytes.Equal(key, []byte("parentId")):
+			if sawParentID {
+				return meta, false
+			}
+			sawParentID = true
 			if bytes.HasPrefix(line[i:], []byte("null")) {
 				i += 4
 			} else {
-				val, n, ok := scanJSONStringBytes(line[i:])
-				if !ok || strings.IndexByte(val, '\\') >= 0 {
+				val, n, ok := scanPlainStringBytes(line[i:])
+				if !ok {
 					return meta, false
 				}
-				parent := val
+				parent := string(val)
 				meta.parentID = &parent
 				i += n
 			}
-		case "message":
+		case bytes.Equal(key, []byte("message")):
+			if sawMessage {
+				return meta, false
+			}
+			sawMessage = true
 			n, ok := skipJSONValue(line[i:])
 			if !ok {
 				return meta, false
@@ -240,27 +260,46 @@ func scanSessionLine(line []byte) (sessionLineMeta, bool) {
 	if i != len(line) {
 		return meta, false
 	}
+	meta.id = string(idVal)
+	meta.timestamp = string(tsVal)
 	return meta, true
 }
 
-// scanJSONStringBytes consumes one JSON string and returns its raw inner bytes
-// (escape sequences left in; callers reject strings containing them).
-func scanJSONStringBytes(s []byte) (content string, consumed int, ok bool) {
-	if len(s) == 0 || s[0] != '"' {
-		return "", 0, false
+// scanPlainStringBytes consumes one JSON string that contains no escape
+// sequences and returns its raw inner bytes as a subslice of s (no copy).
+// Anything else — missing quotes, an escape, an unterminated string — fails,
+// which is what the scanner wants: it must reject every string it cannot
+// take at face value.
+func scanPlainStringBytes(s []byte) (content []byte, consumed int, ok bool) {
+	if len(s) < 2 || s[0] != '"' {
+		return nil, 0, false
 	}
-	i := 1
-	for i < len(s) {
+	for i := 1; i < len(s); i++ {
 		switch s[i] {
 		case '"':
-			return string(s[1:i]), i + 1, true
+			return s[1:i:i], i + 1, true
 		case '\\':
-			i += 2
-		default:
-			i++
+			return nil, 0, false
 		}
 	}
-	return "", 0, false
+	return nil, 0, false
+}
+
+// skipJSONString consumes one JSON string with proper escape handling and
+// copies nothing: the bytes are being skipped, not kept.
+func skipJSONString(s []byte) (consumed int, ok bool) {
+	if len(s) < 2 || s[0] != '"' {
+		return 0, false
+	}
+	for i := 1; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			i++
+		case '"':
+			return i + 1, true
+		}
+	}
+	return 0, false
 }
 
 // skipJSONValue consumes one JSON value of any type, tracking nesting and
@@ -271,14 +310,13 @@ func skipJSONValue(s []byte) (consumed int, ok bool) {
 	}
 	switch s[0] {
 	case '"':
-		_, n, ok := scanJSONStringBytes(s)
-		return n, ok
+		return skipJSONString(s)
 	case '{', '[':
 		depth := 0
 		for i := 0; i < len(s); i++ {
 			switch s[i] {
 			case '"':
-				_, n, ok := scanJSONStringBytes(s[i:])
+				n, ok := skipJSONString(s[i:])
 				if !ok {
 					return 0, false
 				}
