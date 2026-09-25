@@ -554,6 +554,16 @@ func VisibleWidth(text string) int {
 	if strings.Contains(clean, "\x1b") {
 		clean = StripTerminalSequences(clean)
 	}
+	// Escapes and tabs are gone. Terminal text is overwhelmingly printable
+	// ASCII, whose width is its byte count, and styled lines never reach the
+	// isPrintableASCII fast path above. Short-circuiting here keeps the grapheme
+	// walk off the per-frame path (D164): wrapping, padding and painting measure
+	// every visible line of every frame, and the walk costs a decode plus two
+	// range searches per character.
+	if isPrintableASCII(clean) {
+		widthCacheStore(text, len(clean))
+		return len(clean)
+	}
 	total := 0
 	for _, segment := range segmentGraphemes(clean) {
 		total += graphemeWidth(segment)

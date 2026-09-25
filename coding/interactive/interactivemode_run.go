@@ -125,6 +125,15 @@ type RunWiring struct {
 	RawInputs <-chan string
 	// RawTerminal is the raw-input terminal (nil for sequence mode).
 	RawTerminal tui.RawInputTerminal
+	// animationScanValid/animationScanNeeds cache the renderer's animation walk
+	// between paints (see armAnimation). The walk visits every mounted
+	// component, and the loop asked for it once per iteration — once per input
+	// event — so an uncached walk charged the whole transcript to every mouse
+	// move. A paint is what changes a component's animation state, so renderUI
+	// drops the cache and the next iteration re-walks and re-arms. Loop-owned;
+	// no other goroutine touches it.
+	animationScanValid bool
+	animationScanNeeds bool
 	// ShowStatus/ShowError/ShowWarning report messages.
 	ShowStatus  func(message string)
 	ShowError   func(message string)
@@ -513,11 +522,50 @@ func (w *RunWiring) drainReadyEvents() {
 // already rare and latency-sensitive.
 const minInteractiveFrameInterval = 16 * time.Millisecond
 
-// renderUI paints the current state (loop goroutine only).
+// renderUI paints the current state (loop goroutine only). A paint is the only
+// thing that can change a component's animation state, so it also invalidates
+// the cached animation walk (D164): the next loop iteration re-walks and
+// re-arms the animation timer.
 func (w *RunWiring) renderUI() {
 	defer w.phase("render")()
+	w.animationScanValid = false
 	if w.UI != nil {
 		w.UI.RenderNow(false)
+	}
+}
+
+// feedRawInput reassembles one raw stdin chunk on the loop goroutine and
+// dispatches the complete sequences it carries.
+func (w *RunWiring) feedRawInput(raw string) {
+	if w.RawTerminal == nil || w.UI == nil {
+		return
+	}
+	for _, sequence := range w.RawTerminal.FeedInput([]byte(raw)) {
+		w.UI.HandleTerminalInput(sequence)
+	}
+}
+
+// drainReadyRawInput feeds every raw chunk already queued before the caller
+// paints, so a burst (mouse motion, a fast typist, a paste) is dispatched once
+// and painted once rather than once per chunk — the same coalescing the event
+// channels get from drainReadyEvents, and half of D164. The drain is bounded
+// by the channel capacity, so a producer that never pauses cannot pin the loop
+// here. Loop goroutine only.
+func (w *RunWiring) drainReadyRawInput() {
+	if w.RawTerminal == nil || w.UI == nil {
+		return
+	}
+	for drained := 0; drained < loopInputCapacity; drained++ {
+		select {
+		case raw, ok := <-w.RawInputs:
+			if !ok {
+				w.RawInputs = nil
+				return
+			}
+			w.feedRawInput(raw)
+		default:
+			return
+		}
 	}
 }
 
@@ -592,7 +640,22 @@ func (w *RunWiring) armAnimation(timer *time.Timer, deadline *time.Time) <-chan 
 	if w.UI == nil {
 		return nil
 	}
+	// The animation walk visits every mounted component, and this runs once per
+	// loop iteration — once per input event. Reuse the last walk while it still
+	// describes the tree: a paint (which renderUI uses to invalidate) is what
+	// changes a component's animation state, so an input event that paints
+	// nothing must not pay for the walk (D164). A walk that reported no animator
+	// stays valid until the next paint; a walk with a deadline stays valid until
+	// that deadline passes, which is when the owner must ask again.
+	if w.animationScanValid && !w.animationScanNeeds && deadline.IsZero() {
+		return nil
+	}
+	if w.animationScanValid && w.animationScanNeeds && !deadline.IsZero() && time.Now().Before(*deadline) {
+		return timer.C
+	}
 	needs, delay := w.UI.NextAnimation()
+	w.animationScanValid = true
+	w.animationScanNeeds = needs
 	if !needs {
 		if !deadline.IsZero() {
 			timer.Stop()
@@ -688,6 +751,7 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 	inputs := w.Startup.Inputs()
 	w.work.ctx = ctx
 	w.StartWork = w.RunWork
+	w.animationScanValid = false
 	// One loop-owned timer drives component animation (loaders, flashes): the
 	// renderer reports the next frame delay and the loop wakes to paint it.
 	animationTimer := time.NewTimer(time.Hour)
@@ -704,8 +768,9 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 
 	// Coalesced render requests paint at most once per frame interval, so a
 	// fast event stream (streaming deltas) cannot saturate the loop with
-	// back-to-back full repaints. Input, resize and animation paints stay
-	// immediate: they are latency-sensitive and already rate-limited.
+	// back-to-back full repaints. Resize and animation paints stay immediate:
+	// they are latency-sensitive and already rate-limited. Input paints on the
+	// next frame when the dispatch asked for one (paintIfRequested).
 	paintTimer := time.NewTimer(time.Hour)
 	paintTimer.Stop()
 	defer paintTimer.Stop()
@@ -720,6 +785,24 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 			paintTimer.Stop()
 			paintCh = nil
 		}
+	}
+	// paintIfRequested paints when the dispatch queued a render request.
+	// RequestRender coalesces onto the tick channel (cap 1), so a pending tick is
+	// exactly "a paint is wanted"; consuming it here also stops the 16 ms frame
+	// timer from repainting the same request.
+	//
+	// Input that changed nothing — a bare mouse move, a key release, a terminal
+	// reply, an already-correct hover — asks for nothing and therefore costs no
+	// frame. A full frame is O(the transcript), so painting per mouse event was
+	// what made mouse interaction unusable on a large session (D164).
+	paintIfRequested := func() {
+		select {
+		case <-w.renderTicks():
+		default:
+			return
+		}
+		w.markInputRead()
+		paint()
 	}
 
 	for _, text := range initialWork {
@@ -790,24 +873,22 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 				continue
 			}
 			// Raw input is latency-sensitive: reassemble, dispatch every
-			// complete sequence, then paint once.
-			if w.RawTerminal != nil && w.UI != nil {
-				func() {
-					defer w.phase("raw-input")()
-					for _, sequence := range w.RawTerminal.FeedInput([]byte(raw)) {
-						w.UI.HandleTerminalInput(sequence)
-					}
-				}()
-			}
+			// complete sequence already queued, then paint once — if the
+			// dispatch asked for a paint at all (D164).
+			func() {
+				defer w.phase("raw-input")()
+				w.feedRawInput(raw)
+				w.drainReadyRawInput()
+			}()
 			w.drainReadyEvents()
-			w.markInputRead()
-			paint()
+			paintIfRequested()
 		case data, ok := <-w.InputEvents:
 			if !ok {
 				w.InputEvents = nil
 				continue
 			}
-			// Input is latency-sensitive: dispatch, then paint once.
+			// Input is latency-sensitive: dispatch, then paint once if it asked
+			// for one.
 			if w.UI != nil {
 				func() {
 					defer w.phase("input")()
@@ -815,7 +896,7 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 				}()
 			}
 			w.drainReadyEvents()
-			paint()
+			paintIfRequested()
 		case _, ok := <-w.ResizeEvents:
 			if !ok {
 				w.ResizeEvents = nil

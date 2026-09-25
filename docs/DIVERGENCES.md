@@ -5,7 +5,7 @@ usually because upstream relies on a JS or Node behaviour that has no direct Go
 equivalent, or because a defect upstream is fixed here. D-row numbers live in
 code comments at the point of divergence; this file is the log, and it is
 representative: the rows below carry a written-up rationale, while the rest live
-only as the code comment that introduced them. The range is **D1–D163**.
+only as the code comment that introduced them. The range is **D1–D164**.
 
 - D30 — startup timings read `PI_TIMING` **per call** instead of once at module
   load (upstream reads the flag when the timing module is first imported), so a
@@ -534,3 +534,28 @@ only as the code comment that introduced them. The range is **D1–D163**.
   least as wide as the old one or after a full-screen clear. The visible result
   is identical; the same keystroke drops to 48 bytes (−62%). The default path is
   untouched so the upstream-parity goldens keep asserting the padded bytes.
+
+- D164 — **input paints only when the dispatch asked for one**. The interactive
+  loop's input arms used to call `paint()` for every raw stdin chunk. Fullscreen
+  mode enables `?1003h` (any-motion mouse tracking), so the terminal reports
+  every pointer movement — one event per pixel — and one frame is O(the whole
+  transcript): on a large session the loop spent its entire budget on full
+  repaints, and mouse movement (and every keystroke queued behind it) was
+  unusable. The arms now drain every raw chunk already queued, then paint once,
+  and only if the dispatch queued a render request (`paintIfRequested` consumes
+  the coalesced tick that `RequestRender` left behind, which also stops the 16 ms
+  frame timer from repainting the same request). Measured on the port: 60 mouse
+  moves plus one keystroke cost 2–3 paints, down from 63. Input that asks for no
+  paint is therefore not painted; the renderer's contract is that components
+  call `RequestRender` and every keyboard path signals one in
+  `HandleTerminalInput`, so only events that changed nothing (a bare move, a key
+  release, a terminal reply) skip a frame. Two supporting changes: the loop
+  caches the renderer's animation walk between paints (the walk visits every
+  mounted component and the loop asked for it once per input event), dropped by
+  the paint that can change a component's animation state; and `VisibleWidth`
+  short-circuits printable-ASCII text after stripping sequences, because a
+  styled line never reached the plain-ASCII fast path and instead allocated a
+  grapheme slice and range-searched twice per character (5.0 µs → 1.0 µs, 1104 →
+  324 B/op on a styled tool-output line). Tests:
+  `TestMouseMotionBurstDoesNotRepaint`, `TestAnimationScanCacheIsDroppedByAPaint`,
+  `TestAltScreenMouseMoveRequestsNoRender`, `TestVisibleWidthStyledTextMatchesPlainText`.
