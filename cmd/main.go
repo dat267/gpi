@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"syscall"
 
@@ -497,6 +498,18 @@ func run(appName string, args *coding.Args) error {
 	})
 	coding.Time("newApp", coding.TimingMain)
 	coding.PrintTimings()
+	// SIGQUIT writes a full goroutine dump to the agent dir before exiting, so a
+	// freeze can be diagnosed without a second terminal or an interactive debugger
+	// (ptrace is often unavailable).
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGQUIT)
+	go func() {
+		<-quit
+		dump := make([]byte, 1<<20)
+		n := goruntime.Stack(dump, true)
+		_ = os.WriteFile(filepath.Join(agentDir, "pier-goroutines.log"), dump[:n], 0o644)
+		os.Exit(1)
+	}()
 	app.Run(ctx)
 	// Upstream prints again as it stops, so the exit path's timings are visible
 	// too.
