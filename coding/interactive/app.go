@@ -10,6 +10,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/dat267/pier/coding"
+	"github.com/dat267/pier/internal/offloop"
 	"github.com/dat267/pier/tui"
 )
 
@@ -259,6 +260,10 @@ func NewApp(options AppOptions) *App {
 		ShowError:           func(message string) { app.showError(message) },
 		OnChanged:           func() { app.updateEditorBorderColor() },
 		InitialThemeSetting: options.InitialThemeSetting,
+		// Theme loads read files from disk; the selector paths that reach the
+		// controller run on the UI loop, so they load off it.
+		Marshal:    func(fn func()) { app.UI.Post(fn) },
+		ThemeQueue: offloop.New(),
 	})
 
 	// Containers.
@@ -744,10 +749,14 @@ func (a *App) currentRenderer() tui.TUI {
 // the footer and its data provider, the session-event subscription, the
 // renderer (with the fullscreen exit output setting) and the signal handlers.
 func (a *App) StopMode(fullscreenExitOutput string) {
-	// Settings persists run on the off-loop queue; drain them here so a clean
-	// exit cannot lose the last save (signals route through the same hook).
+	// Settings persists and session writes run on off-loop queues; drain them
+	// here so a clean exit cannot lose the last save (signals route through
+	// the same hook).
 	if a.Settings != nil {
 		a.Settings.FlushPersists()
+	}
+	if a.SessionMgr != nil {
+		a.SessionMgr.FlushWrites()
 	}
 	if a.Commands == nil {
 		// Teardown before Init finished: stop the renderer only.

@@ -101,6 +101,7 @@ func (a *App) SessionNew(ctx context.Context) (*SessionSwitchResult, error) {
 	sessionManager := coding.NewSessionManager(a.SessionMgr.GetCwd(), &coding.SessionManagerOptions{
 		SessionDir: sessionDir,
 		Persist:    &persist,
+		WriteQueue: a.SessionMgr.GetWriteQueue(),
 	})
 	return a.applySessionReplacement(sessionManager)
 }

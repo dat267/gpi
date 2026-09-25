@@ -195,6 +195,12 @@ func run(appName string, args *coding.Args) error {
 			persist := false
 			options.Persist = &persist
 		}
+		if !args.NoSession && !listingModels {
+			// The interactive UI's event loop must never block, so session file
+			// writes run on the off-loop queue (ordered, flushed at teardown via
+			// App.StopMode). One-shot consumers keep synchronous writes.
+			options.WriteQueue = offloop.New()
+		}
 		sessions = coding.NewSessionManager(cwd, options)
 	}
 	coding.Time("createSessionManager", coding.TimingMain)

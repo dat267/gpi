@@ -418,6 +418,12 @@ func (w *SessionWiring) ShowSessionSelector() {
 					if err != nil {
 						return err
 					}
+					// The rename write runs on the session write queue: the
+					// selector callback runs on the UI loop, which must never
+					// block on the file write.
+					if w.SessionInfo != nil {
+						manager.SetWriteQueue(w.SessionInfo.GetWriteQueue())
+					}
 					manager.AppendSessionInfo(next)
 					return nil
 				},

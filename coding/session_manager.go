@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/dat267/pier/ai"
+	"github.com/dat267/pier/internal/offloop"
 )
 
 // Port of the SessionManager class: append-only JSONL session trees.
@@ -30,6 +31,10 @@ type SessionManager struct {
 	cwd         string
 	persist     bool
 	flushed     bool
+
+	// writeQueue, when wired, carries the file writes (offloop); nil keeps
+	// them synchronous. See SessionManagerOptions.WriteQueue.
+	writeQueue *offloop.Queue
 
 	fileEntries []FileEntry
 	// loadedData is the file buffer OpenSession loaded from. Raw message and
@@ -87,6 +92,15 @@ type SessionManagerOptions struct {
 	SessionDir string
 	// Persist enables file persistence. Default true.
 	Persist *bool
+	// WriteQueue, when non-nil, moves session file writes off the calling
+	// goroutine through the internal/offloop uniform mechanism: the line is
+	// marshaled synchronously (the caller's lock stays authoritative) and the
+	// file write runs on the queue's worker in submission order. Interactive
+	// mode wires one because its callers include the UI loop, which must never
+	// block; nil (the default) keeps writes synchronous for one-shot
+	// consumers. A manager with a queue must have FlushWrites called before
+	// process exit.
+	WriteQueue *offloop.Queue
 }
 
 // NewSessionManager creates a session manager with a fresh session
@@ -107,6 +121,9 @@ func NewSessionManager(cwd string, options *SessionManagerOptions) *SessionManag
 		byID:            map[string]*SessionEntry{},
 		labelsByID:      map[string]string{},
 		labelTimestamps: map[string]string{},
+	}
+	if options != nil {
+		m.writeQueue = options.WriteQueue
 	}
 	// Without an explicit directory, persisted sessions live under the agent
 	// dir's per-cwd sessions path (upstream create -> getDefaultSessionDir);
@@ -364,16 +381,53 @@ func (m *SessionManager) rewriteFile() {
 	if !m.persist || m.sessionFile == "" {
 		return
 	}
-	var buf strings.Builder
-	for _, entry := range m.fileEntries {
-		line, err := MarshalFileEntry(entry)
-		if err != nil {
-			continue
+	if m.writeQueue == nil {
+		var buf strings.Builder
+		for _, entry := range m.fileEntries {
+			line, err := MarshalFileEntry(entry)
+			if err != nil {
+				continue
+			}
+			buf.WriteString(line)
 		}
-		buf.WriteString(line)
+		_ = os.WriteFile(m.sessionFile, []byte(buf.String()), 0o644)
+		return
 	}
-	_ = os.WriteFile(m.sessionFile, []byte(buf.String()), 0o644)
+	// Queued: snapshot the entries (a shallow pointer copy taken under the
+	// manager lock) and let the worker marshal and write them, ordered behind
+	// any queued appends by the same FIFO. The marshal moves off the loop with
+	// the write; on a large loaded session that is the expensive part.
+	snapshot := make([]FileEntry, len(m.fileEntries))
+	copy(snapshot, m.fileEntries)
+	path := m.sessionFile
+	m.writeQueue.Go(func() {
+		var buf strings.Builder
+		for _, entry := range snapshot {
+			line, err := MarshalFileEntry(entry)
+			if err != nil {
+				continue
+			}
+			buf.WriteString(line)
+		}
+		_ = os.WriteFile(path, []byte(buf.String()), 0o644)
+	})
 }
+
+// FlushWrites blocks until every queued session file write has finished.
+// Shutdown calls it so a clean exit cannot lose the session tail; nil-queue
+// managers have nothing to flush.
+func (m *SessionManager) FlushWrites() {
+	if m.writeQueue != nil {
+		m.writeQueue.Flush()
+	}
+}
+
+// GetWriteQueue returns the wired write queue, or nil for synchronous writes.
+func (m *SessionManager) GetWriteQueue() *offloop.Queue { return m.writeQueue }
+
+// SetWriteQueue wires (or replaces) the write queue; used by the interactive
+// wiring for managers it opens ad hoc (session rename, model list).
+func (m *SessionManager) SetWriteQueue(queue *offloop.Queue) { m.writeQueue = queue }
 
 // IsPersisted reports file persistence.
 func (m *SessionManager) IsPersisted() bool { return m.persist }
@@ -433,7 +487,20 @@ func (m *SessionManager) appendLine(entry *SessionEntry) {
 	if err != nil {
 		return
 	}
-	file, err := os.OpenFile(m.sessionFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	// The path and the marshaled line are captured under the manager lock;
+	// the worker touches no manager state.
+	path := m.sessionFile
+	write := func() { writeSessionLine(path, line) }
+	if m.writeQueue == nil {
+		write()
+		return
+	}
+	m.writeQueue.Go(write)
+}
+
+// writeSessionLine appends one pre-marshaled line to the session file.
+func writeSessionLine(path string, line string) {
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
 	}
