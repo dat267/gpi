@@ -578,3 +578,21 @@ only as the code comment that introduced them. The range is **D1–D164**.
   `RunWiring.OnStarted` (after `UI.Start`, i.e. raw mode + live reader) and
   re-armed on a renderer swap (`RebindTUI`). A terminal that does not answer
   leaves the `COLORFGBG`/fallback theme in place; nothing blocks on the reply.
+
+- D166 — **the global theme is a stable handle, mirroring upstream's `theme`
+  Proxy**. Upstream exports `theme` as a `Proxy` that reads
+  `globalThis[THEME_KEY]` on every property access, so a component that calls
+  `theme.fg(...)` at render always sees the current theme and a switch needs no
+  rebuild (`onThemeChange` only invalidates and refreshes the editor border).
+  The port returned the current concrete `*Theme` from `ActiveTheme()`;
+  components captured that pointer at construction, so a switch left the
+  transcript with the old colors and the first fix attempt added an ad-hoc
+  `App.rebuildForTheme`. `ActiveTheme()` now returns one stable `*Theme` handle;
+  `Fg`/`Bg`/`GetFgAnsi`/`GetBgAnsi`/`ColorMode` forward to `CurrentTheme()` on
+  every call (`Theme.concrete`), factories such as `GetMarkdownTheme` close over
+  the handle, and `Renderer.Invalidate()` clears the render caches so the next
+  paint re-resolves. The header and other components that bake `theme.fg(...)`
+  into a `Text` at construction stay baked in both implementations, so
+  `onChanged` remains upstream's `updateEditorBorderColor`. Tests:
+  `TestThemeHandleResolvesTheCurrentTheme`,
+  `TestMarkdownThemeRecolorsAfterASwitch`.

@@ -279,6 +279,18 @@ Stage 2 (rendering on the loop) has landed:
   `CSI ? 2031` notification toggle is deferred the same way: before `Start` it
   only flips a flag, and `Start` replays it. A terminal that does not answer
   keeps the `COLORFGBG`/fallback theme.
+- **D166 the global theme is a stable handle (upstream's `theme` Proxy).**
+  Upstream's `theme` reads the global theme on every property access, so a
+  switch reaches any component that resolves colors at render. The port used to
+  return the current concrete `*Theme`, which components captured at
+  construction and therefore never recolored. `ActiveTheme()` now returns one
+  stable `*Theme` whose `Fg`/`Bg`/`GetFgAnsi`/`GetBgAnsi`/`ColorMode` resolve
+  `CurrentTheme()` at call time; factories (`GetMarkdownTheme`,
+  `GetEditorTheme`, …) and `GetThinkingBorderColor` closures built once from the
+  handle recolor after `Renderer.Invalidate()` on the next paint. This is what
+  lets `onChanged` stay `updateEditorBorderColor` (upstream's), with no
+  `rebuildForTheme`. Colors baked into a `Text` at construction stay baked in
+  both implementations.
 
 - Stage 1 also fixed the read side of `coding.SessionManager`
   (`GetEntries`, `BuildContextEntriesForLeaf`, `BuildSessionContext` now take

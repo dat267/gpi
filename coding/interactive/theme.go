@@ -60,6 +60,13 @@ type Theme struct {
 	mode     ColorMode
 	fgColors map[string]string
 	bgColors map[string]string
+
+	// resolve, when non-nil, makes this Theme a stable handle: reads forward to
+	// the current concrete theme, mirroring upstream's `theme` Proxy (which reads
+	// the global theme on every property access). A component that holds the
+	// handle therefore resolves the current colors at render, so a switch reaches
+	// it without a rebuild. Concrete themes leave it nil.
+	resolve func() *Theme
 }
 
 // NewTheme resolves the palettes into ANSI sequences.
@@ -83,8 +90,21 @@ func NewTheme(fgColors map[string]ColorValue, bgColors map[string]ColorValue, mo
 	return theme
 }
 
+// concrete resolves a stable handle to the current concrete theme. A concrete
+// theme (resolve == nil) returns itself, so the delegation terminates.
+func (t *Theme) concrete() *Theme {
+	if t.resolve == nil {
+		return t
+	}
+	if current := t.resolve(); current != nil && current != t {
+		return current
+	}
+	return t
+}
+
 // Fg styles text with a foreground color.
 func (t *Theme) Fg(color ThemeColor, text string) string {
+	t = t.concrete()
 	ansi, ok := t.fgColors[color]
 	if !ok {
 		panic("Unknown theme color: " + color)
@@ -94,6 +114,7 @@ func (t *Theme) Fg(color ThemeColor, text string) string {
 
 // Bg styles text with a background color.
 func (t *Theme) Bg(color ThemeBg, text string) string {
+	t = t.concrete()
 	ansi, ok := t.bgColors[color]
 	if !ok {
 		panic("Unknown theme background color: " + color)
@@ -164,6 +185,7 @@ func (t *Theme) Strikethrough(text string) string {
 
 // GetFgAnsi returns the raw foreground sequence.
 func (t *Theme) GetFgAnsi(color ThemeColor) string {
+	t = t.concrete()
 	ansi, ok := t.fgColors[color]
 	if !ok {
 		panic("Unknown theme color: " + color)
@@ -173,6 +195,7 @@ func (t *Theme) GetFgAnsi(color ThemeColor) string {
 
 // GetBgAnsi returns the raw background sequence.
 func (t *Theme) GetBgAnsi(color ThemeBg) string {
+	t = t.concrete()
 	ansi, ok := t.bgColors[color]
 	if !ok {
 		panic("Unknown theme background color: " + color)
@@ -181,7 +204,7 @@ func (t *Theme) GetBgAnsi(color ThemeBg) string {
 }
 
 // ColorMode returns the palette mode.
-func (t *Theme) ColorMode() ColorMode { return t.mode }
+func (t *Theme) ColorMode() ColorMode { return t.concrete().mode }
 
 // GetThinkingBorderColor maps a thinking level to a border style.
 func (t *Theme) GetThinkingBorderColor(level string) func(string) string {

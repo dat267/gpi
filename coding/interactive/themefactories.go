@@ -15,15 +15,22 @@ import (
 // always uses the per-line mdCodeBlock fallback, which is upstream's behaviour
 // for unsupported languages.
 
+// activeTheme is the stable theme handle ActiveTheme returns. It mirrors
+// upstream's `theme` Proxy: its methods resolve the current concrete theme on
+// every call, so a theme switch reaches components that captured the handle at
+// construction (a rebuild would be needed otherwise). It is created once and
+// never installed as the current theme (setGlobalTheme always stores concrete
+// themes).
+var activeTheme = &Theme{resolve: CurrentTheme}
+
 // ActiveTheme returns the active theme; it panics when no theme is
 // initialized (upstream's Proxy throws). Named ActiveTheme because Theme is
 // the type (divergence D85).
 func ActiveTheme() *Theme {
-	theme := CurrentTheme()
-	if theme == nil {
+	if CurrentTheme() == nil {
 		panic("Theme not initialized. Call InitTheme() first.")
 	}
-	return theme
+	return activeTheme
 }
 
 // GetMarkdownTheme builds the markdown theme from the active theme.
