@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/dat267/pier/ai"
+	"github.com/dat267/pier/internal/offloop"
 )
 
 // Port of core/settings-manager.ts (with the config constants it uses from
@@ -382,6 +383,14 @@ func (s *InMemorySettingsStorage) WithLock(scope SettingsScope, fn func(current 
 type SettingsManagerCreateOptions struct {
 	// ProjectTrusted defaults to true.
 	ProjectTrusted *bool
+	// PersistQueue, when non-nil, moves settings persistence off the calling
+	// goroutine through the internal/offloop uniform mechanism: the storage
+	// roundtrip (lock retries, file read and write) runs on the queue's worker
+	// in submission order. Interactive mode wires one here because its callers
+	// are the UI loop, which must never block; nil (the default) keeps
+	// persistence synchronous for one-shot consumers. A manager with a queue
+	// must have FlushPersists called before process exit.
+	PersistQueue *offloop.Queue
 }
 
 // SettingsManager is the scoped settings facade (upstream SettingsManager).
@@ -389,11 +398,16 @@ type SettingsManagerCreateOptions struct {
 // D23: upstream serializes writes through a promise queue because its storage
 // is asynchronous; Go storage is synchronous, so writes run inline under the
 // manager lock and failures are recorded (never thrown from save), matching the
-// observable behavior (errors surface through DrainErrors).
+// observable behavior (errors surface through DrainErrors). With a PersistQueue
+// the storage roundtrip moves off the calling goroutine (the UI loop), ordered
+// by the queue; the snapshot and modified sets are still taken under the
+// manager lock, so the in-memory view stays authoritative the moment SetX
+// returns.
 type SettingsManager struct {
 	mu sync.Mutex
 
 	storage         SettingsStorage
+	persistQueue    *offloop.Queue
 	globalSettings  *Settings
 	projectSettings *Settings
 	settings        *Settings
@@ -498,6 +512,7 @@ func newSettingsManagerFromStorage(storage SettingsStorage, options SettingsMana
 
 	manager := &SettingsManager{
 		storage:                  storage,
+		persistQueue:             options.PersistQueue,
 		globalSettings:           globalLoad,
 		projectSettings:          projectLoad,
 		projectTrusted:           projectTrusted,
@@ -923,7 +938,7 @@ func (m *SettingsManager) SetProjectTrusted(trusted bool) {
 	m.projectSettings = projectLoad
 	m.projectSettingsLoadError = projectErr
 	if projectErr != nil {
-		m.recordError(SettingsScopeProject, projectErr)
+		m.recordErrorLocked(SettingsScopeProject, projectErr)
 	}
 	m.settings = DeepMergeSettings(m.globalSettings, m.projectSettings)
 }
@@ -938,7 +953,7 @@ func (m *SettingsManager) Reload() {
 		m.globalSettingsLoadError = nil
 	} else {
 		m.globalSettingsLoadError = globalErr
-		m.recordError(SettingsScopeGlobal, globalErr)
+		m.recordErrorLocked(SettingsScopeGlobal, globalErr)
 	}
 	m.modifiedFields = map[string]bool{}
 	m.modifiedNestedFields = map[string]map[string]bool{}
@@ -949,7 +964,7 @@ func (m *SettingsManager) Reload() {
 		m.projectSettingsLoadError = nil
 	} else {
 		m.projectSettingsLoadError = projectErr
-		m.recordError(SettingsScopeProject, projectErr)
+		m.recordErrorLocked(SettingsScopeProject, projectErr)
 	}
 	m.settings = DeepMergeSettings(m.globalSettings, m.projectSettings)
 }
@@ -970,7 +985,16 @@ func (m *SettingsManager) DrainErrors() []SettingsError {
 	return drained
 }
 
+// recordError records a settings failure from any goroutine (the persist
+// queue's worker reports persistence failures here).
 func (m *SettingsManager) recordError(scope SettingsScope, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.recordErrorLocked(scope, err)
+}
+
+// recordErrorLocked is recordError for callers already holding m.mu.
+func (m *SettingsManager) recordErrorLocked(scope SettingsScope, err error) {
 	if err == nil {
 		return
 	}
@@ -998,6 +1022,8 @@ func (m *SettingsManager) markProjectModified(field string, nestedKey string) {
 	}
 }
 
+// clearModifiedScope drops the scope's modified flags; the caller holds m.mu
+// (the sync save path under the mutator's lock, or the queue worker's closure).
 func (m *SettingsManager) clearModifiedScope(scope SettingsScope) {
 	if scope == SettingsScopeGlobal {
 		m.modifiedFields = map[string]bool{}
@@ -1008,7 +1034,11 @@ func (m *SettingsManager) clearModifiedScope(scope SettingsScope) {
 	m.modifiedProjectNested = map[string]map[string]bool{}
 }
 
-// save merges the scopes and persists the modified global fields.
+// save merges the scopes and queues the modified global fields for
+// persistence. The snapshot and the modified sets are taken synchronously, so
+// the caller's in-memory view is authoritative the moment SetX returns; the
+// storage roundtrip (lock retries, file read and write) runs on the persist
+// queue because the caller is the UI loop in interactive mode.
 func (m *SettingsManager) save() {
 	m.settings = DeepMergeSettings(m.globalSettings, m.projectSettings)
 	if m.globalSettingsLoadError != nil {
@@ -1017,16 +1047,49 @@ func (m *SettingsManager) save() {
 	snapshot := cloneSettings(m.globalSettings)
 	modified := copyStringSet(m.modifiedFields)
 	nested := copyNestedSet(m.modifiedNestedFields)
-	if err := m.persistScopedSettings(SettingsScopeGlobal, snapshot, modified, nested); err != nil {
-		m.recordError(SettingsScopeGlobal, err)
+	m.persistScoped(SettingsScopeGlobal, snapshot, modified, nested)
+}
+
+// persistScoped runs one scoped storage roundtrip: synchronously under the
+// manager lock when no queue is wired, otherwise as a queued task. The worker
+// persists exactly the submitted state and clears the scope's modified flags
+// only on success, so a failed persist keeps its fields marked and the next
+// save retries them. Errors surface through DrainErrors as before.
+func (m *SettingsManager) persistScoped(scope SettingsScope, snapshot *Settings, modified map[string]bool, nested map[string]map[string]bool) {
+	if m.persistQueue == nil {
+		// The caller holds m.mu (the mutator that called save); use the locked
+		// variants.
+		if err := m.persistScopedSettings(scope, snapshot, modified, nested); err != nil {
+			m.recordErrorLocked(scope, err)
+			return
+		}
+		m.clearModifiedScope(scope)
 		return
 	}
-	m.clearModifiedScope(SettingsScopeGlobal)
+	run := func() {
+		if err := m.persistScopedSettings(scope, snapshot, modified, nested); err != nil {
+			m.recordError(scope, err)
+			return
+		}
+		m.mu.Lock()
+		m.clearModifiedScope(scope)
+		m.mu.Unlock()
+	}
+	m.persistQueue.Go(run)
+}
+
+// FlushPersists blocks until every queued settings persist has finished. Tests
+// use it to observe persisted state; shutdown uses it so a clean exit cannot
+// lose the last save.
+func (m *SettingsManager) FlushPersists() {
+	if m.persistQueue != nil {
+		m.persistQueue.Flush()
+	}
 }
 
 func (m *SettingsManager) saveProjectSettings(settings *Settings) {
 	if !m.projectTrusted {
-		m.recordError(SettingsScopeProject, fmt.Errorf("Project is not trusted; refusing to write project settings"))
+		m.recordErrorLocked(SettingsScopeProject, fmt.Errorf("Project is not trusted; refusing to write project settings"))
 		return
 	}
 	m.projectSettings = cloneSettings(settings)
@@ -1037,16 +1100,12 @@ func (m *SettingsManager) saveProjectSettings(settings *Settings) {
 	snapshot := cloneSettings(m.projectSettings)
 	modified := copyStringSet(m.modifiedProjectFields)
 	nested := copyNestedSet(m.modifiedProjectNested)
-	if err := m.persistScopedSettings(SettingsScopeProject, snapshot, modified, nested); err != nil {
-		m.recordError(SettingsScopeProject, err)
-		return
-	}
-	m.clearModifiedScope(SettingsScopeProject)
+	m.persistScoped(SettingsScopeProject, snapshot, modified, nested)
 }
 
 func (m *SettingsManager) updateProjectSettings(field string, update func(*Settings)) {
 	if !m.projectTrusted {
-		m.recordError(SettingsScopeProject, fmt.Errorf("Project is not trusted; refusing to write project settings"))
+		m.recordErrorLocked(SettingsScopeProject, fmt.Errorf("Project is not trusted; refusing to write project settings"))
 		return
 	}
 	projectSettings := cloneSettings(m.projectSettings)

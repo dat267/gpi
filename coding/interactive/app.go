@@ -744,6 +744,11 @@ func (a *App) currentRenderer() tui.TUI {
 // the footer and its data provider, the session-event subscription, the
 // renderer (with the fullscreen exit output setting) and the signal handlers.
 func (a *App) StopMode(fullscreenExitOutput string) {
+	// Settings persists run on the off-loop queue; drain them here so a clean
+	// exit cannot lose the last save (signals route through the same hook).
+	if a.Settings != nil {
+		a.Settings.FlushPersists()
+	}
 	if a.Commands == nil {
 		// Teardown before Init finished: stop the renderer only.
 		a.Lifecycle.StopInteractiveTui(fullscreenExitOutput)

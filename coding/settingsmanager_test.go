@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/dat267/pier/internal/offloop"
 )
 
 // Tests ported from packages/coding-agent/test/settings-manager.test.ts (and
@@ -563,3 +566,64 @@ func TestSettingsManagerInMemoryRoundTrip(t *testing.T) {
 }
 
 func strPtr(value string) *string { return &value }
+
+// SetX hands persistence to the off-loop queue: the calling goroutine (the UI
+// loop in interactive mode) must not wait on the storage lock, whose retries
+// can cost up to 10 x 20 ms, or on the file read and write.
+func TestSettingsSetDoesNotBlockOnTheStorageLock(t *testing.T) {
+	agentDir, projectDir := settingsDirs(t)
+	settingsPath := filepath.Join(agentDir, "settings.json")
+	writeSettingsFile(t, settingsPath, `{"theme":"light"}`)
+	// Hold the storage lock the way a concurrent writer would.
+	lock, err := acquireLockWithRetry(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock()
+
+	manager := NewSettingsManagerFromFiles(projectDir, agentDir, SettingsManagerCreateOptions{
+		PersistQueue: offloop.New(),
+	})
+	done := make(chan struct{})
+	go func() {
+		manager.SetTheme("dark")
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("SetTheme blocked on the storage lock")
+	}
+	// The queued persist fails after its retry window and the error is
+	// recorded; nothing is lost or silently swallowed.
+	manager.FlushPersists()
+	if saved := readSettingsFile(t, settingsPath); saved["theme"] != "light" {
+		t.Fatalf("theme = %#v, want the unchanged light", saved["theme"])
+	}
+	errors := manager.DrainErrors()
+	if len(errors) != 1 || errors[0].Scope != SettingsScopeGlobal {
+		t.Fatalf("errors = %+v", errors)
+	}
+}
+
+// Persistence still lands: mutators keep the in-memory view synchronous and
+// the queue persists every submission in order.
+func TestSettingsPersistLandsOffLoop(t *testing.T) {
+	agentDir, projectDir := settingsDirs(t)
+	settingsPath := filepath.Join(agentDir, "settings.json")
+	writeSettingsFile(t, settingsPath, `{"theme":"light"}`)
+
+	manager := NewSettingsManagerFromFiles(projectDir, agentDir, SettingsManagerCreateOptions{
+		PersistQueue: offloop.New(),
+	})
+	manager.SetTheme("dark")
+	manager.SetDefaultThinkingLevel("high")
+	manager.FlushPersists()
+	saved := readSettingsFile(t, settingsPath)
+	if saved["theme"] != "dark" || saved["defaultThinkingLevel"] != "high" {
+		t.Fatalf("saved = %#v", saved)
+	}
+	if manager.GetTheme() == nil || *manager.GetTheme() != "dark" {
+		t.Fatalf("in-memory theme = %v", manager.GetTheme())
+	}
+}

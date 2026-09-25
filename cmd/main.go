@@ -22,6 +22,7 @@ import (
 	"github.com/dat267/pier/ai"
 	"github.com/dat267/pier/coding"
 	"github.com/dat267/pier/coding/interactive"
+	"github.com/dat267/pier/internal/offloop"
 )
 
 // executableName returns the invoked binary name (without the .exe suffix),
@@ -257,8 +258,12 @@ func run(appName string, args *coding.Args) error {
 		return trustErr
 	}
 	coding.Time("resolveProjectTrust", coding.TimingMain)
+	// The interactive UI's event loop must never block, so the runtime manager
+	// persists settings through the off-loop queue (the bootstrap manager above
+	// has no writers). FlushPersists runs at teardown via App.StopMode.
 	settings = coding.NewSettingsManagerFromFiles(runtimeCwd, agentDir, coding.SettingsManagerCreateOptions{
 		ProjectTrusted: &trusted,
+		PersistQueue:   offloop.New(),
 	})
 	if args.UseTheme != nil {
 		settings.ApplyOverrides(&coding.Settings{Theme: args.UseTheme})
