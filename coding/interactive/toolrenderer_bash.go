@@ -44,6 +44,14 @@ type bashResultState struct {
 	countWidth  int
 	countedText string
 	totalVisual int
+
+	// expanded caches the full (expanded) output; see bashExpandedComponent.
+	expandedOutput   string
+	expandedWidth    int
+	expandedConsumed int
+	expandedComplete []string
+	expandedRendered []string
+	expandedHasCache bool
 }
 
 func rebuildBashResult(result *SortToolResultContent, options ToolRenderResultOptions, theme *Theme,
@@ -69,7 +77,7 @@ func rebuildBashResult(result *SortToolResultContent, options ToolRenderResultOp
 	}
 	if output != "" {
 		if options.Expanded {
-			children = append(children, tui.NewText("\n"+styleBashOutput(output, theme), 0, 0, nil))
+			children = append(children, &bashExpandedComponent{output: output, state: state, theme: theme})
 		} else {
 			// The collapsed preview styles and wraps only the lines it shows;
 			// styling the whole output here was the per-chunk cost.
@@ -304,6 +312,78 @@ func (c *bashPreviewComponent) Invalidate() {
 	state.countWidth = 0
 	state.countedText = ""
 	state.totalVisual = 0
+}
+
+// bashExpandedComponent renders the full (expanded) bash output. Streaming
+// appends to the output, so styling and wrapping the whole thing on every chunk
+// was O(output) per chunk — O(output²) over a stream, measured at 468 ms per
+// chunk for 20k lines, which stalled the loop. Complete lines are styled and
+// wrapped once and reused; only the current partial line is re-wrapped per
+// chunk. The output matches what tui.Text produced for the expanded result
+// (leading blank line, tab expansion, wrap, pad to width), which the exec
+// goldens pin.
+type bashExpandedComponent struct {
+	output string
+	state  *bashResultState
+	theme  *Theme
+}
+
+func (c *bashExpandedComponent) Invalidate() {
+	state := c.state
+	state.expandedHasCache = false
+	state.expandedOutput = ""
+	state.expandedWidth = 0
+	state.expandedConsumed = 0
+	state.expandedComplete = nil
+	state.expandedRendered = nil
+}
+
+func (c *bashExpandedComponent) Render(width int) []string {
+	state := c.state
+	if state.expandedHasCache && state.expandedWidth == width && state.expandedOutput == c.output {
+		return state.expandedRendered
+	}
+	// A width change or a rewritten (non-append) output discards the prefix.
+	if !state.expandedHasCache || state.expandedWidth != width ||
+		!strings.HasPrefix(c.output, state.expandedOutput) {
+		state.expandedConsumed = 0
+		state.expandedComplete = nil
+	}
+	for {
+		rest := c.output[state.expandedConsumed:]
+		nl := strings.IndexByte(rest, '\n')
+		if nl < 0 {
+			break
+		}
+		state.expandedComplete = append(state.expandedComplete, c.wrapLine(rest[:nl], width)...)
+		state.expandedConsumed += nl + 1
+	}
+	partial := c.output[state.expandedConsumed:]
+	rendered := make([]string, 0, len(state.expandedComplete)+2)
+	rendered = append(rendered, strings.Repeat(" ", width)) // the leading "\n"
+	rendered = append(rendered, state.expandedComplete...)
+	// The element after the last newline is always styled, even when empty (a
+	// trailing newline yields a styled blank line, as styleBashOutput did).
+	rendered = append(rendered, c.wrapLine(partial, width)...)
+	state.expandedOutput = c.output
+	state.expandedWidth = width
+	state.expandedRendered = rendered
+	state.expandedHasCache = true
+	return rendered
+}
+
+// wrapLine styles one logical line like styleBashOutput, expands tabs like
+// tui.Text, wraps it to width, and pads it to the full width (tui.Text padded
+// the expanded result the same way).
+func (c *bashExpandedComponent) wrapLine(line string, width int) []string {
+	styled := strings.ReplaceAll(c.theme.Fg("toolOutput", line), "\t", "   ")
+	wrapped := tui.WrapTextWithAnsi(styled, width)
+	for i, l := range wrapped {
+		if pad := width - tui.VisibleWidth(l); pad > 0 {
+			wrapped[i] = l + strings.Repeat(" ", pad)
+		}
+	}
+	return wrapped
 }
 
 // CreateShellRenderers builds the shell tool renderers (bash and powershell

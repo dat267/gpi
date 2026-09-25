@@ -197,8 +197,14 @@ var combiningMarkRanges = [][2]rune{
 	{0x1E944, 0x1E94A}, {0xE0100, 0xE01EF},
 }
 
-// isInTable reports whether r is in an inclusive range table.
+// isInTable reports whether r is in an inclusive range table. The tables are
+// sorted, so a rune below the first range is an immediate miss: this keeps the
+// common ASCII path out of the binary search (width computation is per rune,
+// and width is recomputed for the whole content on every paint).
 func isInTable(r rune, table [][2]rune) bool {
+	if len(table) > 0 && r < table[0][0] {
+		return false
+	}
 	low, high := 0, len(table)-1
 	for low <= high {
 		mid := (low + high) / 2
@@ -242,6 +248,14 @@ func isPrintableASCII(text string) bool {
 func graphemeWidth(segment string) int {
 	if segment == "\t" {
 		return 3
+	}
+	// Printable ASCII is one cell and never combining, an emoji, or wide. It is
+	// by far the most common segment, and width is recomputed for the whole
+	// content on every paint, so skip the Unicode tables for it.
+	if len(segment) == 1 {
+		if b := segment[0]; b >= 0x20 && b < 0x7F {
+			return 1
+		}
 	}
 
 	first, firstSize := utf8.DecodeRuneInString(segment)
@@ -553,6 +567,12 @@ func VisibleWidth(text string) int {
 	}
 	if strings.Contains(clean, "\x1b") {
 		clean = StripTerminalSequences(clean)
+	}
+	// Styled text whose visible content is ASCII (the common case) is one cell
+	// per byte; skip grapheme segmentation. Width is recomputed for the whole
+	// content on every paint, so this is a hot path for large tool output.
+	if isPrintableASCII(clean) {
+		return len(clean)
 	}
 	total := 0
 	for _, segment := range segmentGraphemes(clean) {

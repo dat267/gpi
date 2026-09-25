@@ -365,7 +365,20 @@ frame after a rebuild stacked that into a 100+ ms frame (caught by a SIGQUIT
 dump inside `bashPreviewComponent.Render` → `visualLineCount`). Plain ASCII
 lines now count in one allocation-free pass (`plainWrappedLineCount`), pinned to
 the generic wrapper by `TestPlainWrappedLineCountMatchesTheGenericWrapper` and
-capped by `TestBashPreviewCountIsAllocationFree`. `AppendCompaction` had the
+capped by `TestBashPreviewCountIsAllocationFree`. The **expanded** bash output
+had the same O(output²) shape: streaming recreated a `tui.Text` over the whole
+output every chunk and re-wrapped it (measured 468 ms per chunk at 20k lines).
+`bashExpandedComponent` styles and wraps each complete line once and re-wraps
+only the current partial line (`TestBashExpandedComponentMatchesReference`
+checks every prefix against the full-output reference;
+`TestBashExpandedStreamingIsLinear` bounds it). Two general width fast paths
+follow from the same profile: `isInTable` returns early for a rune below the
+first range, `graphemeWidth` returns 1 for printable ASCII, and `VisibleWidth`
+re-checks ASCII after stripping ANSI (styled tool output is ASCII underneath).
+Together the expanded 20k-line stream went 468 ms → 35 ms per frame, and the
+collapsed default stays sub-millisecond. The remaining cost is the AltScreen
+post-processing every line of the scroll content each paint (only `height` are
+visible); a viewport-first pass is the next step there. `AppendCompaction` had the
 same shape: its entry records the projected system message, and the port
 resolved that from `buildSessionContextLocked` **while holding the session
 mutex** — 247 ms on a 45 MB session, so every UI read waited. It now projects
