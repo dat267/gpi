@@ -701,6 +701,16 @@ func (m *MouseRegion) HandleMouse(event TuiMouseEvent) *TuiMouseDispatchResult {
 // Invalidate invalidates the child.
 func (m *MouseRegion) Invalidate() { m.child.Invalidate() }
 
+// childComponents exposes the wrapped child to the tree walks (the animation
+// scan): without it a component that animates inside a mouse region was never
+// visited, so its timer never armed and the value froze on screen.
+func (m *MouseRegion) childComponents() []Component {
+	if m.child == nil {
+		return nil
+	}
+	return []Component{m.child}
+}
+
 // ---- AltScreenFlashContainer ----
 
 // AltScreenFlashContainer shows transient messages composited by the

@@ -240,7 +240,13 @@ Stage 2 (rendering on the loop) has landed:
   keystroke now cost 2–3 paints, down from 63. The loop also caches the
   renderer's animation walk between paints (`RunWiring.animationScanValid`,
   dropped by `renderUI`) because the walk visits every mounted component and
-  the loop asked for it once per input event, and `VisibleWidth` short-circuits
+  the loop asked for it once per input event. That walk descends through
+  `childrenHolder` (`Container`, `Box`, and now `ScrollView`/`MouseRegion`): a
+  single-child wrapper that forgets `childComponents` hides any animator inside
+  it, which is how the elapsed-time label on a running tool froze (the
+  transcript's scroll view held its content in a field, not in the embedded
+  Container's Children, and the mouse region wrapped the result), and
+  `VisibleWidth` short-circuits
   printable-ASCII text after stripping sequences (5.0 µs → 1.0 µs, 1104 →
   324 B/op on a styled tool-output line) since styled lines never reached the
   plain-ASCII fast path. The behavior change is that input which asks for no

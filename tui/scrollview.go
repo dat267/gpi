@@ -345,6 +345,18 @@ func (s *ScrollView) Clear() {
 // Child returns the wrapped component.
 func (s *ScrollView) Child() Component { return s.child }
 
+// childComponents exposes the wrapped content to the tree walks (the animation
+// scan). ScrollView holds its one child in a field rather than in the embedded
+// Container's Children, so without this the walk stopped at the scroll view and
+// never reached an animator inside the transcript (the elapsed-time label froze
+// while a tool ran with no output).
+func (s *ScrollView) childComponents() []Component {
+	if s.child == nil {
+		return nil
+	}
+	return []Component{s.child}
+}
+
 // Render renders the child at the content width, padding a trailing column
 // when the scrollbar takes one.
 // Render renders the scrolled view, lazily expiring the transient scrollbar's
