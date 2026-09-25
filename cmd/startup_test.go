@@ -128,7 +128,7 @@ func TestInitialPromptReadsFileArguments(t *testing.T) {
 	}
 
 	args := coding.ParseArgs([]string{"@" + path, "explain this"})
-	prompt, err := initialPromptFor(args, cwd)
+	prompt, err := initialPromptFor(args, cwd, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestInitialPromptKeepsFollowUpsQueued(t *testing.T) {
 	}
 
 	args := coding.ParseArgs([]string{"@" + path, "first", "second"})
-	prompt, err := initialPromptFor(args, cwd)
+	prompt, err := initialPromptFor(args, cwd, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestInitialPromptKeepsFollowUpsQueued(t *testing.T) {
 // the first one is still the prompt and the rest follow it.
 func TestInitialPromptWithoutFileArguments(t *testing.T) {
 	args := coding.ParseArgs([]string{"hello", "again"})
-	prompt, err := initialPromptFor(args, t.TempDir())
+	prompt, err := initialPromptFor(args, t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestInitialPromptWithoutFileArguments(t *testing.T) {
 
 func TestInitialPromptReportsUnreadableFiles(t *testing.T) {
 	args := coding.ParseArgs([]string{"@" + filepath.Join(t.TempDir(), "missing.txt")})
-	if _, err := initialPromptFor(args, t.TempDir()); err == nil {
+	if _, err := initialPromptFor(args, t.TempDir(), ""); err == nil {
 		t.Error("a missing @file argument should be an error, not silence")
 	}
 }

@@ -19,16 +19,15 @@ type InitialPrompt struct {
 }
 
 // BuildInitialPrompt composes the session's first user message the way upstream
-// buildInitialMessage does: the text of any @file arguments comes first, then
-// the first positional message, concatenated with no separator so a file and
-// the question about it arrive as a single prompt. Everything after the first
-// message stays queued as separate follow-ups.
-//
-// Upstream can also take a heading from piped stdin; this build only runs the
-// interactive mode, and a piped stdin makes upstream switch to its print mode
-// instead, so there is no stdin text to fold in here.
-func BuildInitialPrompt(messages []string, fileText string, fileImages []ai.ImageContent) InitialPrompt {
-	parts := make([]string, 0, 2)
+// buildInitialMessage does: piped stdin (headless runs) first, then the text of
+// any @file arguments, then the first positional message, concatenated with no
+// separator so a file and the question about it arrive as a single prompt.
+// Everything after the first message stays queued as separate follow-ups.
+func BuildInitialPrompt(messages []string, fileText string, fileImages []ai.ImageContent, stdinContent string) InitialPrompt {
+	parts := make([]string, 0, 3)
+	if stdinContent != "" {
+		parts = append(parts, stdinContent)
+	}
 	if fileText != "" {
 		parts = append(parts, fileText)
 	}

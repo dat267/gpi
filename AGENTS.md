@@ -444,14 +444,14 @@ snapshot under and deliver outside.
 Where upstream relies on JSON/JS semantics Go has no equivalent for, or where
 upstream has a defect, the port diverges deliberately: a numbered **D-row** in a
 code comment at the point of divergence, with the reproducing scenario, and an
-entry in `docs/DIVERGENCES.md` (range **D1–D161**). Prefer a D-row over silently
+entry in `docs/DIVERGENCES.md` (range **D1–D162**). Prefer a D-row over silently
 approximating upstream.
 
 ## Out of scope (documented)
 
 Native clipboard, kitty/iterm image transport internals beyond the
-line-detection helpers, extension mechanics, the package manager, and the
-print/json/rpc modes. Mermaid rendering needs `grok-mermaid` and is inert.
+line-detection helpers, extension mechanics, the package manager, and the rpc
+mode. Mermaid rendering needs `grok-mermaid` and is inert.
 
 ## Session history (high level)
 

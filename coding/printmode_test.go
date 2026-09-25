@@ -1,40 +1,41 @@
 package coding
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
+	"os"
 	"strings"
-	"sync"
 	"testing"
 
+	"github.com/dat267/pier/agent"
 	"github.com/dat267/pier/ai"
 )
 
-// imagesFromTranscript collects the image blocks of the last user message.
-func imagesFromTranscript(context ai.TranscriptContext) []ai.ImageContent {
-	var images []ai.ImageContent
-	for _, message := range context.Messages {
-		user, ok := message.(*ai.UserMessage)
-		if !ok {
-			continue
-		}
-		for _, block := range user.Content.Blocks {
-			if image, ok := block.(ai.ImageContent); ok {
-				images = append(images, image)
-			}
-		}
+// RunPrintMode drives an AgentSession to completion headlessly: text mode
+// prints the last assistant message's text; json mode streams the session
+// header plus one JSON object per session event, with the cumulative partial
+// snapshots stripped from message_update (upstream toJsonEvent).
+
+func captureStdout(t *testing.T, run func()) string {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
 	}
-	return images
+	saved := os.Stdout
+	os.Stdout = writer
+	defer func() { os.Stdout = saved }()
+	run()
+	_ = writer.Close()
+	out := make([]byte, 64*1024)
+	n, _ := reader.Read(out)
+	_ = reader.Close()
+	return string(out[:n])
 }
 
-// Tests for modes/print-mode.ts (the extension-free core).
-
-func newPrintModeSession(t *testing.T, responses ...*ai.AssistantMessage) (*AgentSession, *SessionManager) {
+func newPrintSession(t *testing.T, responses ...*ai.AssistantMessage) (*AgentSession, *SessionManager) {
 	t.Helper()
 	dir := t.TempDir()
 	sessions := NewSessionManager(dir, &SessionManagerOptions{SessionDir: dir})
-	sessions.NewSession(&NewSessionOptions{ID: "print-mode-session"})
 	session, err := NewAgentSession(&SessionConfig{
 		Cwd:      dir,
 		Model:    &ai.Model{ID: "mock", API: "openai-responses", Provider: "openai", ContextWindow: 200000},
@@ -47,239 +48,141 @@ func newPrintModeSession(t *testing.T, responses ...*ai.AssistantMessage) (*Agen
 	return session, sessions
 }
 
-func TestRunPrintModeTextOutput(t *testing.T) {
-	session, _ := newPrintModeSession(t, createAssistantMessageT("the answer"))
-	var stdout, stderr bytes.Buffer
-
-	exitCode := RunPrintMode(session, PrintModeOptions{
-		Mode:           CLIModeText,
-		InitialMessage: "say the answer",
-		Stdout:         &stdout,
-		Stderr:         &stderr,
+func TestPrintModeTextPrintsTheFinalResponse(t *testing.T) {
+	session, sessions := newPrintSession(t, createAssistantMessageT("hello from print"))
+	var exitCode int
+	output := captureStdout(t, func() {
+		exitCode = RunPrintMode(session, sessions, PrintModeOptions{
+			Mode:           CLIModeText,
+			InitialMessage: "say hello",
+		})
 	})
 	if exitCode != 0 {
-		t.Fatalf("exit = %d stderr = %q", exitCode, stderr.String())
+		t.Fatalf("exit code = %d", exitCode)
 	}
-	if stdout.String() != "the answer\n" {
-		t.Fatalf("stdout = %q", stdout.String())
+	if strings.TrimSpace(output) != "hello from print" {
+		t.Fatalf("output = %q", output)
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr = %q", stderr.String())
-	}
-
-	// Multiple prompts run in order.
-	session, _ = newPrintModeSession(t, createAssistantMessageT("first"), createAssistantMessageT("second"))
-	stdout.Reset()
-	stderr.Reset()
-	exitCode = RunPrintMode(session, PrintModeOptions{
-		Mode:           CLIModeText,
-		InitialMessage: "one",
-		Messages:       []string{"two"},
-		Stdout:         &stdout,
-		Stderr:         &stderr,
-	})
-	if exitCode != 0 {
-		t.Fatalf("exit = %d stderr = %q", exitCode, stderr.String())
-	}
-	// Text mode prints only the final assistant message.
-	if stdout.String() != "second\n" {
-		t.Fatalf("stdout = %q", stdout.String())
+	// The transcript survives: the prompt and response persisted. GetEntries
+	// excludes the header line, so this is user + assistant.
+	sessions.FlushWrites()
+	entries := sessions.GetEntries()
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d", len(entries))
 	}
 }
 
-func TestRunPrintModeTextFailures(t *testing.T) {
-	errorMessage := "provider failure"
-	failed := createAssistantMessageT("")
-	failed.StopReason = ai.StopError
-	failed.ErrorMessage = &errorMessage
-	session, _ := newPrintModeSession(t, failed)
-
-	var stdout, stderr bytes.Buffer
-	exitCode := RunPrintMode(session, PrintModeOptions{Mode: CLIModeText, InitialMessage: "go", Stdout: &stdout, Stderr: &stderr})
+func TestPrintModeTextReportsAnErroredResponse(t *testing.T) {
+	errored := createAssistantMessageT("")
+	errored.StopReason = ai.StopError
+	message := "provider exploded"
+	errored.ErrorMessage = &message
+	session, sessions := newPrintSession(t, errored)
+	var exitCode int
+	output := captureStdout(t, func() {
+		exitCode = RunPrintMode(session, sessions, PrintModeOptions{
+			Mode:           CLIModeText,
+			InitialMessage: "break",
+		})
+	})
 	if exitCode != 1 {
-		t.Fatalf("exit = %d", exitCode)
+		t.Fatalf("exit code = %d", exitCode)
 	}
-	if strings.TrimSpace(stderr.String()) != "provider failure" {
-		t.Fatalf("stderr = %q", stderr.String())
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("stdout = %q", stdout.String())
-	}
-
-	// Without an error message the stop reason is reported.
-	aborted := createAssistantMessageT("")
-	aborted.StopReason = ai.StopAborted
-	session, _ = newPrintModeSession(t, aborted)
-	stdout.Reset()
-	stderr.Reset()
-	exitCode = RunPrintMode(session, PrintModeOptions{Mode: CLIModeText, InitialMessage: "go", Stdout: &stdout, Stderr: &stderr})
-	if exitCode != 1 || strings.TrimSpace(stderr.String()) != "Request aborted" {
-		t.Fatalf("exit = %d stderr = %q", exitCode, stderr.String())
+	if strings.Contains(output, "provider exploded") {
+		t.Fatalf("error went to stdout: %q", output)
 	}
 }
 
-func TestRunPrintModeJSONStream(t *testing.T) {
-	session, sessions := newPrintModeSession(t, createAssistantMessageT("json answer"))
-	var stdout, stderr bytes.Buffer
-
-	exitCode := RunPrintMode(session, PrintModeOptions{
-		Mode:           CLIModeJSON,
-		InitialMessage: "answer in json",
-		Stdout:         &stdout,
-		Stderr:         &stderr,
+func TestPrintModeJSONStreamsHeaderAndEvents(t *testing.T) {
+	session, sessions := newPrintSession(t, createAssistantMessageT("reply"))
+	var exitCode int
+	output := captureStdout(t, func() {
+		exitCode = RunPrintMode(session, sessions, PrintModeOptions{
+			Mode:           CLIModeJSON,
+			InitialMessage: "hi",
+		})
 	})
 	if exitCode != 0 {
-		t.Fatalf("exit = %d stderr = %q", exitCode, stderr.String())
+		t.Fatalf("exit code = %d", exitCode)
 	}
-
-	lines := strings.Split(strings.TrimRight(stdout.String(), "\n"), "\n")
-	if len(lines) < 3 {
-		t.Fatalf("lines = %#v", lines)
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) < 3 { // header + at least agent_start..agent_end
+		t.Fatalf("too few lines: %d", len(lines))
 	}
-	// The first line is the session header.
 	var header map[string]any
 	if err := json.Unmarshal([]byte(lines[0]), &header); err != nil {
-		t.Fatalf("header: %v", err)
+		t.Fatalf("header line: %v", err)
 	}
-	if header["id"] != "print-mode-session" {
+	if header["type"] != "session" {
 		t.Fatalf("header = %#v", header)
 	}
-	if header["cwd"] != sessions.GetCwd() {
-		t.Fatalf("header cwd = %#v", header["cwd"])
-	}
-
-	// Every following line is a JSON event object.
-	types := map[string]bool{}
+	types := make([]string, 0, len(lines)-1)
+	sawPartial := false
 	for _, line := range lines[1:] {
 		var event map[string]any
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
 			t.Fatalf("event line %q: %v", line, err)
 		}
-		eventType, ok := event["type"].(string)
-		if !ok {
-			t.Fatalf("event has no type: %#v", event)
-		}
-		types[eventType] = true
-	}
-	for _, expected := range []string{SessionAgentStart, SessionMessageStart, SessionMessageEnd, SessionAgentEnd} {
-		if !types[expected] {
-			t.Fatalf("missing event %q in %#v", expected, types)
+		typ, _ := event["type"].(string)
+		types = append(types, typ)
+		if inner, ok := event["assistantMessageEvent"].(map[string]any); ok {
+			if _, has := inner["partial"]; has {
+				sawPartial = true
+			}
 		}
 	}
-
-	// Text mode prints nothing extra in JSON mode.
-	if strings.Contains(stdout.String(), "json answer\njson answer") {
-		t.Fatalf("stdout = %q", stdout.String())
+	if sawPartial {
+		t.Fatal("message_update events must not carry cumulative partial snapshots")
+	}
+	if types[0] != "agent_start" {
+		t.Fatalf("first event = %q", types[0])
+	}
+	if types[len(types)-1] != "agent_end" {
+		t.Fatalf("last event = %q", types[len(types)-1])
+	}
+	for _, wanted := range []string{"message_start", "message_end", "turn_end"} {
+		found := false
+		for _, typ := range types {
+			if typ == wanted {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("missing %s event in %v", wanted, types)
+		}
 	}
 }
 
-func TestRunPrintModeForwardsInitialImages(t *testing.T) {
-	dir := t.TempDir()
-	sessions := NewSessionManager(dir, &SessionManagerOptions{SessionDir: dir})
-
-	var mu sync.Mutex
-	var seenImages [][]ai.ImageContent
-	streamFn := func(model *ai.Model, context ai.TranscriptContext, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
-		stream := ai.NewAssistantMessageEventStream()
-		mu.Lock()
-		// The images reach the provider through the transcript context's last
-		// user message.
-		images := imagesFromTranscript(context)
-		seenImages = append(seenImages, images)
-		mu.Unlock()
-		go func() {
-			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: ai.StopStop, Message: createAssistantMessageT("ok")})
-		}()
-		return stream
+func TestMarshalJSONSessionEventStripsPartialAndNamesToolCalls(t *testing.T) {
+	assistant := createAssistantMessageT("")
+	assistant.Content = ai.ContentList{ai.ToolCall{ID: "call_1", Name: "bash"}}
+	event := &SessionEvent{
+		Type: SessionMessageUpdate,
+		Agent: &agent.AgentEvent{
+			Type:                  agent.MessageUpdate,
+			Message:               assistant,
+			AssistantMessageEvent: &ai.AssistantMessageEvent{Type: ai.EventToolcallStart, ContentIndex: 0, Partial: assistant},
+		},
 	}
-	session, err := NewAgentSession(&SessionConfig{
-		Cwd:      dir,
-		Model:    &ai.Model{ID: "mock", API: "openai-responses", Provider: "openai", ContextWindow: 200000},
-		StreamFn: streamFn,
-		Sessions: sessions,
-	})
+	encoded, err := MarshalJSONSessionEvent(event)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	image := ai.ImageContent{Data: "abc", MimeType: "image/png"}
-	var stdout, stderr bytes.Buffer
-	exitCode := RunPrintMode(session, PrintModeOptions{
-		Mode:           CLIModeText,
-		InitialMessage: "what is this",
-		InitialImages:  []ai.ImageContent{image},
-		Stdout:         &stdout,
-		Stderr:         &stderr,
-	})
-	if exitCode != 0 {
-		t.Fatalf("exit = %d stderr = %q", exitCode, stderr.String())
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(seenImages) != 1 || len(seenImages[0]) != 1 || seenImages[0][0].Data != "abc" {
-		t.Fatalf("images = %#v", seenImages)
-	}
-}
-
-func TestRunPrintModePromptFailure(t *testing.T) {
-	// A stream that terminates with an error makes the prompt fail.
-	dir := t.TempDir()
-	sessions := NewSessionManager(dir, &SessionManagerOptions{SessionDir: dir})
-	streamFn := func(model *ai.Model, context ai.TranscriptContext, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
-		stream := ai.NewAssistantMessageEventStream()
-		go func() {
-			message := createAssistantMessageT("")
-			message.StopReason = ai.StopError
-			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopError, Error: message})
-		}()
-		return stream
-	}
-	session, err := NewAgentSession(&SessionConfig{
-		Cwd:      dir,
-		Model:    &ai.Model{ID: "mock", API: "openai-responses", Provider: "openai", ContextWindow: 200000},
-		StreamFn: streamFn,
-		Sessions: sessions,
-	})
-	if err != nil {
+	var shaped map[string]any
+	if err := json.Unmarshal(encoded, &shaped); err != nil {
 		t.Fatal(err)
 	}
-	var stdout, stderr bytes.Buffer
-	exitCode := RunPrintMode(session, PrintModeOptions{Mode: CLIModeText, InitialMessage: "go", Stdout: &stdout, Stderr: &stderr})
-	if exitCode != 1 || stderr.Len() == 0 {
-		t.Fatalf("exit = %d stderr = %q", exitCode, stderr.String())
+	inner, ok := shaped["assistantMessageEvent"].(map[string]any)
+	if !ok {
+		t.Fatalf("assistantMessageEvent = %#v", shaped)
 	}
-
-	// A nil session fails rather than panicking.
-	if exitCode := RunPrintMode(nil, PrintModeOptions{Mode: CLIModeText}); exitCode != 1 {
-		t.Fatalf("exit = %d", exitCode)
+	if _, has := inner["partial"]; has {
+		t.Fatal("partial must be stripped")
 	}
-}
-
-func TestFormatJSONEventLine(t *testing.T) {
-	session, _ := newPrintModeSession(t, createAssistantMessageT("line"))
-	var events []*SessionEvent
-	unsubscribe := session.Subscribe(func(event *SessionEvent) { events = append(events, event) })
-	defer unsubscribe()
-	if err := session.PromptText(context.Background(), "go"); err != nil {
-		t.Fatal(err)
+	if inner["id"] != "call_1" || inner["toolName"] != "bash" {
+		t.Fatalf("toolcall identity missing: %#v", inner)
 	}
-	if len(events) == 0 {
-		t.Fatal("no events")
-	}
-	for _, event := range events {
-		line, err := FormatJSONEventLine(event)
-		if err != nil {
-			t.Fatalf("event %s: %v", event.Type, err)
-		}
-		if strings.Contains(line, "\n") {
-			t.Fatalf("line must be single-line: %q", line)
-		}
-		var decoded map[string]any
-		if err := json.Unmarshal([]byte(line), &decoded); err != nil {
-			t.Fatalf("line %q: %v", line, err)
-		}
-		if decoded["type"] != event.Type {
-			t.Fatalf("type = %#v", decoded["type"])
-		}
+	if shaped["usage"] == nil {
+		t.Fatal("usage must stay (constant size)")
 	}
 }

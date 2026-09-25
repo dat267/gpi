@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -95,11 +96,10 @@ func Execute() {
 		fmt.Println("Exported to: " + result)
 		return
 	}
-	if args.Print || args.Mode == coding.CLIModeJSON || args.Mode == coding.CLIModeRPC {
-		fmt.Fprintln(os.Stderr, appName+": print, json and rpc modes are not supported by this build")
+	if args.Mode == coding.CLIModeRPC {
+		fmt.Fprintln(os.Stderr, appName+": rpc mode is not supported by this build")
 		os.Exit(1)
 	}
-
 	if err := run(appName, args); err != nil {
 		if !errors.Is(err, errAlreadyReported) {
 			fmt.Fprintln(os.Stderr, appName+": "+err.Error())
@@ -124,6 +124,10 @@ func applyOfflineMode(args *coding.Args) {
 func run(appName string, args *coding.Args) error {
 	ctx := context.Background()
 	applyOfflineMode(args)
+	// Print mode (single-shot): -p or --mode json. D162: upstream also
+	// auto-enters print mode when stdin or stdout is not a TTY; the port requires
+	// an explicit flag so the interactive mode is never chosen silently.
+	printMode := args.Print || args.Mode == coding.CLIModeJSON
 	// Bounds the create-time catalog refresh (upstream leaves it unbounded; the
 	// Go refresh is synchronous, so it needs a ceiling).
 	modelRefreshTimeoutMS := int64(15000)
@@ -257,7 +261,7 @@ func run(appName string, args *coding.Args) error {
 		agentDir:  agentDir,
 		override:  args.ProjectTrustOverride,
 		bootstrap: settings,
-		hasUI:     true,
+		hasUI:     !printMode,
 		prompt:    startupTrustPrompt(settings),
 	})
 	if trustErr != nil {
@@ -321,9 +325,20 @@ func run(appName string, args *coding.Args) error {
 		})
 	}
 
+	// Piped stdin becomes part of the first prompt, ahead of @file text and
+	// the first positional message (upstream readPipedStdin).
+	stdinContent := ""
+	if printMode {
+		content, _, err := readPipedStdin()
+		if err != nil {
+			return err
+		}
+		stdinContent = content
+	}
+
 	// @file arguments are read into the session's first message, so a file and
 	// the question about it arrive as one prompt.
-	initialPrompt, err := initialPromptFor(args, cwd)
+	initialPrompt, err := initialPromptFor(args, cwd, stdinContent)
 	if err != nil {
 		return err
 	}
@@ -397,6 +412,27 @@ func run(appName string, args *coding.Args) error {
 		}
 	}
 
+	if printMode {
+		mode := coding.CLIModeText
+		if args.Mode == coding.CLIModeJSON {
+			mode = coding.CLIModeJSON
+		}
+		exitCode := coding.RunPrintMode(created.Session, sessions, coding.PrintModeOptions{
+			Mode:           mode,
+			InitialMessage: initialPrompt.Message,
+			Messages:       initialPrompt.Rest,
+		})
+		// Session writes run on the off-loop queue; drain before exit so the
+		// transcript survives (upstream disposes the runtime the same way).
+		sessions.FlushWrites()
+		settings.FlushPersists()
+		coding.PrintTimings()
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
+		return nil
+	}
+
 	tuiMode := settings.GetTuiMode()
 	if args.TuiMode != nil {
 		tuiMode = *args.TuiMode
@@ -455,6 +491,23 @@ func run(appName string, args *coding.Args) error {
 	// too.
 	coding.PrintTimings()
 	return nil
+}
+
+// readPipedStdin reads all of stdin when it is piped (not a character
+// device), the port of upstream readPipedStdin.
+func readPipedStdin() (string, bool, error) {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return "", false, err
+	}
+	if info.Mode()&os.ModeCharDevice != 0 {
+		return "", false, nil
+	}
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return "", false, err
+	}
+	return string(data), true, nil
 }
 
 // applyThemeSources installs the theme discovery sources and loads the resulting
@@ -548,7 +601,7 @@ func scopedModelsFor(args *coding.Args, settings *coding.SettingsManager, runtim
 
 // initialPromptFor reads any @file arguments and composes the session's first
 // message from them and the first positional message.
-func initialPromptFor(args *coding.Args, cwd string) (coding.InitialPrompt, error) {
+func initialPromptFor(args *coding.Args, cwd string, stdinContent string) (coding.InitialPrompt, error) {
 	var fileText string
 	var fileImages []ai.ImageContent
 	if len(args.FileArgs) > 0 {
@@ -564,7 +617,7 @@ func initialPromptFor(args *coding.Args, cwd string) (coding.InitialPrompt, erro
 		}
 		fileText, fileImages = processed.Text, processed.Images
 	}
-	return coding.BuildInitialPrompt(args.Messages, fileText, fileImages), nil
+	return coding.BuildInitialPrompt(args.Messages, fileText, fileImages, stdinContent), nil
 }
 
 // resolvedSession is upstream main.ts's ResolvedSession (kind + payload).

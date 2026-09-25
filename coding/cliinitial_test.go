@@ -60,7 +60,7 @@ func TestBuildInitialPrompt(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := BuildInitialPrompt(tc.messages, tc.fileText, tc.images)
+			got := BuildInitialPrompt(tc.messages, tc.fileText, tc.images, "")
 			if got.Message != tc.want.Message {
 				t.Errorf("Message = %q, want %q", got.Message, tc.want.Message)
 			}
@@ -83,7 +83,7 @@ func TestBuildInitialPrompt(t *testing.T) {
 // keeps using args.Messages would see its first element silently disappear.
 func TestBuildInitialPromptDoesNotMutateMessages(t *testing.T) {
 	messages := []string{"first", "second"}
-	_ = BuildInitialPrompt(messages, "", nil)
+	_ = BuildInitialPrompt(messages, "", nil, "")
 	if messages[0] != "first" || len(messages) != 2 {
 		t.Errorf("messages were modified: %#v", messages)
 	}

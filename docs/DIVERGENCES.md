@@ -5,7 +5,7 @@ usually because upstream relies on a JS or Node behaviour that has no direct Go
 equivalent, or because a defect upstream is fixed here. D-row numbers live in
 code comments at the point of divergence; this file is the log, and it is
 representative: the rows below carry a written-up rationale, while the rest live
-only as the code comment that introduced them. The range is **D1–D160**.
+only as the code comment that introduced them. The range is **D1–D162**.
 
 - D30 — startup timings read `PI_TIMING` **per call** instead of once at module
   load (upstream reads the flag when the timing module is first imported), so a
@@ -506,3 +506,18 @@ only as the code comment that introduced them. The range is **D1–D160**.
   exactly when the pile grows — and never touches the file being written, another
   tool's log, or a directory whose name happens to match. `TestSweepTempOutputFiles`
   pins that, including the oldest-first order.
+
+- D162 — **print mode is entered only by an explicit flag**. Upstream's `main.ts`
+  auto-enters print mode when stdin or stdout is not a TTY, so `echo hi | pi`
+  runs headless without `-p`. The port requires `-p` or `--mode json`; without
+  one of those it runs the interactive mode (or fails to open a terminal), so a
+  non-TTY invocation is never silently answered by a single-shot run. Everything
+  else in print mode follows `print-mode.ts`: the `-p` text mode prints the final
+  assistant message's text, JSON mode streams the header followed by one line per
+  session event with the cumulative `partial` stripped from `message_update`, and
+  a prompt failure or an error/aborted stop reason goes to stderr with exit
+  code 1. The JSON header line carries the session file's own `"type":"session"`
+  discriminator (marshaled via `MarshalFileEntry`), matching upstream's
+  `JSON.stringify(sessionManager.getHeader())`. `@file` images are warned and
+  ignored (D153); extensions and the runtime-rebind plumbing upstream carries
+  are out of scope (D41).
