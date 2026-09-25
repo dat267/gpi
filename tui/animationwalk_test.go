@@ -45,3 +45,36 @@ func TestNextAnimationDescendsThroughWrappers(t *testing.T) {
 		})
 	}
 }
+
+// TestNextAnimationFindsElapsedInsideFullscreenLayout builds the real fullscreen
+// shape (layout root VStack -> transcript ScrollView -> document -> chat -> tool
+// -> content Box -> result MouseRegion -> elapsed animator) and checks the walk
+// reaches it on an AltScreen, whose mounted roots are the layout root.
+func TestNextAnimationFindsElapsedInsideFullscreenLayout(t *testing.T) {
+	elapsed := &animationProbe{}
+	result := &Container{}
+	result.AddChild(elapsed)
+	region := NewMouseRegion(result, nil)
+	box := NewBox(1, 1, nil)
+	box.AddChild(region)
+	tool := &Container{}
+	tool.AddChild(box)
+	chat := &Container{}
+	chat.AddChild(tool)
+	document := &Container{}
+	document.AddChild(chat)
+	transcript := NewScrollView(document, ScrollViewOptions{})
+	dock := NewVStack(nil, StackOptions{})
+	root := NewVStack([]Component{transcript, dock}, StackOptions{})
+
+	screen := NewAltScreen(&fakeTerminal{width: 120, height: 40}, false, "", AltScreenOptions{})
+	screen.SetLayoutRoot(root)
+
+	needs, delay := screen.NextAnimation()
+	if !needs || delay <= 0 {
+		t.Fatalf("elapsed animator not reached in the fullscreen layout: needs=%v delay=%v", needs, delay)
+	}
+	if elapsed.calls == 0 {
+		t.Fatal("AnimationFrame was never called")
+	}
+}

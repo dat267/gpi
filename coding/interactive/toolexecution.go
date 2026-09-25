@@ -3,6 +3,7 @@ package interactive
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/dat267/pier/tui"
 )
@@ -279,6 +280,18 @@ func (c *ToolExecutionComponent) RenderVersion() (uint64, bool) {
 		return 0, false
 	}
 	return c.Container.RenderVersion()
+}
+
+// AnimationFrame keeps a running tool repainting once a second, so the shell
+// elapsed label ticks. It is reported at the tool level: the animation walk
+// finds the tool as a direct chat child, so it does not depend on descending
+// through the result wrappers (content box, mouse region) to reach the elapsed
+// component.
+func (c *ToolExecutionComponent) AnimationFrame(now time.Time) (bool, time.Duration) {
+	if !c.executionStarted || !c.isPartial {
+		return false, 0
+	}
+	return true, time.Second
 }
 
 // HandleMouse forwards mouse events for the self-render shell.

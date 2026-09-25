@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dat267/pier/tui"
 )
@@ -96,5 +97,29 @@ func TestBashPreviewCountIsAllocationFree(t *testing.T) {
 	})
 	if allocs > 100 {
 		t.Fatalf("cold visual line count allocated %.0f objects for 2000 lines", allocs)
+	}
+}
+
+// TestShellElapsedRenderUpdatesAcrossCalls pins that the elapsed label changes
+// when the render chain is re-run (the value is computed at render time), so a
+// frozen label is a missing repaint, not a cached line.
+func TestShellElapsedRenderUpdatesAcrossCalls(t *testing.T) {
+	newRendererTestTheme(t)
+	state := &shellCallState{}
+	elapsed := &shellElapsedComponent{state: state, theme: ActiveTheme()}
+	result := &tui.Container{}
+	result.AddChild(elapsed)
+	region := tui.NewMouseRegion(result, nil)
+	box := tui.NewBox(1, 1, nil)
+	box.AddChild(region)
+	tool := &tui.Container{}
+	tool.AddChild(box)
+
+	state.startedAtMS = time.Now().Add(-time.Second).UnixMilli()
+	first := strings.Join(tool.Render(80), "\n")
+	state.startedAtMS = time.Now().Add(-2 * time.Second).UnixMilli()
+	second := strings.Join(tool.Render(80), "\n")
+	if first == second {
+		t.Fatalf("elapsed line did not update across renders:\n%s", first)
 	}
 }
