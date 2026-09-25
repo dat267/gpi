@@ -48,16 +48,22 @@ var (
 func pierBinary(t *testing.T) string {
 	t.Helper()
 	ptyBinaryOnce.Do(func() {
-		if env := os.Getenv("PIER_TEST_BIN"); env != "" {
-			if _, err := os.Stat(env); err == nil {
-				ptyBinaryPath, ptyBinaryErr = env, nil
-				return
-			}
+		executable := func(path string) bool {
+			info, err := os.Stat(path)
+			return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
+		}
+		// A non-executable candidate must fall through to a fresh build:
+		// `go build -o` onto an existing file preserves its mode, so a 0644
+		// bin/pier would otherwise surface as a fork/exec "permission denied"
+		// skip in every test.
+		if env := os.Getenv("PIER_TEST_BIN"); env != "" && executable(env) {
+			ptyBinaryPath, ptyBinaryErr = env, nil
+			return
 		}
 		root := findModuleRoot(t)
 		if root != "" {
 			candidate := filepath.Join(root, "bin", "pier")
-			if _, err := os.Stat(candidate); err == nil {
+			if executable(candidate) {
 				ptyBinaryPath, ptyBinaryErr = candidate, nil
 				return
 			}
@@ -77,6 +83,10 @@ func pierBinary(t *testing.T) string {
 		build.Dir = root
 		if out, err := build.CombinedOutput(); err != nil {
 			ptyBinaryErr = fmt.Errorf("build pier: %v: %s", err, out)
+			return
+		}
+		if err := os.Chmod(bin, 0o755); err != nil {
+			ptyBinaryErr = err
 			return
 		}
 		ptyBinaryPath, ptyBinaryErr = bin, nil
@@ -131,18 +141,29 @@ func startPierConfigured(t *testing.T, setup func(agentDir string), args ...stri
 		t.Skipf("pty unavailable: %v", err)
 	}
 	slaveFile := os.NewFile(uintptr(slave), "pty-slave")
+	// The master is wrapped as an os.File so teardown can set a read deadline
+	// and unblock the reader goroutine deterministically (a raw close does not
+	// interrupt an in-flight read on Linux).
+	masterFile := os.NewFile(uintptr(master), "pty-master")
 	session := &ptySession{t: t, master: master, done: make(chan struct{})}
 
-	// Teardown: kill the child, close the last slave fd so the reader sees EOF,
-	// then close the master. This keeps the reader from hanging a test that
-	// fails early.
+	// Teardown: kill the child, close the last slave fd, unblock the reader via
+	// a past master read deadline, wait for it, then close the master. Order
+	// matters: on the skip path (Start failed) there is no child and no EOF,
+	// so waiting on done before unblocking the reader deadlocked the harness.
 	t.Cleanup(func() {
 		if session.cmd != nil {
 			_ = session.cmd.Process.Kill()
 		}
 		_ = slaveFile.Close()
-		<-session.done
-		_ = unix.Close(master)
+		_ = masterFile.SetReadDeadline(time.Now().Add(-1))
+		select {
+		case <-session.done:
+		case <-time.After(2 * time.Second):
+			// The reader stays blocked; bounded so a harness bug cannot hang
+			// the test run.
+		}
+		_ = masterFile.Close()
 	})
 
 	cmd := exec.Command(bin, append([]string{"--offline"}, args...)...)
@@ -170,7 +191,7 @@ func startPierConfigured(t *testing.T, setup func(agentDir string), args ...stri
 		defer close(session.done)
 		buf := make([]byte, 65536)
 		for {
-			n, err := unix.Read(master, buf)
+			n, err := masterFile.Read(buf)
 			if n > 0 {
 				session.mu.Lock()
 				session.buf.Write(buf[:n])
