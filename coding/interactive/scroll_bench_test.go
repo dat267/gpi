@@ -48,7 +48,13 @@ func BenchmarkScrollWarmDiff(b *testing.B) {
 
 func buildScrollTranscript(b *testing.B, app *App) {
 	b.Helper()
-	for i := 0; i < benchmarkMessageCount; i++ {
+	buildScrollTranscriptN(b, app, benchmarkMessageCount)
+}
+
+// buildScrollTranscriptN appends n user/assistant message pairs.
+func buildScrollTranscriptN(tb testing.TB, app *App, n int) {
+	tb.Helper()
+	for i := 0; i < n; i++ {
 		app.Events.HandleEvent(&coding.SessionEvent{
 			Type: coding.SessionMessageStart,
 			Agent: agentEvent("message_start", &ai.UserMessage{

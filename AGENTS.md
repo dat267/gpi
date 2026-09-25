@@ -399,9 +399,18 @@ follow from the same profile: `isInTable` returns early for a rune below the
 first range, `graphemeWidth` returns 1 for printable ASCII, and `VisibleWidth`
 re-checks ASCII after stripping ANSI (styled tool output is ASCII underneath).
 Together the expanded 20k-line stream went 468 ms → 35 ms per frame, and the
-collapsed default stays sub-millisecond. The remaining cost is the AltScreen
-post-processing every line of the scroll content each paint (only `height` are
-visible); a viewport-first pass is the next step there. `AppendCompaction` had the
+collapsed default stays sub-millisecond. **The remaining frame cost is the
+change-detection walk, not the post-processing.** A paint already only fills the
+terminal height (`RenderLayoutFrame` allocates `height` lines and `paintBox`
+fills those), and a warm walk is all cache hits (Markdown reports 100% via a
+`sync/atomic` probe), but the renderer re-walks every mounted component to find
+what changed, so a warm frame is O(components). `BenchmarkTranscriptFrameScaling`
+pins the curve: ~0.16 ms at 1k components, ~0.86 ms at ~4k, ~4.5 ms at 16k. The
+next optimization is a persistent subtree cache (or a per-component dirty/version
+signal propagated on `Invalidate`) so an unchanged transcript subtree is not
+walked; the open question is making that invalidation discipline complete, since
+components currently change state (e.g. `Text.SetText`) without telling the
+parent. `AppendCompaction` had the
 same shape: its entry records the projected system message, and the port
 resolved that from `buildSessionContextLocked` **while holding the session
 mutex** — 247 ms on a 45 MB session, so every UI read waited. It now projects
