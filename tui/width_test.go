@@ -182,3 +182,67 @@ func TestWidthCacheEvictsInBatches(t *testing.T) {
 
 // widthCacheProbeNonce keeps the eviction probe's keys unique between runs.
 var widthCacheProbeNonce int
+
+// TestVisibleWidthStyledTextMatchesPlainText covers the printable-ASCII
+// short-circuit added for D164: wrapping, padding and painting measure every
+// visible line of every frame through VisibleWidth, and a styled line carries
+// escapes, so it never reached the plain-ASCII fast path and instead allocated
+// a grapheme slice and range-searched twice per character. The short-circuit
+// must not change the answer — including for wide runes and emoji sitting
+// behind escapes, which must still take the grapheme walk.
+func TestVisibleWidthStyledTextMatchesPlainText(t *testing.T) {
+	cases := []struct{ styled, plain string }{
+		{"\x1b[38;2;138;190;183mhello world\x1b[39m", "hello world"},
+		{"\x1b[48;2;40;50;40m padded \x1b[49m", " padded "},
+		{"\x1b[31ma\tb\x1b[0m", "a\tb"},
+		{"\x1b]8;;https://x\x07link\x1b]8;;\x07", "link"},
+		{"\x1b[1m日本語\x1b[22m", "日本語"},
+		{"\x1b[31mwide 日 tail\x1b[0m", "wide 日 tail"},
+		{"\x1b[31memoji 😀 tail\x1b[0m", "emoji 😀 tail"},
+		{"\x1b[31me\u0301\x1b[0m", "e\u0301"},
+	}
+	for _, testCase := range cases {
+		want := VisibleWidth(testCase.plain)
+		if got := VisibleWidth(testCase.styled); got != want {
+			t.Errorf("VisibleWidth(%q) = %d, want %d (plain %q)",
+				testCase.styled, got, want, testCase.plain)
+		}
+	}
+}
+
+// styledWidthProbeLine builds the kind of line the render pipeline measures by
+// the thousand (a styled tool-output row) with a distinct key per iteration,
+// so the width memo — 512 entries, far fewer than a real frame touches —
+// cannot answer and the measured path is the one a large transcript keeps the
+// cache in.
+func styledWidthProbeLine(index int) string {
+	return fmt.Sprintf("\x1b[38;2;138;190;183mok  github.com/dat267/pier/coding  0.12s (line %d)\x1b[39m", index)
+}
+
+// BenchmarkVisibleWidthStyledLineMiss measures the D164 short-circuit: a styled
+// line is stripped, and printable-ASCII content answers with its byte count
+// instead of a grapheme walk.
+func BenchmarkVisibleWidthStyledLineMiss(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		VisibleWidth(styledWidthProbeLine(i))
+	}
+}
+
+// BenchmarkVisibleWidthStyledLineGraphemeWalk is the same line measured through
+// the walk the short-circuit replaces (segmentGraphemes allocates one string
+// header per byte, graphemeWidth decodes and range-searches per character). It
+// skips the memo, so it understates the old cost rather than overstating it.
+func BenchmarkVisibleWidthStyledLineGraphemeWalk(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		clean := StripTerminalSequences(styledWidthProbeLine(i))
+		total := 0
+		for _, segment := range segmentGraphemes(clean) {
+			total += graphemeWidth(segment)
+		}
+		if total == 0 {
+			b.Fatal("probe line measured zero wide")
+		}
+	}
+}

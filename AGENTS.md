@@ -221,8 +221,29 @@ Stage 2 (rendering on the loop) has landed:
 - **D144**: the interactive renderer is caller-driven (the loop owns the frame
   schedule) where upstream schedules its own throttled frames. The loop keeps
   upstream's 16 ms frame throttle for coalesced render ticks, so a streaming
-  delta burst cannot paint back-to-back; input, resize and animation paints
-  stay immediate.
+  delta burst cannot paint back-to-back; resize and animation paints stay
+  immediate.
+- **D164 input does not paint by default.** The terminal input arms paint only
+  when the dispatch queued a render request (`RunWiring.paintIfRequested`,
+  which consumes the coalesced tick the request left) and first drain every
+  raw chunk already queued, so one input burst is one paint. Fullscreen mode
+  enables `?1003h`, so a bare pointer movement arrives as an event per pixel,
+  and one frame is O(the whole transcript): painting per chunk spent the loop's
+  entire budget on full repaints. Measured on the port: 60 mouse moves plus a
+  keystroke now cost 2–3 paints, down from 63. The loop also caches the
+  renderer's animation walk between paints (`RunWiring.animationScanValid`,
+  dropped by `renderUI`) because the walk visits every mounted component and
+  the loop asked for it once per input event, and `VisibleWidth` short-circuits
+  printable-ASCII text after stripping sequences (5.0 µs → 1.0 µs, 1104 →
+  324 B/op on a styled tool-output line) since styled lines never reached the
+  plain-ASCII fast path. The behavior change is that input which asks for no
+  paint is not painted; the tui renderer's own contract is that components call
+  `RequestRender`, and every keyboard path signals one in
+  `Renderer.HandleTerminalInput`, so only events that changed nothing skip a
+  frame. Tests: `TestMouseMotionBurstDoesNotRepaint`,
+  `TestAnimationScanCacheIsDroppedByAPaint`,
+  `TestAltScreenMouseMoveRequestsNoRender`,
+  `TestVisibleWidthStyledTextMatchesPlainText`.
 - **D163 low bandwidth over SSH.** Styled rows carry trailing padding to the
   viewport width; over SSH those cells are bytes on the wire (one keystroke
   measured 127 bytes, ~77 of them padding). When `SSH_CONNECTION`/`SSH_TTY` is
