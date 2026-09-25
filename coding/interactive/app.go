@@ -283,6 +283,10 @@ func NewApp(options AppOptions) *App {
 		ShowError:           func(message string) { app.showError(message) },
 		OnChanged:           func() { app.updateEditorBorderColor() },
 		InitialThemeSetting: options.InitialThemeSetting,
+		// The COLORFGBG fallback for terminals that do not answer OSC 11
+		// (upstream detectTerminalBackgroundFromEnv). The live probe is the
+		// deferred OSC 11 request from RunWiring.OnStarted (D165).
+		Env: os.Getenv,
 		// Theme loads read files from disk; the selector paths that reach the
 		// controller run on the UI loop, so they load off it.
 		Marshal:    func(fn func()) { app.UI.Post(fn) },
