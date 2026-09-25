@@ -88,10 +88,12 @@ runs each test twice (`-p 8` overlaps the test-binary builds; the whole gate is
   message pairs discriminate as well as a few thousand; at 60k appends one test
   cost 44 s under `-race` on its own. Do not grow a fixture back without
   re-measuring the package.
-- Avoid `testing.Benchmark` in tests: it has a hard one-second floor per
-  measurement, so two scaling tests paid ~5 s of pure timer wait. Use
-  `allocatedBytesPerRun` (`coding/allocmeasure_test.go`) for bytes and
-  `testing.AllocsPerRun` for counts.
+- Avoid `testing.Benchmark` *calls* in ordinary tests: `testing.Benchmark`
+  has a hard one-second floor per measurement, so two scaling tests paid ~5 s
+  of pure timer wait. Use `allocatedBytesPerRun` (`coding/allocmeasure_test.go`)
+  for bytes and `testing.AllocsPerRun` for counts. Proper `func BenchmarkX`
+  declarations are fine — they only run under `-bench` and never execute in
+  the plain test run (`coding/session_load_bench_test.go`).
 - Never sleep a spec-mandated interval in a test. RFC 8628's device-code poll
   interval is a whole second, which made the OAuth tests spend ~25 s asleep;
   they swap `deviceCodeSleep` (`ai/oauthpkce.go`) for a millisecond instead.
