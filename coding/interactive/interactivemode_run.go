@@ -68,6 +68,10 @@ type RunWiring struct {
 	// (test seam: partial events are otherwise superseded no-ops without a
 	// streaming assistant component).
 	OnPartialEventApplied func()
+	// OnStarted runs once after the terminal is started (raw mode + input reader
+	// live). Terminal probes that write a query belong here: a query written
+	// before raw mode is echoed back into the input stream.
+	OnStarted func()
 	// StallLogPath, when non-empty, receives a record with a goroutine dump for
 	// any UI-loop phase that exceeds StallLogThreshold. It exists to diagnose
 	// stutters that do not reproduce elsewhere: the threshold defaults to 100ms
@@ -329,6 +333,10 @@ func (w *RunWiring) Init(ctx context.Context, scopedModels []coding.ScopedModel,
 		}
 	}
 	w.requestRender()
+
+	if w.OnStarted != nil {
+		w.OnStarted()
+	}
 
 	// Enable the remaining handlers after the managed-tool setup.
 	if w.SetupKeyHandlers != nil {
@@ -1046,6 +1054,7 @@ func newRunWiring(app *App) *RunWiring {
 			app.Startup.MaybeWarnAboutAnthropicSubscriptionAuth(ctx, app.Session.Model())
 		},
 		RequestRender: func() { app.UI.RequestRender(false) },
+		OnStarted:     func() { app.Theme.ProbeTerminalBackground() },
 	}
 }
 

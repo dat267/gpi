@@ -451,6 +451,7 @@ func NewApp(options AppOptions) *App {
 		OnUncaughtException: options.OnUncaughtException,
 
 		DisableThemeAutoSync:    func() { StopThemeWatcher() },
+		OnTuiModeSwitched:       func() { app.Theme.RebindTUI() },
 		RecordCrash:             func(kind string, err error) bool { return app.Trust.RecordCrash(kind, err) },
 		CrashReportInstructions: func() string { return app.Trust.CrashReportInstructions() }, // Upstream prints "To resume this session: pi --session …" after the
 		// interactive shutdown (interactive-mode.ts shutdown(), chalk.dim
@@ -966,6 +967,23 @@ func (t themeUIAdapter) OnTerminalColorSchemeChange(listener func(theme Terminal
 		})
 	}
 	return func() {}
+}
+
+// OnTerminalBackgroundColorChange forwards OSC 11 replies.
+func (t themeUIAdapter) OnTerminalBackgroundColorChange(listener func(tui.RgbColor)) func() {
+	if renderer, ok := t.ui.(interface {
+		OnTerminalBackgroundColorChange(func(tui.RgbColor)) func()
+	}); ok {
+		return renderer.OnTerminalBackgroundColorChange(listener)
+	}
+	return func() {}
+}
+
+// RequestTerminalBackgroundColor forwards the OSC 11 probe.
+func (t themeUIAdapter) RequestTerminalBackgroundColor() {
+	if renderer, ok := t.ui.(interface{ RequestTerminalBackgroundColor() }); ok {
+		renderer.RequestTerminalBackgroundColor()
+	}
 }
 
 // themeSettingsAdapter adapts *coding.SettingsManager to ThemeSettings.

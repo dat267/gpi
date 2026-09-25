@@ -1,6 +1,9 @@
 package interactive
 
-import "github.com/dat267/pier/internal/offloop"
+import (
+	"github.com/dat267/pier/internal/offloop"
+	"github.com/dat267/pier/tui"
+)
 
 // Port of src/modes/interactive/theme/theme-controller.ts: the settings-driven
 // theme controller with terminal auto-sync.
@@ -11,6 +14,8 @@ type ThemeControllerUI interface {
 	RequestRender()
 	SetTerminalColorSchemeNotifications(enabled bool)
 	OnTerminalColorSchemeChange(listener func(theme TerminalTheme)) (unsubscribe func())
+	OnTerminalBackgroundColorChange(listener func(color tui.RgbColor)) (unsubscribe func())
+	RequestTerminalBackgroundColor()
 }
 
 // ThemeSettings is the settings surface the controller needs.
@@ -64,6 +69,8 @@ type InteractiveThemeController struct {
 	activeThemeName     string
 	autoSyncEnabled     bool
 	unsubscribe         func()
+	unsubscribeBg       func()
+	probeStarted        bool
 	marshal             func(func())
 	themeQueue          *offloop.Queue
 }
@@ -96,6 +103,7 @@ func NewInteractiveThemeController(options ThemeControllerOptions) *InteractiveT
 	}
 	InitTheme(controller.activeThemeName, true)
 	controller.bindTerminalColorSchemeListener()
+	controller.bindTerminalBackgroundListener()
 	return controller
 }
 
@@ -105,10 +113,33 @@ func (c *InteractiveThemeController) RebindTUI() {
 		c.unsubscribe()
 		c.unsubscribe = nil
 	}
+	if c.unsubscribeBg != nil {
+		c.unsubscribeBg()
+		c.unsubscribeBg = nil
+	}
+	c.probeStarted = false
 	c.bindTerminalColorSchemeListener()
+	c.bindTerminalBackgroundListener()
 	if c.ui != nil {
 		c.ui.SetTerminalColorSchemeNotifications(c.autoSyncEnabled)
 	}
+	// The new renderer never received the OSC 11 probe; re-request it (the
+	// reply listener is rebound above).
+	c.ProbeTerminalBackground()
+}
+
+// ProbeTerminalBackground writes one OSC 11 query and returns. The reply is
+// applied by the background listener on the UI loop; a terminal that does not
+// answer simply leaves the environment fallback in place. Callers must invoke
+// it only after the terminal is in raw mode and the input reader is live: the
+// reply is delivered through the ordinary input path, and a query written before
+// raw mode is echoed back into the input stream.
+func (c *InteractiveThemeController) ProbeTerminalBackground() {
+	if c.ui == nil || c.probeStarted || !c.autoSyncEnabled {
+		return
+	}
+	c.probeStarted = true
+	c.ui.RequestTerminalBackgroundColor()
 }
 
 // ApplyFromSettings applies the theme from the current settings.
@@ -270,6 +301,10 @@ func (c *InteractiveThemeController) Dispose() {
 		c.unsubscribe()
 		c.unsubscribe = nil
 	}
+	if c.unsubscribeBg != nil {
+		c.unsubscribeBg()
+		c.unsubscribeBg = nil
+	}
 }
 
 // GetTerminalTheme returns the detected terminal theme.
@@ -330,6 +365,17 @@ func (c *InteractiveThemeController) bindTerminalColorSchemeListener() {
 	}
 	c.unsubscribe = c.ui.OnTerminalColorSchemeChange(func(terminalTheme TerminalTheme) {
 		c.applyTerminalTheme(terminalTheme)
+	})
+}
+
+// bindTerminalBackgroundListener applies an OSC 11 reply on the UI loop. The
+// reply is converted to a light/dark preference by luminance.
+func (c *InteractiveThemeController) bindTerminalBackgroundListener() {
+	if c.ui == nil {
+		return
+	}
+	c.unsubscribeBg = c.ui.OnTerminalBackgroundColorChange(func(color tui.RgbColor) {
+		c.applyTerminalTheme(GetThemeForRgbColor(RgbColor{R: color.R, G: color.G, B: color.B}))
 	})
 }
 

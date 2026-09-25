@@ -143,6 +143,7 @@ type Renderer struct {
 	postMu  sync.Mutex
 	posted  []func()
 	stopped atomic.Bool
+	started atomic.Bool
 
 	renderRequested bool
 	fullRedrawCount int
@@ -153,6 +154,8 @@ type Renderer struct {
 	colorSchemeListeners []colorSchemeListener
 	colorSchemeNotifyOn  atomic.Bool
 	nextColorSchemeID    int
+	backgroundListeners  []backgroundListener
+	nextBackgroundID     int
 
 	overlayStack           []*overlayEntry
 	renderedOverlayLayouts []renderedOverlayLayout
@@ -289,6 +292,7 @@ func nextAnimationFor(components []Component, now time.Time) (bool, time.Duratio
 // Start starts the terminal and requests the first render.
 func (t *Renderer) Start() {
 	t.stopped.Store(false)
+	t.started.Store(true)
 	loopInput, loopResize := t.loopInput, t.loopResize
 	if t.OnBeforeTerminalStart != nil {
 		t.OnBeforeTerminalStart()
@@ -298,6 +302,12 @@ func (t *Renderer) Start() {
 		t.Terminal.Start(loopInput, loopResize)
 	} else {
 		t.Terminal.Start(func(data string) { t.HandleTerminalInput(data) }, func() { t.RequestRender(false) })
+	}
+	// A color-scheme notification toggle requested before Start only flips the
+	// flag; replay it now, after the terminal is in raw mode, so the mode sequence
+	// is not echoed into the input stream.
+	if t.colorSchemeNotifyOn.Load() {
+		t.Terminal.Write("\x1b[?2031h")
 	}
 	if t.OnAfterTerminalStart != nil {
 		t.OnAfterTerminalStart()
@@ -309,7 +319,9 @@ func (t *Renderer) Start() {
 // Stop stops the renderer and restores the terminal.
 func (t *Renderer) Stop(options TuiStopOptions) {
 	t.stopped.Store(true)
-	if t.colorSchemeNotifyOn.Load() {
+	started := t.started.Load()
+	t.started.Store(false)
+	if started && t.colorSchemeNotifyOn.Load() {
 		t.colorSchemeNotifyOn.Store(false)
 		t.Terminal.Write("\x1b[?2031l")
 	}
@@ -499,6 +511,40 @@ type colorSchemeListener struct {
 	listener func(TerminalColorScheme)
 }
 
+type backgroundListener struct {
+	id       int
+	listener func(RgbColor)
+}
+
+// OnTerminalBackgroundColorChange subscribes to OSC 11 background-color
+// replies. The listener runs on the owner loop (input dispatch); registration
+// happens during setup/teardown only, so the registry needs no lock.
+func (t *Renderer) OnTerminalBackgroundColorChange(listener func(RgbColor)) func() {
+	t.nextBackgroundID++
+	id := t.nextBackgroundID
+	t.backgroundListeners = append(t.backgroundListeners, backgroundListener{id: id, listener: listener})
+	return func() {
+		filtered := t.backgroundListeners[:0]
+		for _, entry := range t.backgroundListeners {
+			if entry.id != id {
+				filtered = append(filtered, entry)
+			}
+		}
+		t.backgroundListeners = filtered
+	}
+}
+
+// RequestTerminalBackgroundColor writes the OSC 11 query. It never blocks: the
+// reply is delivered to the OnTerminalBackgroundColorChange listeners on the
+// owner loop. Callers must invoke it only after the terminal is in raw mode and
+// the input reader is live, so the reply is dispatched rather than echoed (D165).
+func (t *Renderer) RequestTerminalBackgroundColor() {
+	if t.Terminal == nil || t.stopped.Load() {
+		return
+	}
+	t.Terminal.Write("\x1b]11;?\x07")
+}
+
 // OnTerminalColorSchemeChange subscribes to terminal color-scheme reports.
 func (t *Renderer) OnTerminalColorSchemeChange(listener func(TerminalColorScheme)) func() {
 	t.nextColorSchemeID++
@@ -521,6 +567,12 @@ func (t *Renderer) SetTerminalColorSchemeNotifications(enabled bool) {
 		return
 	}
 	t.colorSchemeNotifyOn.Store(enabled)
+	// Before the terminal is started the request only flips the flag: Start
+	// replays it once raw mode is active, so the sequence is never echoed into
+	// the input stream (the SSH-launch freeze).
+	if !t.started.Load() {
+		return
+	}
 	stopped := t.stopped.Load()
 	terminal := t.Terminal
 	if !stopped && terminal != nil {
@@ -585,27 +637,36 @@ func (t *Renderer) QueryTerminalColorScheme(timeoutMS int) (TerminalColorScheme,
 	}
 }
 
-// consumeOSC11BackgroundResponse resolves the oldest pending OSC 11 query.
+// consumeOSC11BackgroundResponse resolves the oldest pending OSC 11 query and
+// notifies the background listeners. An OSC 11 reply is never user input, so it
+// is consumed even when no query is pending; otherwise a proactive probe's reply
+// would leak into the editor.
 func (t *Renderer) consumeOSC11BackgroundResponse(data string) bool {
-	if t.pendingOSC11Replies <= 0 {
-		return false
-	}
 	if !IsOsc11BackgroundColorResponse(data) {
 		return false
 	}
 	color, ok := ParseOsc11BackgroundColor(data)
 
-	t.pendingOSC11Replies--
-	var query *pendingOSC11Query
-	if len(t.pendingOSC11Queries) > 0 {
-		query = t.pendingOSC11Queries[0]
-		t.pendingOSC11Queries = t.pendingOSC11Queries[1:]
+	if t.pendingOSC11Replies > 0 {
+		t.pendingOSC11Replies--
+		var query *pendingOSC11Query
+		if len(t.pendingOSC11Queries) > 0 {
+			query = t.pendingOSC11Queries[0]
+			t.pendingOSC11Queries = t.pendingOSC11Queries[1:]
+		}
+		if query != nil && !query.settled {
+			query.settled = true
+			select {
+			case query.result <- osc11Result{color: color, ok: ok}:
+			default:
+			}
+		}
 	}
-	if query != nil && !query.settled {
-		query.settled = true
-		select {
-		case query.result <- osc11Result{color: color, ok: ok}:
-		default:
+
+	if ok && len(t.backgroundListeners) > 0 {
+		listeners := append([]backgroundListener{}, t.backgroundListeners...)
+		for _, entry := range listeners {
+			entry.listener(color)
 		}
 	}
 	return true

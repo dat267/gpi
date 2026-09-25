@@ -559,3 +559,22 @@ only as the code comment that introduced them. The range is **D1–D164**.
   324 B/op on a styled tool-output line). Tests:
   `TestMouseMotionBurstDoesNotRepaint`, `TestAnimationScanCacheIsDroppedByAPaint`,
   `TestAltScreenMouseMoveRequestsNoRender`, `TestVisibleWidthStyledTextMatchesPlainText`.
+- D165 — **the terminal background probe is listener-driven, not a blocking
+  query**. Upstream detects the terminal's light/dark preference by querying it
+  synchronously at theme-apply time (`queryTerminalBackgroundColor` waits on a
+  channel, `setInterval`-free). The port cannot: the UI loop is the only
+  dispatcher of terminal replies (`Renderer.HandleTerminalInput`), so a query
+  called on the loop can never receive its own reply and always times out, and a
+  query written before the pty is in raw mode is echoed back into the input
+  stream (this is what froze the TUI over SSH when the feature was first
+  attempted). The port instead writes a single OSC 11 query
+  (`Renderer.RequestTerminalBackgroundColor`, `ESC ] 11 ; ? BEL`) after the
+  terminal is started and returns immediately; the reply is consumed in
+  `HandleTerminalInput`, classified by luminance (`GetThemeForRgbColor`), and
+  applied by a `OnTerminalBackgroundColorChange` listener on the loop. The
+  `CSI ? 2031` color-scheme notification toggle is likewise deferred: a request
+  before `Start` only flips the flag and `Start` replays it, so the mode sequence
+  is never echoed. `App.Theme.ProbeTerminalBackground` is invoked from
+  `RunWiring.OnStarted` (after `UI.Start`, i.e. raw mode + live reader) and
+  re-armed on a renderer swap (`RebindTUI`). A terminal that does not answer
+  leaves the `COLORFGBG`/fallback theme in place; nothing blocks on the reply.

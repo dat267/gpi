@@ -149,6 +149,41 @@ func (r *TuiReference) NextAnimation() (bool, time.Duration) { return r.get().Ne
 // RequestRender requests a render.
 func (r *TuiReference) RequestRender(force bool) { r.get().RequestRender(force) }
 
+// SetTerminalColorSchemeNotifications forwards to the active renderer.
+func (r *TuiReference) SetTerminalColorSchemeNotifications(enabled bool) {
+	if q, ok := r.get().(interface{ SetTerminalColorSchemeNotifications(bool) }); ok {
+		q.SetTerminalColorSchemeNotifications(enabled)
+	}
+}
+
+// OnTerminalColorSchemeChange forwards to the active renderer.
+func (r *TuiReference) OnTerminalColorSchemeChange(listener func(TerminalColorScheme)) func() {
+	if q, ok := r.get().(interface {
+		OnTerminalColorSchemeChange(func(TerminalColorScheme)) func()
+	}); ok {
+		return q.OnTerminalColorSchemeChange(listener)
+	}
+	return func() {}
+}
+
+// OnTerminalBackgroundColorChange forwards to the active renderer.
+func (r *TuiReference) OnTerminalBackgroundColorChange(listener func(RgbColor)) func() {
+	if q, ok := r.get().(interface {
+		OnTerminalBackgroundColorChange(func(RgbColor)) func()
+	}); ok {
+		return q.OnTerminalBackgroundColorChange(listener)
+	}
+	return func() {}
+}
+
+// RequestTerminalBackgroundColor forwards the OSC 11 probe to the active
+// renderer. The reply is delivered to OnTerminalBackgroundColorChange listeners.
+func (r *TuiReference) RequestTerminalBackgroundColor() {
+	if q, ok := r.get().(interface{ RequestTerminalBackgroundColor() }); ok {
+		q.RequestTerminalBackgroundColor()
+	}
+}
+
 // SetFocus sets the focused component.
 func (r *TuiReference) SetFocus(component Component) { r.get().SetFocus(component) }
 

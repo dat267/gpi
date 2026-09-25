@@ -109,6 +109,9 @@ func TestRendererTerminalQueries(t *testing.T) {
 	}
 
 	// Notifications toggle writes the mode sequences and Stop disables them.
+	// The renderer must be started: before Start the toggle only flips the flag
+	// (Start replays it once raw mode is active).
+	renderer.Start()
 	renderer.SetTerminalColorSchemeNotifications(true)
 	renderer.SetTerminalColorSchemeNotifications(false)
 	renderer.SetTerminalColorSchemeNotifications(true)
@@ -134,4 +137,66 @@ func waitForWrite(t *testing.T, terminal *fakeTerminal, substring string) {
 
 func timeSleepMicro() {
 	time.Sleep(50 * time.Microsecond)
+}
+
+// TestRendererBackgroundProbeIsNonBlocking covers the listener-driven OSC 11
+// probe: RequestTerminalBackgroundColor returns immediately and the reply is
+// delivered to listeners with no pending blocking query. A reply must never leak
+// to the input listeners (which would type garbage into the editor).
+func TestRendererBackgroundProbeIsNonBlocking(t *testing.T) {
+	terminal := &fakeTerminal{width: 80, height: 24}
+	renderer := NewRenderer(terminal)
+	got := make(chan RgbColor, 1)
+	unsubscribe := renderer.OnTerminalBackgroundColorChange(func(color RgbColor) { got <- color })
+
+	renderer.RequestTerminalBackgroundColor()
+	waitForWrite(t, terminal, "\x1b]11;?")
+	renderer.HandleTerminalInput("\x1b]11;#112233\x07")
+	select {
+	case color := <-got:
+		if color.R != 0x11 || color.G != 0x22 || color.B != 0x33 {
+			t.Fatalf("color = %+v", color)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("background listener not notified")
+	}
+
+	var leaked []string
+	renderer.AddInputListener(func(data string) TuiInputListenerResult {
+		leaked = append(leaked, data)
+		return TuiInputListenerResult{}
+	})
+	renderer.HandleTerminalInput("\x1b]11;#445566\x07")
+	if len(leaked) != 0 {
+		t.Fatalf("OSC 11 reply leaked to input listeners: %v", leaked)
+	}
+	select {
+	case <-got:
+	default:
+	}
+
+	unsubscribe()
+	renderer.HandleTerminalInput("\x1b]11;#778899\x07")
+	select {
+	case color := <-got:
+		t.Fatalf("listener called after unsubscribe: %+v", color)
+	default:
+	}
+}
+
+// TestRendererDefersColorSchemeNotificationsUntilStart pins that a notification
+// toggle requested before the terminal starts is not written (it would be echoed
+// into the input stream over SSH) and is replayed by Start.
+func TestRendererDefersColorSchemeNotificationsUntilStart(t *testing.T) {
+	terminal := &fakeTerminal{width: 80, height: 24}
+	renderer := NewRenderer(terminal)
+	renderer.SetTerminalColorSchemeNotifications(true)
+	if terminal.hasWrite("\x1b[?2031h") {
+		t.Fatal("notification written before Start")
+	}
+	renderer.Start()
+	if !terminal.hasWrite("\x1b[?2031h") {
+		t.Fatal("notification not replayed by Start")
+	}
+	renderer.Stop(TuiStopOptions{})
 }

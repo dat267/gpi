@@ -266,6 +266,19 @@ Stage 2 (rendering on the loop) has landed:
   did. The visible result is identical; the keystroke frame drops to 48 bytes
   (−62%). Default off, so the upstream-parity goldens keep asserting the padded
   bytes. `ConfigureLowBandwidth` (called from `cmd`) is the boot hook.
+- **D165 terminal theme detection is a deferred listener, not a query.** The UI
+  loop is the only dispatcher of terminal replies, so upstream's synchronous
+  `queryTerminalBackgroundColor` can never complete on the loop (it always times
+  out), and a query written before raw mode is echoed into the input stream (the
+  SSH freeze that killed the first attempt). The port writes one OSC 11 query
+  (`Renderer.RequestTerminalBackgroundColor`) from `RunWiring.OnStarted`, after
+  `UI.Start`, and returns; the reply is consumed by `HandleTerminalInput`,
+  classified by luminance, and applied by an `OnTerminalBackgroundColorChange`
+  listener bound in `NewInteractiveThemeController` and re-bound on a renderer
+  swap (`RebindTUI`, called from `LifecycleOptions.OnTuiModeSwitched`). The
+  `CSI ? 2031` notification toggle is deferred the same way: before `Start` it
+  only flips a flag, and `Start` replays it. A terminal that does not answer
+  keeps the `COLORFGBG`/fallback theme.
 
 - Stage 1 also fixed the read side of `coding.SessionManager`
   (`GetEntries`, `BuildContextEntriesForLeaf`, `BuildSessionContext` now take

@@ -295,6 +295,8 @@ type fakeThemeUI struct {
 	renders       int
 	notifications bool
 	listener      func(TerminalTheme)
+	bgListener    func(tui.RgbColor)
+	bgProbes      int
 }
 
 func (f *fakeThemeUI) Invalidate() {
@@ -320,6 +322,28 @@ func (f *fakeThemeUI) OnTerminalColorSchemeChange(listener func(theme TerminalTh
 	defer f.mu.Unlock()
 	f.listener = listener
 	return func() {}
+}
+
+func (f *fakeThemeUI) OnTerminalBackgroundColorChange(listener func(color tui.RgbColor)) func() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.bgListener = listener
+	return func() {}
+}
+
+func (f *fakeThemeUI) RequestTerminalBackgroundColor() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.bgProbes++
+}
+
+func (f *fakeThemeUI) emitBackground(color tui.RgbColor) {
+	f.mu.Lock()
+	listener := f.bgListener
+	f.mu.Unlock()
+	if listener != nil {
+		listener(color)
+	}
 }
 
 func (f *fakeThemeUI) emit(theme TerminalTheme) {
@@ -417,6 +441,24 @@ func TestThemeControllerLifecycle(t *testing.T) {
 	ui.mu.Unlock()
 	if !notifications {
 		t.Fatal("auto-sync notifications not enabled")
+	}
+
+	// The proactive OSC 11 probe runs once and its reply drives auto-sync.
+	controller.ProbeTerminalBackground()
+	controller.ProbeTerminalBackground()
+	ui.mu.Lock()
+	probes := ui.bgProbes
+	ui.mu.Unlock()
+	if probes != 1 {
+		t.Fatalf("background probes = %d", probes)
+	}
+	ui.emitBackground(tui.RgbColor{R: 255, G: 255, B: 255})
+	if controller.ActiveThemeName() != "light" {
+		t.Fatalf("auto background light = %q", controller.ActiveThemeName())
+	}
+	ui.emitBackground(tui.RgbColor{R: 0, G: 0, B: 0})
+	if controller.ActiveThemeName() != "dark" {
+		t.Fatalf("auto background dark = %q", controller.ActiveThemeName())
 	}
 
 	// Preview switches without persisting.
@@ -551,5 +593,29 @@ func TestThemeSettingAppliesOnTheQueue(t *testing.T) {
 	controller.ThemeQueueFlushForTest()
 	if CurrentThemeName() != "light" {
 		t.Fatalf("preview = %q", CurrentThemeName())
+	}
+}
+
+// TestThemeControllerDoesNotProbeWithoutAutoSync pins that the OSC 11 probe is
+// only written when an auto (light/dark) theme is active: a fixed theme has no
+// use for the terminal background.
+func TestThemeControllerDoesNotProbeWithoutAutoSync(t *testing.T) {
+	dir := t.TempDir()
+	SetCustomThemesDir(dir)
+	SetRegisteredThemes(nil)
+
+	ui := &fakeThemeUI{}
+	controller := NewInteractiveThemeController(ThemeControllerOptions{
+		UI:        ui,
+		TimeoutMS: 1,
+		Env:       func(string) string { return "" },
+	})
+	controller.SetThemeName("dark", false)
+	controller.ProbeTerminalBackground()
+	ui.mu.Lock()
+	probes := ui.bgProbes
+	ui.mu.Unlock()
+	if probes != 0 {
+		t.Fatalf("probed with auto-sync off: %d", probes)
 	}
 }
