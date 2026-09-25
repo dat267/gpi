@@ -183,7 +183,10 @@ Stage 3 (input and signals on the loop) has landed:
   so no caller blocks. Windows Terminal stops draining the pty while a mouse
   drag-selection is active, and a synchronous write parked the UI loop for the
   whole duration of the drag; `Stop` flushes the queue before restoring the
-  terminal.
+  terminal. The renderer brackets each paint (`BeginFrame`/`EndFrame`), so a
+  frame still queued behind the pause is replaced by the newer one instead of
+  piling up (the backlog the terminal would otherwise ingest all at once on
+  release).
 - The `DrainInput` last-input tracking is an atomic stamp written by the reader
   instead of an `OnData` swap from another goroutine (one lock retired).
 - **`/compact` no longer blocks the UI**: the command is split into

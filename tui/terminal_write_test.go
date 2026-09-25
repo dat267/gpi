@@ -89,3 +89,79 @@ func TestProcessTerminalFlushWaitsForAPausedWriter(t *testing.T) {
 		t.Fatal("flushWrites did not return after the writer resumed")
 	}
 }
+
+// A frame is a whole renderer paint. While a terminal is paused, a newer frame
+// must replace an earlier queued one instead of piling up behind it — that
+// backlog is what the terminal has to ingest all at once on release.
+
+func TestProcessTerminalCoalescesQueuedFrames(t *testing.T) {
+	terminal := NewProcessTerminal(nil, nil)
+	release := make(chan struct{})
+	started := make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	var got strings.Builder
+	terminal.writeFn = func(data string) {
+		once.Do(func() { close(started) })
+		<-release
+		mu.Lock()
+		got.WriteString(data)
+		mu.Unlock()
+	}
+
+	terminal.Write("setup") // durable; the writer takes it and blocks
+	<-started
+
+	terminal.BeginFrame()
+	terminal.Write("frame-A")
+	terminal.EndFrame()
+	terminal.BeginFrame()
+	terminal.Write("frame-B")
+	terminal.EndFrame()
+
+	close(release)
+	terminal.flushWrites()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if got.String() != "setupframe-B" {
+		t.Fatalf("got %q, want %q (frame-A must be dropped)", got.String(), "setupframe-B")
+	}
+}
+
+func TestProcessTerminalFrameCoalescingKeepsDurableWrites(t *testing.T) {
+	terminal := NewProcessTerminal(nil, nil)
+	release := make(chan struct{})
+	started := make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	var got strings.Builder
+	terminal.writeFn = func(data string) {
+		once.Do(func() { close(started) })
+		<-release
+		mu.Lock()
+		got.WriteString(data)
+		mu.Unlock()
+	}
+
+	terminal.Write("setup")
+	<-started
+
+	terminal.BeginFrame()
+	terminal.Write("frame-A")
+	terminal.EndFrame()
+	terminal.Write("mode") // durable write between two frames
+	terminal.BeginFrame()
+	terminal.Write("frame-B")
+	terminal.EndFrame()
+
+	close(release)
+	terminal.flushWrites()
+
+	mu.Lock()
+	defer mu.Unlock()
+	// frame-A is dropped, the durable write survives, in order.
+	if got.String() != "setupmodeframe-B" {
+		t.Fatalf("got %q, want %q", got.String(), "setupmodeframe-B")
+	}
+}

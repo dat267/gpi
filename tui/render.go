@@ -426,10 +426,23 @@ func (t *Renderer) resetRenderState() {
 
 func (t *Renderer) doRender() {
 	t.drainPosted()
+	if coalescer, ok := t.Terminal.(frameCoalescer); ok {
+		coalescer.BeginFrame()
+		defer coalescer.EndFrame()
+	}
 	if t.DoRender != nil {
 		t.DoRender()
 	}
 	atomic.AddInt64(&t.renderCount, 1)
+}
+
+// frameCoalescer is implemented by terminals whose writes run off the caller
+// (ProcessTerminal): the renderer brackets a paint so that, while an earlier
+// frame is still queued behind a paused console, a newer frame replaces it
+// instead of piling up behind it.
+type frameCoalescer interface {
+	BeginFrame()
+	EndFrame()
 }
 
 // Post schedules fn to run on the UI side: drained at the next render pass,

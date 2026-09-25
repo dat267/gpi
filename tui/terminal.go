@@ -183,10 +183,19 @@ type ProcessTerminal struct {
 	// them in that order (so ordering is preserved); writeFn is a test seam.
 	writesMu      sync.Mutex
 	writesCond    *sync.Cond
-	writes        []string
+	writes        []terminalWrite
 	writesStarted bool
 	inFlight      bool
 	writeFn       func(string)
+
+	// frameDepth/frameBuf bracket a renderer paint (BeginFrame/EndFrame). While
+	// a frame is open its writes accumulate here; on EndFrame the frame is
+	// queued as one item, replacing any frame still queued behind a paused
+	// console. Without this a terminal that stops draining (a Windows drag
+	// selection) makes the renderer pile up frames, which the terminal then has
+	// to ingest all at once on release.
+	frameDepth int
+	frameBuf   strings.Builder
 
 	// cols/rows cache the terminal size. Terminal size is queried with a
 	// console API (GetConsoleScreenBufferInfo on Windows), and that call can
@@ -682,20 +691,73 @@ func (t *ProcessTerminal) disableModifyOtherKeysLocked() {
 	t.modifyOtherKeysActive.Store(false)
 }
 
-// writeLocked enqueues data for the writer goroutine (see the writesMu
-// comment). It never touches the console, so a paused terminal cannot block
-// the caller.
+// terminalWrite is one queued write, or a whole coalescable frame.
+type terminalWrite struct {
+	data  string
+	frame bool
+}
+
+// writeLocked buffers data for the writer goroutine (see the writesMu
+// comment). Inside a frame it accumulates into the frame buffer; otherwise it
+// queues a durable write. It never touches the console, so a paused terminal
+// cannot block the caller.
 func (t *ProcessTerminal) writeLocked(data string) {
 	if data == "" {
 		return
 	}
 	t.writesMu.Lock()
-	t.writes = append(t.writes, data)
+	if t.frameDepth > 0 {
+		t.frameBuf.WriteString(data)
+		t.writesMu.Unlock()
+		return
+	}
+	t.enqueueLocked(terminalWrite{data: data})
+	t.writesMu.Unlock()
+}
+
+// enqueueLocked appends a write and starts the writer on first use.
+func (t *ProcessTerminal) enqueueLocked(item terminalWrite) {
+	t.writes = append(t.writes, item)
 	if !t.writesStarted {
 		t.writesStarted = true
 		go t.writeLoop()
 	}
 	t.writesCond.Signal()
+}
+
+// BeginFrame opens a renderer paint; its writes accumulate in the frame buffer.
+func (t *ProcessTerminal) BeginFrame() {
+	t.writesMu.Lock()
+	t.frameDepth++
+	t.writesMu.Unlock()
+}
+
+// EndFrame commits the paint as one coalescable write, dropping any frame that
+// is still queued (superseded) while keeping durable writes in order.
+func (t *ProcessTerminal) EndFrame() {
+	t.writesMu.Lock()
+	if t.frameDepth > 0 {
+		t.frameDepth--
+	}
+	if t.frameDepth > 0 {
+		t.writesMu.Unlock()
+		return
+	}
+	data := t.frameBuf.String()
+	t.frameBuf.Reset()
+	if data == "" {
+		t.writesMu.Unlock()
+		return
+	}
+	kept := t.writes[:0]
+	for _, item := range t.writes {
+		if item.frame {
+			continue // superseded by this frame
+		}
+		kept = append(kept, item)
+	}
+	t.writes = kept
+	t.enqueueLocked(terminalWrite{data: data, frame: true})
 	t.writesMu.Unlock()
 }
 
@@ -719,17 +781,21 @@ func (t *ProcessTerminal) writeDirect(data string) {
 // writeLoop drains the pending writes in order, joining each batch into one
 // console write. A blocked console parks only this goroutine.
 func (t *ProcessTerminal) writeLoop() {
+	var batch strings.Builder
 	for {
 		t.writesMu.Lock()
 		for len(t.writes) == 0 {
 			t.writesCond.Wait()
 		}
-		batch := t.writes
+		batch.Reset()
+		for _, item := range t.writes {
+			batch.WriteString(item.data)
+		}
 		t.writes = nil
 		t.inFlight = true
 		t.writesMu.Unlock()
 
-		t.writeDirect(strings.Join(batch, ""))
+		t.writeDirect(batch.String())
 
 		t.writesMu.Lock()
 		t.inFlight = false
