@@ -49,9 +49,7 @@ func TestInstallPierThemeShadowsUpstream(t *testing.T) {
 }
 
 // The point of the palette: the terminal's own background shows through the
-// decorative fills, so none of them may resolve to a colour — but the palette
-// itself paints a fixed `background` (see TestPierThemeBackgroundIsFixed), so
-// primary text is an explicit colour rather than the terminal's foreground.
+// decorative fills, so none of them may resolve to a colour.
 func TestPierThemeDecorativeBackgroundsAreTerminalDefault(t *testing.T) {
 	installPierThemeForTest(t)
 	for _, name := range []string{"dark", "light"} {
@@ -74,10 +72,9 @@ func TestPierThemeDecorativeBackgroundsAreTerminalDefault(t *testing.T) {
 			if got := theme.Bg("selectedBg", "row"); got != "\x1b[49mrow\x1b[49m" {
 				t.Errorf("%s: Bg(selectedBg) = %q", name, got)
 			}
-			// Primary text is explicit: the palette paints its own background, so the
-			// terminal's foreground (dark on a light terminal) cannot be trusted.
-			if got := theme.Fg("text", "hello"); got == "\x1b[39mhello\x1b[39m" {
-				t.Errorf("%s: Fg(text) = %q, want an explicit foreground", name, got)
+			// Primary text is the terminal's foreground, for the same reason.
+			if got := theme.Fg("text", "hello"); got != "\x1b[39mhello\x1b[39m" {
+				t.Errorf("%s: Fg(text) = %q", name, got)
 			}
 		})
 	}
@@ -305,27 +302,5 @@ func TestCustomThemeResolvesByDeclaredName(t *testing.T) {
 	}
 	if theme.Name != "declared-name" {
 		t.Errorf("name = %q", theme.Name)
-	}
-}
-
-// TestPierThemeBackgroundIsFixed pins the fixed-background contract: both
-// palettes define a real page background and an explicit foreground, so the
-// terminal's theme cannot make the UI unreadable.
-func TestPierThemeBackgroundIsFixed(t *testing.T) {
-	installPierThemeForTest(t)
-	for _, name := range []string{"dark", "light"} {
-		t.Run(name, func(t *testing.T) {
-			theme := GetThemeByName(name)
-			if theme == nil {
-				t.Fatalf("theme %q did not load", name)
-			}
-			bg, ok := theme.bgColors["background"]
-			if !ok || bg == "" || bg == "\x1b[49m" {
-				t.Fatalf("%s: background = %q ok=%v, want a real colour", name, bg, ok)
-			}
-			if got := theme.Fg("text", "x"); got == "\x1b[39mx\x1b[39m" {
-				t.Fatalf("%s: text is still the terminal default", name)
-			}
-		})
 	}
 }

@@ -139,25 +139,13 @@ func createInteractiveTui(options InteractiveTuiOptions) tui.TUI {
 			},
 		})
 		installDebugKey(screen.Renderer, options.OnDebug)
-		screen.PageBackground = themePageBackgroundAnsi
 		clipboardScreen = screen
 		return screen
 	}
 	screen := tui.NewMainScreen(terminal, options.ShowHardwareCursor, options.LogDirectory)
 	installDebugKey(screen.Renderer, options.OnDebug)
-	screen.PageBackground = themePageBackgroundAnsi
 	clipboardScreen = screen
 	return screen
-}
-
-// themePageBackgroundAnsi returns the active theme's fixed page background, or
-// "" when the theme does not define one (upstream's embedded palettes).
-func themePageBackgroundAnsi() string {
-	theme := CurrentTheme()
-	if theme == nil {
-		return ""
-	}
-	return theme.GetBgAnsiOr("background", "")
 }
 
 // installDebugKey gives a renderer the global debug key (upstream's

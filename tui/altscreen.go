@@ -2120,23 +2120,10 @@ func (s *AltScreen) doRender() {
 	screen = s.applySelection(screen, &nextLayout)
 	screen = s.compositeFlashes(screen, width, height)
 
-	// The palette owns the surface: replace every default-background reset with
-	// the page background and pad to width, so the terminal's own theme never
-	// shows through behind the text.
-	pageBG := s.PageBackgroundAnsi()
-	if pageBG != "" {
-		for index, line := range screen {
-			if !IsImageLine(line) {
-				screen[index] = ApplyPageBackground(line, width, pageBG)
-			}
-		}
-	}
-
 	row, col, hasCursor := s.ExtractCursorPosition(screen, height)
-	if LowBandwidth() && pageBG == "" {
+	if LowBandwidth() {
 		// Trailing padding is invisible (each row is cleared before writing) but
-		// costs a byte per cell on the wire; drop it. With a page background the
-		// padding carries the fill, so it must be kept.
+		// costs a byte per cell on the wire; drop it.
 		for index, line := range screen {
 			if !IsImageLine(line) {
 				screen[index] = strings.TrimRight(line, " ")

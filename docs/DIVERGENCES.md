@@ -5,7 +5,7 @@ usually because upstream relies on a JS or Node behaviour that has no direct Go
 equivalent, or because a defect upstream is fixed here. D-row numbers live in
 code comments at the point of divergence; this file is the log, and it is
 representative: the rows below carry a written-up rationale, while the rest live
-only as the code comment that introduced them. The range is **D1–D165**.
+only as the code comment that introduced them. The range is **D1–D164**.
 
 - D30 — startup timings read `PI_TIMING` **per call** instead of once at module
   load (upstream reads the flag when the timing module is first imported), so a
@@ -172,8 +172,8 @@ only as the code comment that introduced them. The range is **D1–D165**.
   departures from upstream's `dark.json`/`light.json`: **the decorative
   background tokens are left unset** (the selected list row, search matches,
   custom messages), which renders as the terminal's default background
-  (`\x1b[49m`); with D165 the frame's page background replaces those resets, so
-  the palette paints the surface rather than the terminal; **the
+  (`\x1b[49m`) so the theme never paints over a transparent or blurred terminal
+  (primary text is the terminal's own foreground for the same reason); **the
   signal fills are kept** (`toolPendingBg` / `toolSuccessBg` / `toolErrorBg`, a
   neutral panel while a call runs and the success/error hues as a tint of it,
   plus `userMessageBg`), because they are not decoration. The tool three are the
@@ -559,17 +559,3 @@ only as the code comment that introduced them. The range is **D1–D165**.
   324 B/op on a styled tool-output line). Tests:
   `TestMouseMotionBurstDoesNotRepaint`, `TestAnimationScanCacheIsDroppedByAPaint`,
   `TestAltScreenMouseMoveRequestsNoRender`, `TestVisibleWidthStyledTextMatchesPlainText`.
-- D165 — **the port's palette paints its own background.** D154 left the base
-  background transparent and the primary text the terminal's foreground, so
-  switching the terminal's colour theme could make the UI unreadable (light
-  text on a now-light background). The port's `dark` and `light` palettes now
-  define a real `background` token (`#101010` / `#ffffff`) and an explicit
-  `text`, and the screens replace every default-background reset in a frame line
-  with that page background (`tui.ApplyPageBackground`, applied in both
-  `AltScreen.doRender` and `MainScreen`'s render). The low-bandwidth
-  trailing-space trim is skipped while a page background is set, because the
-  padding carries the fill. The decorative fills stay unset and become the page
-  background; upstream's embedded palettes have no `background`, so the fixed
-  page is off for them (`Theme.GetBgAnsiOr`). Tests:
-  `TestPierThemeBackgroundIsFixed`, `TestApplyPageBackgroundReplacesResetsAndPads`,
-  `TestAltScreenPageBackgroundOwnsTheSurface`.
