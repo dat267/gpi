@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/dat267/pier/internal/offloop"
 	"time"
 
 	"github.com/dat267/pier/ai"
@@ -516,5 +518,38 @@ func TestTerminalDetection(t *testing.T) {
 	detector = &fakeDetector{scheme: TerminalThemeDark, hasScheme: true, rgb: RgbColor{R: 255, G: 255, B: 255}, hasRGB: true}
 	if theme := DetectTerminalThemeForAuto(detector, 1, func(string) string { return "" }); theme != TerminalThemeDark {
 		t.Fatalf("auto theme = %q", theme)
+	}
+}
+
+// With a theme queue wired (the interactive wiring), named-theme switches and
+// previews load off the calling goroutine and apply in submission order; the
+// controller state update marshals back through the Marshal seam.
+func TestThemeSettingAppliesOnTheQueue(t *testing.T) {
+	ui := &fakeThemeUI{}
+	var marshaled int
+	controller := NewInteractiveThemeController(ThemeControllerOptions{
+		UI:         ui,
+		Detector:   nil,
+		TimeoutMS:  1,
+		Env:        func(string) string { return "" },
+		Marshal:    func(fn func()) { marshaled++; fn() },
+		ThemeQueue: offloop.New(),
+	})
+	controller.SetThemeSetting("light")
+	controller.SetThemeSetting("dark")
+	controller.ThemeQueueFlushForTest()
+	if CurrentThemeName() != "dark" {
+		t.Fatalf("current theme = %q, want dark (last switch wins)", CurrentThemeName())
+	}
+	if controller.ActiveThemeName() != "dark" {
+		t.Fatalf("active theme = %q", controller.ActiveThemeName())
+	}
+	if marshaled != 2 {
+		t.Fatalf("marshaled = %d, want 2", marshaled)
+	}
+	controller.Preview("light")
+	controller.ThemeQueueFlushForTest()
+	if CurrentThemeName() != "light" {
+		t.Fatalf("preview = %q", CurrentThemeName())
 	}
 }

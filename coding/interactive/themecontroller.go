@@ -1,5 +1,7 @@
 package interactive
 
+import "github.com/dat267/pier/internal/offloop"
+
 // Port of src/modes/interactive/theme/theme-controller.ts: the settings-driven
 // theme controller with terminal auto-sync.
 
@@ -25,6 +27,15 @@ type ThemeControllerOptions struct {
 	ShowError           func(message string)
 	OnChanged           func()
 	InitialThemeSetting *string
+	// Marshal runs a function on the UI loop (the wiring's UI.Post); nil runs
+	// it inline (tests, headless). The async apply paths use it to bring their
+	// controller-state updates back onto the loop.
+	Marshal func(func())
+	// ThemeQueue, when non-nil, loads and applies named themes off the calling
+	// goroutine (the internal/offloop uniform mechanism): loadTheme reads the
+	// theme file from disk, which the UI loop must never do. nil (the default)
+	// keeps theme application synchronous.
+	ThemeQueue *offloop.Queue
 	// Query detections (the terminal queries behind the auto theme).
 	Detector  TerminalAutoThemeDetector
 	TimeoutMS int
@@ -53,6 +64,8 @@ type InteractiveThemeController struct {
 	activeThemeName     string
 	autoSyncEnabled     bool
 	unsubscribe         func()
+	marshal             func(func())
+	themeQueue          *offloop.Queue
 }
 
 // NewInteractiveThemeController creates and initializes the controller.
@@ -66,6 +79,8 @@ func NewInteractiveThemeController(options ThemeControllerOptions) *InteractiveT
 		timeoutMS:           options.TimeoutMS,
 		env:                 options.Env,
 		currentThemeSetting: options.InitialThemeSetting,
+		marshal:             options.Marshal,
+		themeQueue:          options.ThemeQueue,
 	}
 	if controller.timeoutMS == 0 {
 		controller.timeoutMS = 100
@@ -155,10 +170,52 @@ func (c *InteractiveThemeController) SetThemeName(themeName string, showError bo
 	return result
 }
 
-// SetThemeSetting applies an auto/plain theme setting.
+// SetThemeSetting applies an auto/plain theme setting. The auto path stays
+// synchronous (terminal detection is interactive by design); a named theme
+// loads and applies on the theme queue because loadTheme reads the theme file
+// from disk, and the selector callbacks that reach here run on the UI loop.
 func (c *InteractiveThemeController) SetThemeSetting(themeSetting string) {
 	c.currentThemeSetting = &themeSetting
-	c.ApplyFromSettings()
+	if _, _, ok := ParseAutoThemeSetting(&themeSetting); ok {
+		c.ApplyFromSettings()
+		return
+	}
+	c.applyThemeNameAsync(themeSetting)
+}
+
+// applyThemeNameAsync is applyThemeName off the loop: SetTheme loads the theme
+// file and swaps the global atomics on the worker (its notifyThemeChange
+// callback already marshals the UI invalidation onto the loop), and the
+// controller's own state update marshals back through the wiring's Marshal
+// seam. Ordered submissions make the last switch win.
+func (c *InteractiveThemeController) applyThemeNameAsync(themeName string) {
+	if c.themeQueue == nil {
+		c.applyThemeNameSync(themeName)
+		return
+	}
+	c.themeQueue.Go(func() {
+		success, message := SetTheme(themeName, true)
+		c.onUI(func() {
+			if success {
+				c.activeThemeName = themeName
+			} else {
+				c.activeThemeName = "dark"
+			}
+			c.notifyChanged()
+			if !success && c.showError != nil {
+				c.showError("Failed to load theme \"" + themeName + "\": " + message + "\nFell back to dark theme.")
+			}
+		})
+	})
+}
+
+// onUI runs fn on the UI loop when a Marshal seam is wired, inline otherwise.
+func (c *InteractiveThemeController) onUI(fn func()) {
+	if c.marshal != nil {
+		c.marshal(fn)
+		return
+	}
+	fn()
 }
 
 // SetThemeInstance installs an in-memory theme.
@@ -179,12 +236,28 @@ func (c *InteractiveThemeController) Preview(themeSettingOrName string) {
 	if themeName == "" {
 		return
 	}
-	if success, _ := SetTheme(themeName, true); success {
-		if c.ui != nil {
-			c.ui.Invalidate()
-			c.ui.RequestRender()
+	if c.themeQueue == nil {
+		if success, _ := SetTheme(themeName, true); success {
+			if c.ui != nil {
+				c.ui.Invalidate()
+				c.ui.RequestRender()
+			}
 		}
+		return
 	}
+	// Preview loads run on the theme queue like real switches; ordered
+	// submissions make the last previewed theme win.
+	c.themeQueue.Go(func() {
+		success, _ := SetTheme(themeName, true)
+		if success {
+			c.onUI(func() {
+				if c.ui != nil {
+					c.ui.Invalidate()
+					c.ui.RequestRender()
+				}
+			})
+		}
+	})
 }
 
 // DisableAutoSync turns off terminal color-scheme syncing.
@@ -207,6 +280,19 @@ func (c *InteractiveThemeController) ActiveThemeName() string { return c.activeT
 
 func (c *InteractiveThemeController) applyThemeName(themeName string, showError bool) ThemeResult {
 	success, message := SetTheme(themeName, true)
+	return c.recordThemeApply(themeName, success, message, showError)
+}
+
+// applyThemeNameSync is applyThemeName for the synchronous (nil-queue) mode;
+// kept separate so the async path cannot accidentally call back into it.
+func (c *InteractiveThemeController) applyThemeNameSync(themeName string) ThemeResult {
+	success, message := SetTheme(themeName, true)
+	return c.recordThemeApply(themeName, success, message, true)
+}
+
+// recordThemeApply updates the controller state after a theme application and
+// reports the outcome; the caller arranges the goroutine (loop or worker).
+func (c *InteractiveThemeController) recordThemeApply(themeName string, success bool, message string, showError bool) ThemeResult {
 	if success {
 		c.activeThemeName = themeName
 	} else {
@@ -268,5 +354,13 @@ func (c *InteractiveThemeController) applyTerminalTheme(terminalTheme TerminalTh
 	}
 	if themeName != c.activeThemeName {
 		c.applyThemeName(themeName, false)
+	}
+}
+
+// ThemeQueueFlushForTest drains the theme queue; exported for tests because
+// the queue is wired by the app, not the caller.
+func (c *InteractiveThemeController) ThemeQueueFlushForTest() {
+	if c.themeQueue != nil {
+		c.themeQueue.Flush()
 	}
 }
