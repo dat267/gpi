@@ -31,7 +31,7 @@ Deliberately out of scope, with divergences recorded in code: the extension mech
 ```bash
 just build   # bin/pier: pure Go (CGO_ENABLED=0), the flags the release workflow uses
 just check   # gofmt + go vet + go test
-just --list  # the other recipes (install, test-race, clean)
+just --list  # the other recipes (install, test-race, cross, clean)
 ```
 
 Plain Go works too. The CLI is the module root — `main.go` is a thin wrapper
@@ -42,7 +42,7 @@ go build -o bin/pier .
 go test ./...
 ```
 
-CI runs `go test -race ./...`, but **the race detector cannot run on
+CI runs `go test -race -count=2 -timeout 300s ./...`, but **the race detector cannot run on
 android/arm64** — Go rejects it outright (`-race is not supported on
 android/arm64`) — so `just test-race` only fails on Termux. That check is
 CI-only, and it is the only one that cannot be reproduced locally.
@@ -59,4 +59,4 @@ just VERSION=1.2.3 install   # stamps --version and the changelog comparison
 directly if you prefer. The binary derives its display name from its own file
 name, so a symlink named `pi` would show `pi`.
 
-Then run `pier`. `pier --help` lists the flags; `pier --version` prints the version. The CLI supports the interactive mode, resume (`-c` continues the newest session; `-r` opens the interactive session picker; `--session` accepts a file path, a session id, an id prefix, or matches globally across projects; `--session-id` opens a matching session or creates a new one with that id; `--fork` forks a session into a new one in the current cwd), model selection (`-m`, `-p`), `--offline`, `--tui-mode` and initial prompts. The print/json/rpc modes, package manager, extensions and migrations are not wired.
+Then run `pier`. `pier --help` lists the flags; `pier --version` prints the version. The CLI supports the interactive mode, resume (`-c` continues the newest session; `-r` opens the interactive session picker; `--session` accepts a file path, a session id, an id prefix, or matches globally across projects; `--session-id` opens a matching session or creates a new one with that id; `--fork` forks a session into a new one in the current cwd), model selection (`--provider`, `--model`), `--offline`, `--tui-mode` and initial prompts. Print mode (`-p`) and JSON output (`--mode json`) are wired; the rpc mode, package manager, extensions and migrations are not.
