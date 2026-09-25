@@ -26,7 +26,11 @@ build:
 	CGO_ENABLED=0 go build {{ldflags}} -o {{bin}} .
 	@echo "built {{bin}}"
 
+# The Unix variant uses the global bash shell; the Windows variant is
+# PowerShell, so install works there without a POSIX shell on PATH.
+#
 # Install the CLI into GOBIN (or GOPATH/bin) and warn if that is not on PATH.
+[unix]
 install:
 	#!/usr/bin/env bash
 	set -euo pipefail
@@ -35,6 +39,26 @@ install:
 	if [[ -z "$dir" ]]; then dir="$(go env GOPATH)/bin"; fi
 	echo "installed $dir/pier"
 	case ":$PATH:" in *":$dir:"*) ;; *) echo "note: $dir is not on PATH" ;; esac
+
+[windows]
+install:
+	#!powershell
+	$ErrorActionPreference = "Stop"
+	$env:CGO_ENABLED = "0"
+	$ld = "-s -w"
+	$version = '{{VERSION}}'
+	if ($version) { $ld = "$ld -X github.com/dat267/pier/coding.Version=$version" }
+	$goArgs = @("install", "-trimpath", "-ldflags", $ld, ".")
+	& go @goArgs
+	$dir = (& go env GOBIN | Out-String).Trim()
+	if (-not $dir) { $dir = Join-Path ((& go env GOPATH | Out-String).Trim()) "bin" }
+	Write-Output ("installed " + (Join-Path $dir "pier.exe"))
+	$target = $dir.TrimEnd('\', '/')
+	$onPath = $false
+	foreach ($entry in ($env:PATH -split ';')) {
+		if ($entry.Trim().TrimEnd('\', '/') -ieq $target) { $onPath = $true; break }
+	}
+	if (-not $onPath) { Write-Output ("note: " + $dir + " is not on PATH") }
 
 # Run the test suite.
 test:

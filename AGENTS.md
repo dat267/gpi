@@ -67,8 +67,10 @@ go build -o bin/pier .
 
 A `justfile` wraps the commands above (`just`, `just check`, `just --list`;
 `just VERSION=1.2.3 install` stamps the version `make install` used to, and the
-recipe names match the old Makefile targets). The build stays plain Go, so the
-gate runs the `go` commands directly.
+recipe names match the old Makefile targets). `install` has a `[windows]`
+(PowerShell) variant so it does not need a POSIX shell on PATH; the other
+recipes still run through the global bash shell. The build stays plain Go, so
+the gate runs the `go` commands directly.
 
 The module root is the command: `main.go` is a thin wrapper over
 `cmd.Execute`, and the `cmd` package holds the flags, boot and session
