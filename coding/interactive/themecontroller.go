@@ -84,6 +84,13 @@ type InteractiveThemeController struct {
 	// it wins over the OSC 11 background fallback and stops the background poll.
 	schemeReportSeen atomic.Bool
 	pollStop         chan struct{}
+
+	// terminalStarted gates every terminal write. Queries written before the
+	// renderer puts the pty in raw mode are echoed/buffered by the line
+	// discipline (and can interleave with the Kitty negotiation); over SSH this
+	// broke launching the TUI entirely. MarkTerminalStarted flushes them once
+	// the terminal is up.
+	terminalStarted bool
 }
 
 // NewInteractiveThemeController creates and initializes the controller.
@@ -128,7 +135,7 @@ func (c *InteractiveThemeController) RebindTUI() {
 		c.backgroundUnsub = nil
 	}
 	c.bindTerminalListeners()
-	if c.ui != nil {
+	if c.ui != nil && c.terminalStarted {
 		c.ui.SetTerminalColorSchemeNotifications(c.autoSyncEnabled)
 	}
 	if c.autoSyncEnabled {
@@ -363,6 +370,9 @@ func (c *InteractiveThemeController) setAutoSync(enabled bool) {
 		return
 	}
 	c.autoSyncEnabled = enabled
+	if !c.terminalStarted {
+		return
+	}
 	if c.ui != nil {
 		c.ui.SetTerminalColorSchemeNotifications(enabled)
 	}
@@ -374,12 +384,29 @@ func (c *InteractiveThemeController) setAutoSync(enabled bool) {
 	c.stopBackgroundPoll()
 }
 
+// MarkTerminalStarted is called by the owner once the renderer's terminal has
+// entered raw mode. It flushes the auto-sync state and sends the initial
+// detection requests, which must not be written before the pty is raw.
+func (c *InteractiveThemeController) MarkTerminalStarted() {
+	if c.terminalStarted {
+		return
+	}
+	c.terminalStarted = true
+	if c.ui != nil {
+		c.ui.SetTerminalColorSchemeNotifications(c.autoSyncEnabled)
+	}
+	c.requestTerminalTheme()
+	if c.autoSyncEnabled {
+		c.startBackgroundPoll()
+	}
+}
+
 // requestTerminalTheme asks the terminal for its scheme and background without
 // blocking; the replies reach the listeners on the owner goroutine. D165: the
 // port cannot query synchronously on the UI loop, which is what dispatches the
 // reply, so it requests and listens instead of awaiting a result.
 func (c *InteractiveThemeController) requestTerminalTheme() {
-	if c.ui == nil {
+	if c.ui == nil || !c.terminalStarted {
 		return
 	}
 	// A fresh request cycle: until a scheme reply arrives, the background

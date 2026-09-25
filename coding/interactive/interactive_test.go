@@ -396,6 +396,9 @@ func TestThemeControllerLifecycle(t *testing.T) {
 		TimeoutMS:          1,
 		Env:                func(key string) string { return "" },
 	})
+	// The real app marks the terminal started after the renderer enters raw
+	// mode; runtime theme changes then reach the terminal.
+	controller.MarkTerminalStarted()
 	if CurrentThemeName() == "" {
 		t.Fatal("no theme initialized")
 	}
@@ -586,9 +589,10 @@ func TestThemeSettingAppliesOnTheQueue(t *testing.T) {
 }
 
 // TestThemeControllerAutoRequestsTerminalTheme pins the listener-driven auto
-// path: ApplyFromSettings must not block on a query, it must ask the terminal,
-// and the reply must switch the light/dark pair. A scheme report wins over the
-// background fallback.
+// path: ApplyFromSettings must not write to the terminal (queries before the pty
+// is raw broke launching over SSH), MarkTerminalStarted must then ask the
+// terminal, and the reply must switch the light/dark pair. A scheme report wins
+// over the background fallback.
 func TestThemeControllerAutoRequestsTerminalTheme(t *testing.T) {
 	SetCustomThemesDir(t.TempDir())
 	SetRegisteredThemes(nil)
@@ -605,8 +609,15 @@ func TestThemeControllerAutoRequestsTerminalTheme(t *testing.T) {
 	if CurrentThemeName() != "dark" {
 		t.Fatalf("provisional theme = %q, want dark", CurrentThemeName())
 	}
+	// Nothing is written before the terminal is in raw mode.
+	if ui.schemeReqs != 0 || ui.bgReqs != 0 || ui.notifications {
+		t.Fatalf("terminal written before start: scheme=%d background=%d notifications=%v",
+			ui.schemeReqs, ui.bgReqs, ui.notifications)
+	}
+
+	controller.MarkTerminalStarted()
 	if ui.schemeReqs == 0 || ui.bgReqs == 0 {
-		t.Fatalf("terminal not queried: scheme=%d background=%d", ui.schemeReqs, ui.bgReqs)
+		t.Fatalf("terminal not queried after start: scheme=%d background=%d", ui.schemeReqs, ui.bgReqs)
 	}
 	if !ui.notifications {
 		t.Fatal("color-scheme notifications not enabled for auto")

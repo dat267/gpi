@@ -211,3 +211,37 @@ func TestLazyTranscriptPrerenderRewarmsAfterWidthChange(t *testing.T) {
 		t.Fatal("transcript incomplete after a width change")
 	}
 }
+
+// TestLazyTranscriptDefersWithoutPopulatingHistory pins the decoupling: a theme
+// rebuild renders with populateHistory=false and used to bypass the lazy path,
+// eagerly attaching the whole (large) session on the UI loop.
+func TestLazyTranscriptDefersWithoutPopulatingHistory(t *testing.T) {
+	SetCustomThemesDir(t.TempDir())
+	SetRegisteredThemes(nil)
+	SetTrueColorSupport(true)
+	SetStyleColorsEnabled(true)
+	InitTheme("dark", false)
+
+	dir := t.TempDir()
+	manager := coding.NewSessionManager(dir, &coding.SessionManagerOptions{Persist: boolPtr(false)})
+	for i := 0; i < 800; i++ {
+		manager.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: fmt.Sprintf("nohist-msg-%04d", i)}})
+	}
+
+	chat := &tui.Container{}
+	transcript := NewTranscriptRenderer(chat, nil, nil, nil, manager)
+	transcript.RenderSessionEntries(manager.BuildContextEntriesForLeaf(), false, false)
+
+	if len(transcript.deferredComponents) == 0 {
+		t.Fatal("large render with populateHistory=false did not defer")
+	}
+	if len(chat.Children) > lazyTranscriptWindowComponents {
+		t.Fatalf("chat attached too many components: %d", len(chat.Children))
+	}
+	for transcript.MaterializeDeferred(80) {
+	}
+	lines := strings.Join(renderChat(t, chat), "\n")
+	if !strings.Contains(lines, "nohist-msg-0000") || !strings.Contains(lines, "nohist-msg-0799") {
+		t.Fatal("deferred render incomplete after materialization")
+	}
+}

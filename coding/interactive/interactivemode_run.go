@@ -62,6 +62,10 @@ type RunWiring struct {
 	SetupKeyHandlers func()
 	// SetupSubmitHandler enables the submit handler.
 	SetupSubmitHandler func()
+	// OnTerminalStarted runs once the renderer's terminal has entered raw mode;
+	// the theme controller sends its color queries here (writing them earlier
+	// broke launching over SSH).
+	OnTerminalStarted func()
 	// RebindSession rebinds the session (extensions/resources).
 	RebindSession func(ctx context.Context) error
 	// RenderInitialMessages renders the initial transcript.
@@ -321,6 +325,9 @@ func (w *RunWiring) Init(ctx context.Context, scopedModels []coding.ScopedModel,
 		w.UI.Start()
 	}
 	w.initialized = true
+	if w.OnTerminalStarted != nil {
+		w.OnTerminalStarted()
+	}
 
 	// Header (unless silenced).
 	if w.HeaderContainer != nil {
@@ -1036,6 +1043,7 @@ func newRunWiring(app *App) *RunWiring {
 
 		SetupKeyHandlers:      app.KeySetup,
 		SetupSubmitHandler:    app.SubmitSetup,
+		OnTerminalStarted:     func() { app.Theme.MarkTerminalStarted() },
 		RenderInitialMessages: func() { app.Transcript.RenderInitialMessages() },
 		ShowLoadedResources:   app.ShowLoadedResources,
 		OnThemeChange: func(callback func()) func() {

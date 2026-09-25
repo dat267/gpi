@@ -366,11 +366,13 @@ func decodeCustomMessage(content json.RawMessage) (string, string, bool) {
 
 // RenderSessionItems renders a list of transcript items.
 func (r *TranscriptRenderer) RenderSessionItems(items []RenderSessionItem, updateFooter bool, populateHistory bool) {
-	// Lazy path: a large replay (session load, renderer swap) collects into a
-	// collector container and attaches only the last window to the real chat;
-	// the rest drains through MaterializeDeferred. Small renders attach
-	// directly, exactly as before.
-	if populateHistory && len(items) >= lazyTranscriptThresholdItems {
+	// Lazy path: a large replay (session load, renderer swap, theme rebuild)
+	// collects into a collector container and attaches only the last window to
+	// the real chat; the rest drains through MaterializeDeferred. Small renders
+	// attach directly, exactly as before. The threshold is independent of
+	// populateHistory, which only controls the editor prompt history: a theme
+	// rebuild passes false and used to eagerly attach the whole session.
+	if len(items) >= lazyTranscriptThresholdItems {
 		r.resetDeferred()
 		collector := &tui.Container{}
 		realChat := r.Chat

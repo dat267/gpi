@@ -582,7 +582,16 @@ only as the code comment that introduced them. The range is **D1–D165**.
   `TestThemeControllerAutoRequestsTerminalTheme`,
   `TestThemeControllerAutoFollowsBackgroundFallback`,
   `TestThemeControllerUnsetAdoptsBackground`,
-  `TestThemeAdapterDrivesDetectionFromTheRenderer`.
+  `TestThemeAdapterDrivesDetectionFromTheRenderer`. Two follow-ups from a real
+  launch regression over SSH: the color queries are written only **after** the
+  renderer's terminal enters raw mode (`MarkTerminalStarted`, wired through
+  `RunWiring.OnTerminalStarted`), because writing them earlier let the line
+  discipline echo/buffer the replies and interleave them with the Kitty
+  negotiation (pinned by
+  `TestThemeControllerAutoRequestsTerminalTheme`'s pre-start assertions); and a
+  large replay's lazy path is no longer gated on `populateHistory`, since the
+  theme rebuild passes false and used to eagerly attach the whole session on the
+  UI loop (pinned by `TestLazyTranscriptDefersWithoutPopulatingHistory`).
 
   A committed switch also rebuilds the themed containers (`App.rebuildForTheme`
   via the controller's `OnChanged`): the port's components bake theme colours at

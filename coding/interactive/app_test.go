@@ -287,6 +287,7 @@ func TestAppWiringCompleteness(t *testing.T) {
 		{"Auth.ShowError", app.Auth.ShowError != nil},
 		{"Theme.Detector", app.Theme.detector != nil},
 		{"Theme.Env", app.Theme.env != nil},
+		{"Runner.OnTerminalStarted", app.Runner.OnTerminalStarted != nil},
 		{"Lifecycle.OnTuiModeSwitched", app.Lifecycle.options.OnTuiModeSwitched != nil},
 	}
 	for _, check := range required {

@@ -303,17 +303,23 @@ terminal query on the UI loop: the loop is what dispatches the reply, so
 `QueryTerminalColorScheme`/`QueryTerminalBackgroundColor` would always time out.
 `App` wires the controller's `Detector`/`Env` (which must reach the renderer
 through `*tui.TuiReference`, so the reference forwards the color-scheme surface),
-`ApplyFromSettings` applies only the fast `COLORFGBG` result and sends
-non-blocking requests, and the persistent color-scheme/background listeners
-apply the reply on the loop. A `CSI ? 997` report wins over the OSC 11 fallback
-and stops the background poll (which covers terminals without OSC 2031).
+`ApplyFromSettings` applies only the fast `COLORFGBG` result, and the persistent
+color-scheme/background listeners apply the reply on the loop. A `CSI ? 997`
+report wins over the OSC 11 fallback and stops the background poll (which covers
+terminals without OSC 2031). The queries are written only after the renderer's
+terminal enters raw mode (`MarkTerminalStarted` via `RunWiring.OnTerminalStarted`):
+writing them earlier let the pty echo/buffer the replies and interleave them with
+the Kitty negotiation, which broke launching the TUI over SSH.
 `Lifecycle.SwitchTuiMode` calls `OnTuiModeSwitched` → `Theme.RebindTUI` because
 the swapped-out renderer's listener registry is gone. `TestAppWiringCompleteness`
 pins the `Detector`/`Env`/`OnTuiModeSwitched` wiring. On a **committed** theme
 change the controller's `OnChanged` runs `App.rebuildForTheme`, which rebuilds
 the header, the loaded-resource sections and the transcript: the port bakes
 theme colours at construction where upstream resolves its `theme` Proxy at
-render, so invalidating alone left the old colours on screen.
+render, so invalidating alone left the old colours on screen. A large replay's
+lazy transcript path must not be gated on `populateHistory` (the theme rebuild
+passes false); otherwise the rebuild eagerly attaches a huge session on the UI
+loop.
 
 `tui/render.go` (+ `mainscreen.go`, `altscreen.go`, `terminal.go`,
 `stdinbuffer.go`) is the differential renderer core. Its lock discipline is
