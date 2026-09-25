@@ -18,7 +18,9 @@
 // followed: a func-typed field can hold any closure of its signature, and
 // signature-based expansion (CHA) produces impossible chains; the surfaces the
 // loop actually calls through func fields are rooted explicitly instead.
-// `go` statements are not followed — they run on other goroutines.
+// `go` statements are not followed during that traversal — they run on other
+// goroutines — but a separate advisory pass (FindGoroutines) lists a bare
+// goroutine whose body blocks, to point it at internal/offloop.
 package uiblock
 
 import (
@@ -45,10 +47,11 @@ const (
 	Lock
 	Sleep
 	CPU
+	Goroutine
 )
 
 func (k Kind) String() string {
-	return [...]string{"syscall/io", "net", "exec", "channel-op", "lock", "sleep", "cpu-bound"}[k]
+	return [...]string{"syscall/io", "net", "exec", "channel-op", "lock", "sleep", "cpu-bound", "goroutine"}[k]
 }
 
 // Finding is one blocking site reachable from the UI goroutine, with the call
@@ -116,15 +119,24 @@ func blockingCallee(fn *ssa.Function) (Kind, bool) {
 var pierRootRE = regexp.MustCompile(`^\(github\.com/dat267/pier/[^()]+\)\.(HandleEvent|HandleTerminalInput|RenderNow|Render|Invalidate|HandleSignal)$`)
 
 var pierNamedRoots = []string{
-	"github.com/dat267/pier/coding/interactive.(*RunWiring).Run",
-	"github.com/dat267/pier/coding/interactive.(*RunWiring).drainReadyEvents",
-	"github.com/dat267/pier/coding/interactive.(*RunWiring).renderUI",
-	"github.com/dat267/pier/coding/interactive.(*TranscriptRenderer).MaterializeDeferred",
-	"github.com/dat267/pier/coding/interactive.(*Queue).MaterializeThinkingChunk",
+	"(*github.com/dat267/pier/coding/interactive.RunWiring).Run",
+	"(*github.com/dat267/pier/coding/interactive.RunWiring).drainReadyEvents",
+	"(*github.com/dat267/pier/coding/interactive.RunWiring).renderUI",
+	"(*github.com/dat267/pier/coding/interactive.TranscriptRenderer).MaterializeDeferred",
+	"(*github.com/dat267/pier/coding/interactive.QueueController).MaterializeThinkingChunk",
 }
 
-// Find runs the analysis over the module rooted at dir.
-func Find(dir string) ([]Finding, error) {
+// module is the loaded SSA world plus the UI-loop roots and the method index
+// that the traversals share.
+type module struct {
+	prog        *ssa.Program
+	all         map[*ssa.Function]bool
+	roots       map[*ssa.Function]string
+	pierMethods map[string][]*ssa.Function
+}
+
+// loadModule builds the SSA program and computes the UI-loop roots.
+func loadModule(dir string) (*module, error) {
 	cfg := &packages.Config{Mode: packages.LoadAllSyntax, Dir: dir}
 	pkgs, err := packages.Load(cfg, "./...")
 	if err != nil {
@@ -211,6 +223,17 @@ func Find(dir string) ([]Finding, error) {
 			}
 		}
 	}
+
+	return &module{prog: prog, all: all, roots: roots, pierMethods: pierMethods}, nil
+}
+
+// Find runs the analysis over the module rooted at dir.
+func Find(dir string) ([]Finding, error) {
+	m, err := loadModule(dir)
+	if err != nil {
+		return nil, err
+	}
+	prog, roots, pierMethods := m.prog, m.roots, m.pierMethods
 
 	type node struct {
 		fn    *ssa.Function
