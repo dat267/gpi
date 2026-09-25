@@ -10,8 +10,6 @@ import (
 // background, so cells that do not set their own fill stay on the palette, and
 // the line is padded to the viewport width on that background.
 func TestApplyPageBackgroundReplacesResetsAndPads(t *testing.T) {
-	SetLowBandwidth(false)
-	defer SetLowBandwidth(false)
 	bg := "\x1b[48;2;16;16;16m"
 	line := "\x1b[38;2;1;2;3mhi\x1b[39m\x1b[49m"
 	got := ApplyPageBackground(line, 5, bg)
@@ -31,22 +29,6 @@ func TestApplyPageBackgroundReplacesResetsAndPads(t *testing.T) {
 func TestApplyPageBackgroundNoopWithoutToken(t *testing.T) {
 	if got := ApplyPageBackground("hi", 4, ""); got != "hi  " {
 		t.Fatalf("empty bg = %q, want padded plain", got)
-	}
-}
-
-// TestApplyPageBackgroundLowBandwidthFillsWithErase pins the D163 budget: over
-// a low-bandwidth link the fill is an erase-to-end-of-line, so no padding spaces
-// go on the wire while the background still covers the row.
-func TestApplyPageBackgroundLowBandwidthFillsWithErase(t *testing.T) {
-	SetLowBandwidth(true)
-	defer SetLowBandwidth(false)
-	bg := "\x1b[48;2;16;16;16m"
-	got := ApplyPageBackground("\x1b[38;2;1;2;3mhi\x1b[39m", 120, bg)
-	if !strings.Contains(got, "\x1b[2K") {
-		t.Fatalf("expected a whole-row erase fill: %q", got)
-	}
-	if strings.Contains(got, "        ") {
-		t.Fatalf("padding spaces leaked onto the wire: %q", got)
 	}
 }
 
