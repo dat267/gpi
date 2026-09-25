@@ -135,3 +135,69 @@ func waitForWrite(t *testing.T, terminal *fakeTerminal, substring string) {
 func timeSleepMicro() {
 	time.Sleep(50 * time.Microsecond)
 }
+
+// TestRendererNotifiesBackgroundListeners pins the persistent OSC 11 listener:
+// the theme controller relies on a reply reaching it without a pending
+// one-shot query, so a bare report must notify.
+func TestRendererNotifiesBackgroundListeners(t *testing.T) {
+	terminal := &fakeTerminal{width: 80, height: 24}
+	renderer := NewRenderer(terminal)
+
+	colors := make(chan RgbColor, 1)
+	unsubscribe := renderer.OnTerminalBackgroundColorChange(func(rgb RgbColor) { colors <- rgb })
+	renderer.HandleTerminalInput("\x1b]11;#112233\x07")
+	select {
+	case rgb := <-colors:
+		if rgb.R != 0x11 || rgb.G != 0x22 || rgb.B != 0x33 {
+			t.Fatalf("background = %+v", rgb)
+		}
+	default:
+		t.Fatal("background listener was not notified")
+	}
+	unsubscribe()
+	renderer.HandleTerminalInput("\x1b]11;#aabbcc\x07")
+	select {
+	case rgb := <-colors:
+		t.Fatalf("unexpected background after unsubscribe: %+v", rgb)
+	default:
+	}
+}
+
+// TestTuiReferenceForwardsThemeQueries pins that the stable reference reaches
+// the active renderer's color-scheme surface. The interactive app holds the
+// reference, and a missing forward made every theme listener a silent no-op.
+func TestTuiReferenceForwardsThemeQueries(t *testing.T) {
+	terminal := &fakeTerminal{width: 80, height: 24}
+	screen := NewAltScreen(terminal, false, "", AltScreenOptions{})
+	reference := NewTuiReference(func() TUI { return screen })
+
+	reference.RequestTerminalColorScheme()
+	reference.RequestTerminalBackgroundColor()
+	if !terminal.hasWrite("\x1b[?996n") {
+		t.Fatal("color-scheme request did not reach the renderer")
+	}
+	if !terminal.hasWrite("\x1b]11;?") {
+		t.Fatal("background request did not reach the renderer")
+	}
+
+	schemes := make(chan TerminalColorScheme, 1)
+	unsubscribe := reference.OnTerminalColorSchemeChange(func(scheme TerminalColorScheme) { schemes <- scheme })
+	reference.HandleTerminalInput("\x1b[?997;2n")
+	if scheme := <-schemes; scheme != TerminalColorSchemeLight {
+		t.Fatalf("scheme = %q", scheme)
+	}
+	unsubscribe()
+
+	backgrounds := make(chan RgbColor, 1)
+	unsubscribeBackground := reference.OnTerminalBackgroundColorChange(func(rgb RgbColor) { backgrounds <- rgb })
+	reference.HandleTerminalInput("\x1b]11;#445566\x07")
+	if rgb := <-backgrounds; rgb.R != 0x44 || rgb.G != 0x55 || rgb.B != 0x66 {
+		t.Fatalf("background = %+v", rgb)
+	}
+	unsubscribeBackground()
+
+	reference.SetTerminalColorSchemeNotifications(true)
+	if !terminal.hasWrite("\x1b[?2031h") {
+		t.Fatal("color-scheme notifications did not reach the renderer")
+	}
+}

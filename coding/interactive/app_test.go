@@ -285,6 +285,9 @@ func TestAppWiringCompleteness(t *testing.T) {
 		{"Models.ShowError", app.Models.ShowError != nil},
 		{"Sessions.Shutdown", app.Sessions.Shutdown != nil},
 		{"Auth.ShowError", app.Auth.ShowError != nil},
+		{"Theme.Detector", app.Theme.detector != nil},
+		{"Theme.Env", app.Theme.env != nil},
+		{"Lifecycle.OnTuiModeSwitched", app.Lifecycle.options.OnTuiModeSwitched != nil},
 	}
 	for _, check := range required {
 		if !check.set {
@@ -347,5 +350,33 @@ func TestRenderInitialMessagesWarnsAboutUntrustedProject(t *testing.T) {
 	rendered := strings.Join(renderChat(t, app.Chat), "\n")
 	if !strings.Contains(rendered, "This project is not trusted") {
 		t.Errorf("the trust warning is missing from the transcript:\n%s", rendered)
+	}
+}
+
+// TestRebuildForThemeRepopulatesThemedContainers pins the committed-theme-change
+// rebuild: the port bakes theme colours into component styles at construction
+// (unlike upstream's render-time Proxy), so a switch must rebuild the header,
+// the loaded-resource sections and the transcript rather than only invalidate.
+func TestRebuildForThemeRepopulatesThemedContainers(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+
+	app.initialized = true
+	chatSentinel := tui.NewText("sentinel", 0, 0, nil)
+	app.Chat.AddChild(chatSentinel)
+	headerSentinel := tui.NewText("old header", 0, 0, nil)
+	app.HeaderContainer.AddChild(headerSentinel)
+
+	app.rebuildForTheme()
+
+	for _, child := range app.Chat.Children {
+		if child == chatSentinel {
+			t.Fatal("the transcript was not rebuilt")
+		}
+	}
+	for _, child := range app.HeaderContainer.Children {
+		if child == headerSentinel {
+			t.Fatal("the startup header was not rebuilt")
+		}
 	}
 }

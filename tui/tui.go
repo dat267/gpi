@@ -140,6 +140,67 @@ func (r *TuiReference) EnableLoopInput(onInput func(string), onResize func()) {
 // HandleTerminalInput forwards terminal input dispatch to the active renderer.
 func (r *TuiReference) HandleTerminalInput(data string) { r.get().HandleTerminalInput(data) }
 
+// SetTerminalColorSchemeNotifications forwards to the active renderer; the
+// renderer's color-scheme/query surface is not part of the TUI interface, so
+// the assertion is guarded.
+func (r *TuiReference) SetTerminalColorSchemeNotifications(enabled bool) {
+	if renderer, ok := r.get().(interface{ SetTerminalColorSchemeNotifications(bool) }); ok {
+		renderer.SetTerminalColorSchemeNotifications(enabled)
+	}
+}
+
+// OnTerminalColorSchemeChange forwards to the active renderer.
+func (r *TuiReference) OnTerminalColorSchemeChange(listener func(TerminalColorScheme)) func() {
+	if renderer, ok := r.get().(interface {
+		OnTerminalColorSchemeChange(func(TerminalColorScheme)) func()
+	}); ok {
+		return renderer.OnTerminalColorSchemeChange(listener)
+	}
+	return func() {}
+}
+
+// OnTerminalBackgroundColorChange forwards to the active renderer.
+func (r *TuiReference) OnTerminalBackgroundColorChange(listener func(RgbColor)) func() {
+	if renderer, ok := r.get().(interface {
+		OnTerminalBackgroundColorChange(func(RgbColor)) func()
+	}); ok {
+		return renderer.OnTerminalBackgroundColorChange(listener)
+	}
+	return func() {}
+}
+
+// RequestTerminalColorScheme forwards to the active renderer.
+func (r *TuiReference) RequestTerminalColorScheme() {
+	if renderer, ok := r.get().(interface{ RequestTerminalColorScheme() }); ok {
+		renderer.RequestTerminalColorScheme()
+	}
+}
+
+// RequestTerminalBackgroundColor forwards to the active renderer.
+func (r *TuiReference) RequestTerminalBackgroundColor() {
+	if renderer, ok := r.get().(interface{ RequestTerminalBackgroundColor() }); ok {
+		renderer.RequestTerminalBackgroundColor()
+	}
+}
+
+// QueryTerminalColorScheme forwards to the active renderer.
+func (r *TuiReference) QueryTerminalColorScheme(timeoutMS int) (TerminalColorScheme, bool) {
+	if renderer, ok := r.get().(interface {
+		QueryTerminalColorScheme(int) (TerminalColorScheme, bool)
+	}); ok {
+		return renderer.QueryTerminalColorScheme(timeoutMS)
+	}
+	return "", false
+}
+
+// QueryTerminalBackgroundColor forwards to the active renderer.
+func (r *TuiReference) QueryTerminalBackgroundColor(timeoutMS int) (RgbColor, bool) {
+	if renderer, ok := r.get().(interface{ QueryTerminalBackgroundColor(int) (RgbColor, bool) }); ok {
+		return renderer.QueryTerminalBackgroundColor(timeoutMS)
+	}
+	return RgbColor{}, false
+}
+
 // RenderCount forwards the active renderer's paint count.
 func (r *TuiReference) RenderCount() int64 { return r.get().RenderCount() }
 
