@@ -354,9 +354,22 @@ func (s *MainScreen) doRender() {
 		newLines = s.CompositeOverlays(newLines, width, height)
 	}
 
-	if LowBandwidth() {
+	// The palette owns the surface: replace every default-background reset with
+	// the page background and pad to width, so the terminal's own theme never
+	// shows through behind the text.
+	pageBG := s.PageBackgroundAnsi()
+	if pageBG != "" {
+		for i, line := range newLines {
+			if !IsImageLine(line) {
+				newLines[i] = ApplyPageBackground(line, width, pageBG)
+			}
+		}
+	}
+
+	if LowBandwidth() && pageBG == "" {
 		// Trailing padding is invisible (every changed row is cleared first) but
-		// costs a byte per cell on the wire; drop it.
+		// costs a byte per cell on the wire; drop it. With a page background the
+		// padding carries the fill, so it must be kept.
 		for i, line := range newLines {
 			if !IsImageLine(line) {
 				newLines[i] = strings.TrimRight(line, " ")

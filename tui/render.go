@@ -114,6 +114,10 @@ type Renderer struct {
 	OnDebug            func()
 	ShowHardwareCursor bool
 	ClearOnShrink      bool
+	// PageBackground, when set, returns the ANSI background sequence painted
+	// behind every frame row: the palette owns the surface, so the terminal's
+	// theme cannot make the text unreadable. Empty disables it.
+	PageBackground func() string
 
 	// DoRender is the screen-specific render implementation.
 	DoRender func()
@@ -373,6 +377,15 @@ func (t *Renderer) RenderTicks() <-chan struct{} {
 
 // RenderCount reports completed paints (test seam).
 func (t *Renderer) RenderCount() int64 { return atomic.LoadInt64(&t.renderCount) }
+
+// PageBackgroundAnsi returns the configured page background sequence, or ""
+// when unset. The screens call it per frame so a theme change is picked up.
+func (t *Renderer) PageBackgroundAnsi() string {
+	if t.PageBackground == nil {
+		return ""
+	}
+	return t.PageBackground()
+}
 
 // signalRender coalesces a render request onto the tick channel.
 func (t *Renderer) signalRender() {

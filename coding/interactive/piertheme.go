@@ -25,9 +25,11 @@ package interactive
 //     at a glance — the header wordmark, borders, selection and list bullets all
 //     carry it.
 //
-// The keyword for everything else is minimal: primary text is the terminal's
-// own foreground, and colour is spent on structure (borders, diffs) and
-// emphasis (the accent) rather than on decoration.
+// The keyword for everything else is minimal: colour is spent on structure
+// (borders, diffs) and emphasis (the accent) rather than on decoration. The
+// palette paints its own `background` token, so the terminal's theme can no
+// longer make the text unreadable; `text` is therefore an explicit colour and
+// not the terminal's foreground.
 
 // transparentBackgroundColors are the decorative background tokens. They are
 // left unset so the terminal's own background shows through; bgAnsi renders an
@@ -84,8 +86,10 @@ func pierDarkJSON() *ThemeJSON {
 	return &ThemeJSON{
 		Name: "dark",
 		Colors: pierColors(map[string]string{
-			// Primary text is the terminal's own foreground.
-			"text":         "",
+			// Primary text is an explicit light colour: the palette paints its own
+			// background, so the terminal's foreground can no longer be trusted.
+			"background":   "#101010",
+			"text":         "#d4d4d4",
 			"accent":       "#ffb454",
 			"border":       "#4a4a4a",
 			"borderAccent": "#ffb454",
@@ -97,10 +101,10 @@ func pierDarkJSON() *ThemeJSON {
 			"dim":          "#5f5f5f",
 
 			"thinkingText":       "#9a9a9a",
-			"toolTitle":          "",
+			"toolTitle":          "#d4d4d4",
 			"toolOutput":         "#8b8b8b",
-			"userMessageText":    "",
-			"customMessageText":  "",
+			"userMessageText":    "#d4d4d4",
+			"customMessageText":  "#d4d4d4",
 			"customMessageLabel": "#c792ea",
 
 			// The tool-state fills: a neutral panel while a call runs, and the
@@ -152,8 +156,8 @@ func pierDarkJSON() *ThemeJSON {
 			"bashMode": "#ffb454",
 
 			"scrollbarTrack":  "#5f5f5f",
-			"scrollbarThumb":  "",
-			"searchMatchText": "",
+			"scrollbarThumb":  "#d4d4d4",
+			"searchMatchText": "#d4d4d4",
 		}),
 		Export: pierExport("#101010", "#171717", "#2a2318"),
 	}
@@ -165,7 +169,8 @@ func pierLightJSON() *ThemeJSON {
 	return &ThemeJSON{
 		Name: "light",
 		Colors: pierColors(map[string]string{
-			"text":         "",
+			"background":   "#ffffff",
+			"text":         "#1f2328",
 			"accent":       "#b45309",
 			"border":       "#c9c9c9",
 			"borderAccent": "#b45309",
@@ -177,10 +182,10 @@ func pierLightJSON() *ThemeJSON {
 			"dim":          "#9aa0a6",
 
 			"thinkingText":       "#6b7280",
-			"toolTitle":          "",
+			"toolTitle":          "#1f2328",
 			"toolOutput":         "#6b7280",
-			"userMessageText":    "",
-			"customMessageText":  "",
+			"userMessageText":    "#1f2328",
+			"customMessageText":  "#1f2328",
 			"customMessageLabel": "#8250df",
 
 			// Warm-neutral while a call runs; the success/error hues as a light tint.
@@ -228,8 +233,8 @@ func pierLightJSON() *ThemeJSON {
 			"bashMode": "#b45309",
 
 			"scrollbarTrack":  "#c9c9c9",
-			"scrollbarThumb":  "",
-			"searchMatchText": "",
+			"scrollbarThumb":  "#1f2328",
+			"searchMatchText": "#1f2328",
 		}),
 		Export: pierExport("#ffffff", "#f6f8fa", "#fff4e5"),
 	}

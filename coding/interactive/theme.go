@@ -180,6 +180,17 @@ func (t *Theme) GetBgAnsi(color ThemeBg) string {
 	return ansi
 }
 
+// GetBgAnsiOr returns the raw background sequence, or fallback when the theme
+// does not define the token (the fixed-background page uses it so upstream's
+// embedded themes, which have no "background", stay safe).
+func (t *Theme) GetBgAnsiOr(color ThemeBg, fallback string) string {
+	ansi, ok := t.bgColors[color]
+	if !ok {
+		return fallback
+	}
+	return ansi
+}
+
 // ColorMode returns the palette mode.
 func (t *Theme) ColorMode() ColorMode { return t.mode }
 
@@ -434,6 +445,7 @@ func withBackgroundFallbacks(colors map[string]ColorValue) map[string]ColorValue
 // ---- Theme loading ----
 
 var backgroundColorKeys = map[string]bool{
+	"background": true,
 	"selectedBg": true, "searchMatchBg": true, "userMessageBg": true, "customMessageBg": true,
 	"toolPendingBg": true, "toolSuccessBg": true, "toolErrorBg": true,
 }

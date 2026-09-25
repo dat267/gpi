@@ -298,6 +298,17 @@ into narrow, injectable wirings (all in `coding/interactive`):
   process-wide `http.DefaultTransport` — a data race against in-flight requests —
   and the setting already reached the wire per request (D40).
 
+**The theme paints its own background** (D165). The port's palettes define a
+real `background` token and an explicit `text`, and
+`createInteractiveTui` installs `Renderer.PageBackground` (both screens) to read
+it; `AltScreen`/`MainScreen` run every frame line through
+`tui.ApplyPageBackground`, which replaces default-background resets with the page
+background and pads to the viewport width. The low-bandwidth trailing-space trim
+is skipped while the page background is set (the padding carries the fill). This
+replaced the adaptive terminal-query theming, which sent OSC 11/`996n` queries
+and rebuilt the transcript at runtime and froze indefinitely over SSH; there are
+no terminal queries on this path.
+
 `tui/render.go` (+ `mainscreen.go`, `altscreen.go`, `terminal.go`,
 `stdinbuffer.go`) is the differential renderer core. Its lock discipline is
 load-bearing (see below).
@@ -568,7 +579,7 @@ snapshot under and deliver outside.
 Where upstream relies on JSON/JS semantics Go has no equivalent for, or where
 upstream has a defect, the port diverges deliberately: a numbered **D-row** in a
 code comment at the point of divergence, with the reproducing scenario, and an
-entry in `docs/DIVERGENCES.md` (range **D1–D163**). Prefer a D-row over silently
+entry in `docs/DIVERGENCES.md` (range **D1–D165**). Prefer a D-row over silently
 approximating upstream.
 
 ## Out of scope (documented)
