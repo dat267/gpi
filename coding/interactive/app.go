@@ -281,12 +281,8 @@ func NewApp(options AppOptions) *App {
 		UI:                  themeUIAdapter{ui: app.UI},
 		GetSettingsManager:  func() ThemeSettings { return themeSettingsAdapter{options.Settings} },
 		ShowError:           func(message string) { app.showError(message) },
-		OnChanged:           func() { app.updateEditorBorderColor(); app.rebuildForTheme() },
+		OnChanged:           func() { app.updateEditorBorderColor() },
 		InitialThemeSetting: options.InitialThemeSetting,
-		// Detect the terminal background/scheme through the active renderer
-		// (the raw terminal queries); Env supplies the COLORFGBG fallback.
-		Detector: themeUIAdapter{ui: app.UI},
-		Env:      os.Getenv,
 		// Theme loads read files from disk; the selector paths that reach the
 		// controller run on the UI loop, so they load off it.
 		Marshal:    func(fn func()) { app.UI.Post(fn) },
@@ -454,10 +450,7 @@ func NewApp(options AppOptions) *App {
 		OnTerminalError:     options.OnTerminalError,
 		OnUncaughtException: options.OnUncaughtException,
 
-		DisableThemeAutoSync: func() { StopThemeWatcher(); app.Theme.DisableAutoSync() },
-		// The renderer swap drops the old renderer's listener registry, so the
-		// theme controller rebinds against the new one.
-		OnTuiModeSwitched:       func() { app.Theme.RebindTUI() },
+		DisableThemeAutoSync:    func() { StopThemeWatcher() },
 		RecordCrash:             func(kind string, err error) bool { return app.Trust.RecordCrash(kind, err) },
 		CrashReportInstructions: func() string { return app.Trust.CrashReportInstructions() }, // Upstream prints "To resume this session: pi --session …" after the
 		// interactive shutdown (interactive-mode.ts shutdown(), chalk.dim
@@ -875,28 +868,6 @@ func (a *App) updateEditorBorderColor() {
 	}
 }
 
-// rebuildForTheme re-renders the themed components on a committed theme change.
-// The port bakes theme colours into component styles at construction (upstream
-// resolves its `theme` Proxy at render), so a switch that only invalidates would
-// leave the old colours on screen; the header and transcript are rebuilt.
-func (a *App) rebuildForTheme() {
-	if !a.initialized {
-		return
-	}
-	if a.Startup != nil {
-		a.Startup.RebuildChatFromMessages()
-	}
-	// The loaded-resource sections ([Context], skills) bake their colours too.
-	a.ShowLoadedResources(false)
-	if a.Runner != nil {
-		a.Runner.RebuildStartupHeader()
-	}
-	if a.UI != nil {
-		a.UI.Invalidate()
-		a.UI.RequestRender(false)
-	}
-}
-
 // applyReloadedSettings re-applies settings-dependent state after /reload
 // (upstream applyRuntimeSettings + restoreChatBeforeSessionStart +
 // themeController.applyFromSettings + setupAutocompleteProvider). It runs on
@@ -996,51 +967,6 @@ func (t themeUIAdapter) OnTerminalColorSchemeChange(listener func(theme Terminal
 	}
 	return func() {}
 }
-func (t themeUIAdapter) OnTerminalBackgroundColorChange(listener func(rgb RgbColor)) func() {
-	if renderer, ok := t.ui.(interface {
-		OnTerminalBackgroundColorChange(func(tui.RgbColor)) func()
-	}); ok {
-		return renderer.OnTerminalBackgroundColorChange(func(rgb tui.RgbColor) {
-			listener(RgbColor{R: rgb.R, G: rgb.G, B: rgb.B})
-		})
-	}
-	return func() {}
-}
-func (t themeUIAdapter) RequestTerminalColorScheme() {
-	if renderer, ok := t.ui.(interface{ RequestTerminalColorScheme() }); ok {
-		renderer.RequestTerminalColorScheme()
-	}
-}
-func (t themeUIAdapter) RequestTerminalBackgroundColor() {
-	if renderer, ok := t.ui.(interface{ RequestTerminalBackgroundColor() }); ok {
-		renderer.RequestTerminalBackgroundColor()
-	}
-}
-func (t themeUIAdapter) QueryTerminalColorScheme(timeoutMS int) (TerminalTheme, bool) {
-	if renderer, ok := t.ui.(interface {
-		QueryTerminalColorScheme(int) (tui.TerminalColorScheme, bool)
-	}); ok {
-		scheme, ok := renderer.QueryTerminalColorScheme(timeoutMS)
-		return TerminalTheme(scheme), ok
-	}
-	return "", false
-}
-func (t themeUIAdapter) QueryTerminalBackgroundColor(timeoutMS int) (RgbColor, bool) {
-	if renderer, ok := t.ui.(interface {
-		QueryTerminalBackgroundColor(int) (tui.RgbColor, bool)
-	}); ok {
-		rgb, ok := renderer.QueryTerminalBackgroundColor(timeoutMS)
-		return RgbColor{R: rgb.R, G: rgb.G, B: rgb.B}, ok
-	}
-	return RgbColor{}, false
-}
-
-// themeUIAdapter is both the controller's UI and its terminal detector; these
-// assertions keep the wiring honest (a missing method silently no-ops).
-var (
-	_ ThemeControllerUI         = themeUIAdapter{}
-	_ TerminalAutoThemeDetector = themeUIAdapter{}
-)
 
 // themeSettingsAdapter adapts *coding.SettingsManager to ThemeSettings.
 type themeSettingsAdapter struct{ *coding.SettingsManager }

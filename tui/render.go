@@ -148,13 +148,11 @@ type Renderer struct {
 	fullRedrawCount int
 
 	// terminal color queries (port of the TuiBase query surface)
-	pendingOSC11Replies      int
-	pendingOSC11Queries      []*pendingOSC11Query
-	colorSchemeListeners     []colorSchemeListener
-	backgroundColorListeners []backgroundColorListener
-	colorSchemeNotifyOn      atomic.Bool
-	nextColorSchemeID        int
-	nextBackgroundColorID    int
+	pendingOSC11Replies  int
+	pendingOSC11Queries  []*pendingOSC11Query
+	colorSchemeListeners []colorSchemeListener
+	colorSchemeNotifyOn  atomic.Bool
+	nextColorSchemeID    int
 
 	overlayStack           []*overlayEntry
 	renderedOverlayLayouts []renderedOverlayLayout
@@ -501,11 +499,6 @@ type colorSchemeListener struct {
 	listener func(TerminalColorScheme)
 }
 
-type backgroundColorListener struct {
-	id       int
-	listener func(RgbColor)
-}
-
 // OnTerminalColorSchemeChange subscribes to terminal color-scheme reports.
 func (t *Renderer) OnTerminalColorSchemeChange(listener func(TerminalColorScheme)) func() {
 	t.nextColorSchemeID++
@@ -519,41 +512,6 @@ func (t *Renderer) OnTerminalColorSchemeChange(listener func(TerminalColorScheme
 			}
 		}
 		t.colorSchemeListeners = filtered
-	}
-}
-
-// OnTerminalBackgroundColorChange subscribes to OSC 11 background-color
-// reports. Unlike a one-shot query, the listener stays registered, so a
-// background re-request can refine the theme long after startup.
-func (t *Renderer) OnTerminalBackgroundColorChange(listener func(RgbColor)) func() {
-	t.nextBackgroundColorID++
-	id := t.nextBackgroundColorID
-	t.backgroundColorListeners = append(t.backgroundColorListeners, backgroundColorListener{id: id, listener: listener})
-	return func() {
-		filtered := t.backgroundColorListeners[:0]
-		for _, entry := range t.backgroundColorListeners {
-			if entry.id != id {
-				filtered = append(filtered, entry)
-			}
-		}
-		t.backgroundColorListeners = filtered
-	}
-}
-
-// RequestTerminalBackgroundColor asks the terminal for its background color
-// (OSC 11) without blocking; the reply reaches OnTerminalBackgroundColorChange
-// on the owner goroutine.
-func (t *Renderer) RequestTerminalBackgroundColor() {
-	if t.Terminal != nil {
-		t.Terminal.Write("\x1b]11;?")
-	}
-}
-
-// RequestTerminalColorScheme asks the terminal for its light/dark preference
-// (DSR) without blocking; the reply reaches OnTerminalColorSchemeChange.
-func (t *Renderer) RequestTerminalColorScheme() {
-	if t.Terminal != nil {
-		t.Terminal.Write("\x1b[?996n")
 	}
 }
 
@@ -627,33 +585,27 @@ func (t *Renderer) QueryTerminalColorScheme(timeoutMS int) (TerminalColorScheme,
 	}
 }
 
-// consumeOSC11BackgroundResponse resolves the oldest pending OSC 11 query and
-// notifies the background listeners.
+// consumeOSC11BackgroundResponse resolves the oldest pending OSC 11 query.
 func (t *Renderer) consumeOSC11BackgroundResponse(data string) bool {
+	if t.pendingOSC11Replies <= 0 {
+		return false
+	}
 	if !IsOsc11BackgroundColorResponse(data) {
 		return false
 	}
 	color, ok := ParseOsc11BackgroundColor(data)
 
-	if t.pendingOSC11Replies > 0 {
-		t.pendingOSC11Replies--
-		var query *pendingOSC11Query
-		if len(t.pendingOSC11Queries) > 0 {
-			query = t.pendingOSC11Queries[0]
-			t.pendingOSC11Queries = t.pendingOSC11Queries[1:]
-		}
-		if query != nil && !query.settled {
-			query.settled = true
-			select {
-			case query.result <- osc11Result{color: color, ok: ok}:
-			default:
-			}
-		}
+	t.pendingOSC11Replies--
+	var query *pendingOSC11Query
+	if len(t.pendingOSC11Queries) > 0 {
+		query = t.pendingOSC11Queries[0]
+		t.pendingOSC11Queries = t.pendingOSC11Queries[1:]
 	}
-	if ok {
-		listeners := append([]backgroundColorListener{}, t.backgroundColorListeners...)
-		for _, entry := range listeners {
-			entry.listener(color)
+	if query != nil && !query.settled {
+		query.settled = true
+		select {
+		case query.result <- osc11Result{color: color, ok: ok}:
+		default:
 		}
 	}
 	return true
