@@ -132,6 +132,11 @@ func run(appName string, args *coding.Args) error {
 	// Go refresh is synchronous, so it needs a ceiling).
 	modelRefreshTimeoutMS := int64(15000)
 
+	// One owner for the off-loop queues: session writes, settings persists and
+	// the app's theme and pre-render queues. Teardown drains them all with a
+	// single call, so a queue cannot be forgotten.
+	offloopGroup := offloop.NewGroup()
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -199,13 +204,14 @@ func run(appName string, args *coding.Args) error {
 			persist := false
 			options.Persist = &persist
 		}
-		if !args.NoSession && !listingModels {
-			// The interactive UI's event loop must never block, so session file
-			// writes run on the off-loop queue (ordered, flushed at teardown via
-			// App.StopMode). One-shot consumers keep synchronous writes.
-			options.WriteQueue = offloop.New()
-		}
 		sessions = coding.NewSessionManager(cwd, options)
+	}
+	// Session writes run off the UI loop. A resumed, continued or forked session
+	// is created without a queue, so wire it here rather than only on the fresh
+	// path — otherwise those sessions wrote synchronously on the loop. One-shot
+	// consumers (--no-session, --list-models) keep synchronous writes.
+	if sessions != nil && !args.NoSession && !listingModels && sessions.GetWriteQueue() == nil {
+		sessions.SetWriteQueue(offloopGroup.Queue())
 	}
 	coding.Time("createSessionManager", coding.TimingMain)
 
@@ -273,7 +279,7 @@ func run(appName string, args *coding.Args) error {
 	// has no writers). FlushPersists runs at teardown via App.StopMode.
 	settings = coding.NewSettingsManagerFromFiles(runtimeCwd, agentDir, coding.SettingsManagerCreateOptions{
 		ProjectTrusted: &trusted,
-		PersistQueue:   offloop.New(),
+		PersistQueue:   offloopGroup.Queue(),
 	})
 	if args.UseTheme != nil {
 		settings.ApplyOverrides(&coding.Settings{Theme: args.UseTheme})
@@ -422,10 +428,10 @@ func run(appName string, args *coding.Args) error {
 			InitialMessage: initialPrompt.Message,
 			Messages:       initialPrompt.Rest,
 		})
-		// Session writes run on the off-loop queue; drain before exit so the
-		// transcript survives (upstream disposes the runtime the same way).
-		sessions.FlushWrites()
-		settings.FlushPersists()
+		// Session writes and settings persists run on the off-loop queues; drain
+		// the shared group before exit so the transcript survives (upstream
+		// disposes the runtime the same way).
+		offloopGroup.FlushAll()
 		coding.PrintTimings()
 		if exitCode != 0 {
 			os.Exit(exitCode)
@@ -450,6 +456,7 @@ func run(appName string, args *coding.Args) error {
 		Session:      created.Session,
 		Runtime:      runtime,
 		SessionMgr:   sessions,
+		Offloop:      offloopGroup,
 		Offline:      args.Offline,
 		// The first message carries any @file text ahead of the first positional
 		// message; the rest stay queued behind it.

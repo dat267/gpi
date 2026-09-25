@@ -10,7 +10,9 @@
 //
 // Domains get their own queue: a 5s clipboard hang must not delay a settings
 // write. Ordering is guaranteed per queue, not across queues. Flush must not
-// be called from a task of the same queue.
+// be called from a task of the same queue. A Group bundles the queues of one
+// composition root so shutdown is a single FlushAll (drain) or StopAll (drain
+// and stop).
 package offloop
 
 import "sync"

@@ -63,6 +63,11 @@ type AppOptions struct {
 	SessionMgr  *coding.SessionManager
 	Keybindings *AppKeybindingsManager
 
+	// Offloop is the command's off-loop queue group. The app registers its own
+	// queues (theme, pre-render) here and StopMode stops them all at teardown;
+	// nil gives the app a group of its own.
+	Offloop *offloop.Group
+
 	// InitialThemeSetting seeds the theme controller.
 	InitialThemeSetting *string
 	// ProjectTrustOverride is --approve/--no-approve: it settles project trust
@@ -185,8 +190,14 @@ type App struct {
 	initialized      bool
 
 	// prerenderQueue warms deferred transcript components off the UI loop.
-	// Stopped in StopMode so a warm cannot touch the renderer after teardown.
+	// Registered in offloopGroup; stopped by StopMode so a warm cannot touch the
+	// renderer after teardown.
 	prerenderQueue *offloop.Queue
+
+	// offloopGroup owns the app's off-loop queues (theme, pre-render) so
+	// teardown is one StopAll. In production the command passes its group, which
+	// also owns the settings and session queues.
+	offloopGroup *offloop.Group
 }
 
 // NewApp builds the interactive-mode object graph.
@@ -231,6 +242,14 @@ func NewApp(options AppOptions) *App {
 		Keybindings: keybindings,
 	}
 
+	// One owner for the off-loop queues. The command passes its group so a
+	// single StopAll at teardown covers the settings and session queues too; a
+	// standalone app gets its own.
+	app.offloopGroup = options.Offloop
+	if app.offloopGroup == nil {
+		app.offloopGroup = offloop.NewGroup()
+	}
+
 	// Renderer + theme. app.UI is the stable forwarding reference (upstream's
 	// createInteractiveTuiReference(() => this.renderer)): SwitchTuiMode swaps
 	// the lifecycle's renderer and every holder of app.UI follows it.
@@ -267,7 +286,7 @@ func NewApp(options AppOptions) *App {
 		// Theme loads read files from disk; the selector paths that reach the
 		// controller run on the UI loop, so they load off it.
 		Marshal:    func(fn func()) { app.UI.Post(fn) },
-		ThemeQueue: offloop.New(),
+		ThemeQueue: app.offloopGroup.Queue(),
 	})
 
 	// Containers.
@@ -345,7 +364,7 @@ func NewApp(options AppOptions) *App {
 	app.UIState.WorkingMessage = app.UIState.DefaultWorkingMessage
 
 	app.Transcript = NewTranscriptRenderer(app.Chat, app.UI, app.Settings, app.Session, app.SessionMgr)
-	app.prerenderQueue = offloop.New()
+	app.prerenderQueue = app.offloopGroup.Queue()
 	app.Transcript.PrerenderQueue = app.prerenderQueue
 	app.Transcript.Footer = app.Footer
 	app.Transcript.Editor = app.DefaultEditor
@@ -768,17 +787,18 @@ func (a *App) terminalWidth() int {
 // the footer and its data provider, the session-event subscription, the
 // renderer (with the fullscreen exit output setting) and the signal handlers.
 func (a *App) StopMode(fullscreenExitOutput string) {
-	// Settings persists and session writes run on off-loop queues; drain them
-	// here so a clean exit cannot lose the last save (signals route through
-	// the same hook).
+	// Drain the settings and session queues (a clean exit cannot lose the last
+	// save; signals route through the same hook), then stop every off-loop
+	// queue the app owns — including the theme queue, which nothing used to
+	// stop.
 	if a.Settings != nil {
 		a.Settings.FlushPersists()
 	}
 	if a.SessionMgr != nil {
 		a.SessionMgr.FlushWrites()
 	}
-	if a.prerenderQueue != nil {
-		a.prerenderQueue.Stop()
+	if a.offloopGroup != nil {
+		a.offloopGroup.StopAll()
 	}
 	if a.Commands == nil {
 		// Teardown before Init finished: stop the renderer only.

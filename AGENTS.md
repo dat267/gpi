@@ -153,6 +153,14 @@ invented to bridge that gap). Stage 1 has landed:
 - The loop calls a **watchdog beat** once per iteration
   (`RunWiring.LoopBeats`, exposed as `App.LoopBeats`): a stalled loop stops
   advancing it, so a watchdog can detect a hang.
+- **Blocking work runs off the loop on `internal/offloop` queues** (one
+  goroutine per domain, strict submission order, optional keyed coalescing):
+  session file writes, settings persists, theme loads, the transcript
+  pre-render, and clipboard/paste. An `offloop.Group` owns the queues of one
+  composition root, so teardown is a single `StopAll` (drain + stop) rather
+  than a hand-written enumeration — `App.StopMode` and the print-mode exit.
+  The queues are opt-in: a nil queue keeps the synchronous path for one-shot
+  CLI/SDK consumers and tests, and the interactive wiring is what opts in.
 - **D143** records the divergence: upstream is single-threaded (await +
   microtask order), the port is an explicit select loop with off-loop work and
   partial coalescing.
