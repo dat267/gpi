@@ -1,11 +1,13 @@
-//go:build !windows
+//go:build linux
 
 package interactive
 
 // PTY watchdog tests for the D136-D139 deadlock class. Each test drives the
 // real pier binary through a flow inside a pseudo-terminal, sends SIGQUIT at
 // teardown, and fails when the runtime stack dump shows a goroutine blocked
-// on a sync.Mutex. The harness is stdlib + golang.org/x/sys/unix only.
+// on a sync.Mutex. The harness is Linux-specific: it unlocks the pty master
+// with TIOCSPTLCK and reads the slave name with TIOCGPTN, neither of which the
+// BSDs have.
 
 import (
 	"bytes"
@@ -308,8 +310,6 @@ func assertNoMutexBlocked(t *testing.T, dump string) {
 func stripAnsiForLog(s string) string {
 	return ansiSequenceRe.ReplaceAllString(s, "")
 }
-
-var ansiSequenceRe = regexp.MustCompile(`\x1b\[[0-9;?<>]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[>=]`)
 
 func truncate(s string, n int) string {
 	if len(s) <= n {

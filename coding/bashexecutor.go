@@ -264,7 +264,7 @@ func (o *localShellOperations) Exec(ctx context.Context, command, cwd string, ex
 	} else {
 		cmd.Env = shellEnv(nil, true)
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureDetachedCommand(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

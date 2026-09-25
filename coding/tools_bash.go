@@ -394,12 +394,10 @@ func ResolveTimeoutSeconds(timeout float64) (time.Duration, error) {
 	return time.Duration(timeoutMS * float64(time.Millisecond)), nil
 }
 
-// KillProcessTree kills the process group (SIGKILL), falling back to the
-// single process (port of killProcessTree).
+// KillProcessTree kills the process tree (SIGKILL on unix, taskkill on
+// Windows; port of killProcessTree).
 func KillProcessTree(pid int) {
-	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
-		_ = syscall.Kill(pid, syscall.SIGKILL)
-	}
+	killProcessTreePlatform(pid)
 }
 
 // CreateBashTool builds the bash tool (port of createShellToolDefinition
@@ -545,7 +543,7 @@ func CreateShellTool(cwd string, config ShellToolConfig, options *BashToolOption
 			cmd.Dir = cwd
 			cmd.Env = shellEnv(sessionEnv, exposeSessionEnv)
 			// Detached process group for tree kills.
-			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			configureDetachedCommand(cmd)
 
 			stdoutPipe, _ := cmd.StdoutPipe()
 			stderrPipe, _ := cmd.StderrPipe()
