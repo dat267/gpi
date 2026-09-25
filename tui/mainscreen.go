@@ -354,6 +354,16 @@ func (s *MainScreen) doRender() {
 		newLines = s.CompositeOverlays(newLines, width, height)
 	}
 
+	if LowBandwidth() {
+		// Trailing padding is invisible (every changed row is cleared first) but
+		// costs a byte per cell on the wire; drop it.
+		for i, line := range newLines {
+			if !IsImageLine(line) {
+				newLines[i] = strings.TrimRight(line, " ")
+			}
+		}
+	}
+
 	cursorRow, cursorCol, hasCursor := s.ExtractCursorPosition(newLines, height)
 	cursorPos := struct {
 		Row, Col int
@@ -591,7 +601,19 @@ func (s *MainScreen) doRender() {
 			continue
 		}
 
-		output.Append("\x1b[2K")
+		// A low-bandwidth frame whose new line is at least as wide as the old one
+		// overwrites every old cell, so the per-line clear is unnecessary.
+		skipClear := false
+		if LowBandwidth() && !isImage {
+			oldLine := ""
+			if i < len(s.previousLines) {
+				oldLine = s.previousLines[i]
+			}
+			skipClear = VisibleWidth(line) >= VisibleWidth(oldLine)
+		}
+		if !skipClear {
+			output.Append("\x1b[2K")
+		}
 		if !isImage && VisibleWidth(line) > width {
 			if err := s.reportOverwideLine(newLines, i, width); err != nil {
 				return

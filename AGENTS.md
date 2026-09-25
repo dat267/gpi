@@ -220,6 +220,15 @@ Stage 2 (rendering on the loop) has landed:
   upstream's 16 ms frame throttle for coalesced render ticks, so a streaming
   delta burst cannot paint back-to-back; input, resize and animation paints
   stay immediate.
+- **D163 low bandwidth over SSH.** Styled rows carry trailing padding to the
+  viewport width; over SSH those cells are bytes on the wire (one keystroke
+  measured 127 bytes, ~77 of them padding). When `SSH_CONNECTION`/`SSH_TTY` is
+  set (or `PIER_LOW_BANDWIDTH=1`; `=0` forces the upstream form),
+  `tui.SetLowBandwidth` makes both `AltScreen` and `MainScreen` trim trailing
+  spaces and skip a `[2K` the new row covers or the full-screen clear already
+  did. The visible result is identical; the keystroke frame drops to 48 bytes
+  (−62%). Default off, so the upstream-parity goldens keep asserting the padded
+  bytes. `ConfigureLowBandwidth` (called from `cmd`) is the boot hook.
 
 - Stage 1 also fixed the read side of `coding.SessionManager`
   (`GetEntries`, `BuildContextEntriesForLeaf`, `BuildSessionContext` now take
@@ -486,7 +495,7 @@ snapshot under and deliver outside.
 Where upstream relies on JSON/JS semantics Go has no equivalent for, or where
 upstream has a defect, the port diverges deliberately: a numbered **D-row** in a
 code comment at the point of divergence, with the reproducing scenario, and an
-entry in `docs/DIVERGENCES.md` (range **D1–D162**). Prefer a D-row over silently
+entry in `docs/DIVERGENCES.md` (range **D1–D163**). Prefer a D-row over silently
 approximating upstream.
 
 ## Out of scope (documented)

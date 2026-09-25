@@ -5,7 +5,7 @@ usually because upstream relies on a JS or Node behaviour that has no direct Go
 equivalent, or because a defect upstream is fixed here. D-row numbers live in
 code comments at the point of divergence; this file is the log, and it is
 representative: the rows below carry a written-up rationale, while the rest live
-only as the code comment that introduced them. The range is **D1–D162**.
+only as the code comment that introduced them. The range is **D1–D163**.
 
 - D30 — startup timings read `PI_TIMING` **per call** instead of once at module
   load (upstream reads the flag when the timing module is first imported), so a
@@ -521,3 +521,16 @@ only as the code comment that introduced them. The range is **D1–D162**.
   `JSON.stringify(sessionManager.getHeader())`. `@file` images are warned and
   ignored (D153); extensions and the runtime-rebind plumbing upstream carries
   are out of scope (D41).
+
+- D163 — **the renderer trims trailing padding over a remote shell**. Upstream
+  pads every styled line to the viewport width and emits the padding, so an
+  editor keystroke writes roughly a full row per changed row. Over SSH those
+  cells are bytes on the wire (and this project's SSH users feel it): measured
+  on the port, one keystroke cost 127 bytes, of which ~77 were trailing spaces
+  after the visible text. When `SSH_CONNECTION`/`SSH_TTY` is set (or
+  `PIER_LOW_BANDWIDTH=1`; `=0` forces the upstream form), the renderer trims
+  trailing spaces from each emitted row, relies on the per-row `[2K` (already
+  emitted) to clear the remainder, and skips the `[2K` when the new row is at
+  least as wide as the old one or after a full-screen clear. The visible result
+  is identical; the same keystroke drops to 48 bytes (−62%). The default path is
+  untouched so the upstream-parity goldens keep asserting the padded bytes.

@@ -444,6 +444,10 @@ func run(appName string, args *coding.Args) error {
 		tuiMode = *args.TuiMode
 	}
 
+	// A remote shell pays for every byte written to the terminal; trim the
+	// render padding unless the user overrides it.
+	interactive.ConfigureLowBandwidth()
+
 	app := interactive.NewApp(interactive.AppOptions{
 		Cwd:          runtimeCwd,
 		AgentDir:     agentDir,

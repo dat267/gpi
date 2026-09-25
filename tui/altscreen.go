@@ -2114,6 +2114,15 @@ func (s *AltScreen) doRender() {
 	screen = s.compositeFlashes(screen, width, height)
 
 	row, col, hasCursor := s.ExtractCursorPosition(screen, height)
+	if LowBandwidth() {
+		// Trailing padding is invisible (each row is cleared before writing) but
+		// costs a byte per cell on the wire; drop it.
+		for index, line := range screen {
+			if !IsImageLine(line) {
+				screen[index] = strings.TrimRight(line, " ")
+			}
+		}
+	}
 	screen = s.ApplyLineResets(screen)
 	for index, line := range screen {
 		if !IsImageLine(line) && VisibleWidth(line) > width {
@@ -2172,13 +2181,17 @@ func (s *AltScreen) doRender() {
 		if !fullRedraw && !imagesNeedRedraw && screen[row] == previous {
 			continue
 		}
-		clear := "\x1b[2K"
-		if clearRowsBeforeKittyImages {
-			clear = ""
-		}
 		line := ""
 		if row < len(screen) {
 			line = screen[row]
+		}
+		// A full repaint already erased the screen, and a low-bandwidth frame
+		// whose new line is at least as wide as the old one overwrites every old
+		// cell: neither needs the per-row clear.
+		clear := "\x1b[2K"
+		if clearRowsBeforeKittyImages ||
+			(LowBandwidth() && (fullRedraw || VisibleWidth(line) >= VisibleWidth(previous))) {
+			clear = ""
 		}
 		builder.WriteString("\x1b[" + itoa(row+1) + ";1H" + clear + line)
 	}
