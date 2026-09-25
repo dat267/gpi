@@ -3,10 +3,10 @@ package interactive
 import (
 	"context"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/dat267/pier/coding"
+	"github.com/dat267/pier/internal/offloop"
 	"github.com/dat267/pier/tui"
 )
 
@@ -466,9 +466,11 @@ func (w *SubmitWiring) HandleSubmit(ctx context.Context, text string) {
 	addHistory(text)
 }
 
-// pasteInFlight drops an image paste while a previous clipboard read is still
-// running: each read can take seconds, and overlapping inserts would interleave.
-var pasteInFlight atomic.Bool
+// pasteQueue runs clipboard reads off the loop (the internal/offloop uniform
+// mechanism); the coalescing key drops an image paste while a previous
+// clipboard read is still queued or running: each read can take seconds, and
+// overlapping inserts would interleave.
+var pasteQueue = offloop.New()
 
 // newKeyWiring assembles the KeyWiring (port of the corresponding InteractiveMode wiring).
 func newKeyWiring(app *App) *KeyWiring {
@@ -483,11 +485,7 @@ func newKeyWiring(app *App) *KeyWiring {
 			// paste command, so it happens off the loop and the insert marshals
 			// back; the in-flight flag drops overlapping pastes instead of
 			// interleaving their inserts.
-			if !pasteInFlight.CompareAndSwap(false, true) {
-				return
-			}
-			go func() {
-				defer pasteInFlight.Store(false)
+			pasteQueue.GoCoalesced("paste", func() {
 				text, err := readClipboardText()
 				if err != nil || text == "" {
 					return
@@ -496,7 +494,7 @@ func newKeyWiring(app *App) *KeyWiring {
 					app.DefaultEditor.InsertTextAtCursor(text)
 					app.UI.RequestRender(false)
 				})
-			}()
+			})
 		},
 		Settings: app.Settings,
 		UI:       app.UI,

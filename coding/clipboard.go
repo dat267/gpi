@@ -15,6 +15,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/dat267/pier/internal/offloop"
 )
 
 // MaxOSC52EncodedLength matches upstream's OSC 52 payload cap.
@@ -146,14 +148,19 @@ func CopyTextToClipboard(text string) error {
 	return nil
 }
 
-// CopyTextToClipboardAsync copies on its own goroutine and reports the outcome
-// to onDone (nil on success). The clipboard subprocess can hang for up to its
-// timeout — xclip serving a selection, a wedged clipboard daemon — so callers
-// on the UI goroutine use this form and confirm optimistically.
+// clipboardQueue serializes clipboard copies off the calling goroutine (the
+// internal/offloop uniform mechanism). The clipboard subprocess can hang for
+// up to its timeout — xclip serving a selection, a wedged clipboard daemon —
+// so callers on the UI goroutine use this form and confirm optimistically;
+// onDone runs on the worker and its caller marshals back onto the loop.
+var clipboardQueue = offloop.New()
+
+// CopyTextToClipboardAsync copies on the clipboard queue and reports the
+// outcome to onDone (nil on success), in submission order.
 func CopyTextToClipboardAsync(text string, onDone func(error)) {
-	go func() {
+	clipboardQueue.Go(func() {
 		onDone(CopyTextToClipboard(text))
-	}()
+	})
 }
 
 // ReadClipboardText reads plain text from the system clipboard (upstream
