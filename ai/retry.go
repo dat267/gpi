@@ -282,6 +282,11 @@ var retryableProviderErrorPattern = regexp.MustCompile(`(?i)` + strings.Join([]s
 	`network.?error`, `connection.?error`, `connection.?refused`, `connection.?lost`,
 	`other side closed`, `fetch failed`, `getaddrinfo`, `ENOTFOUND`, `EAI_AGAIN`,
 	`upstream.?connect`, `reset before headers`, `socket hang up`, `socket connection was closed`,
+	// OS-level socket aborts (D171): "software caused connection abort"
+	// (ECONNABORTED — what Termux and Windows emit), "connection reset by peer"
+	// (ECONNRESET), "broken pipe" (EPIPE) and "unexpected EOF" all mean what the
+	// fetch and websocket phrasings above mean. Upstream's list omits them.
+	`connection.?abort`, `connection.?reset`, `broken.?pipe`, `unexpected.?eof`,
 	`timed? out`, `timeout`, `terminated`,
 	`websocket.?closed`, `websocket.?error`,
 	`ended without`, `stream ended before message_stop`,

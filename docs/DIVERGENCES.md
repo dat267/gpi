@@ -659,3 +659,13 @@ only as the code comment that introduced them. The range is **D1–D169**.
   request: the product it ships is pier, and the hint advertises the capability
   under the upstream name. The key-binding lists and the ctrl+o pointer above it are
   unchanged.
+
+- D171 — **OS-level socket aborts are retryable**. Upstream's retryable list
+  (`packages/ai/src/utils/retry.ts`) covers fetch, HTTP and websocket phrasings —
+  `socket hang up`, `connection refused`, `connection lost`, `reset before
+  headers`, `timed out` — but not the strings the OS produces when a socket dies
+  under an open request: `software caused connection abort` (ECONNABORTED, what
+  Termux and Windows emit), `connection reset by peer` (ECONNRESET), `broken pipe`
+  (EPIPE) and `unexpected EOF`. A request that hit one failed with no retry at
+  all. The port matches those four; the quota/billing guard is still evaluated
+  first, so a usage-limit error that also mentions a reset is not retried.
