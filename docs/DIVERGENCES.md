@@ -221,10 +221,12 @@ only as the code comment that introduced them. The range is **D1–D169**.
     upstream does — and an error among them exits 1.
   - **`@file`** text is folded into the session's first message ahead of the
     first positional message, with the rest queued behind it, matching upstream
-    `buildInitialMessage`. *One deliberate gap*: upstream attaches `@file`
-    **images** to that message, but this build's interactive mode has no
-    image-input path at all, so the images are dropped with a warning rather than
-    letting the model be asked about an image it never received.
+    `buildInitialMessage`. `@file` **images** ride that same first message as
+    `ImageContent` attachments (`ProcessFileArguments` → `InitialPrompt.Images` →
+    `RunOptions.InitialImages` → the first prompt's `PromptOptions.Images`), the
+    way upstream attaches them, and only that prompt carries them. *Remaining
+    gap*: print mode's prompt path is text-only, so an image there is still
+    reported and dropped rather than sent.
   - **`--skill`, `--prompt-template`, `--theme`** paths are resolved against the
     working directory (`ResolveCLIPaths`/`IsLocalPath`, a port of upstream
     `resolveCliPaths`), and each **survives its own `--no-*`**: refusing

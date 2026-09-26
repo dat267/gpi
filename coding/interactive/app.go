@@ -9,6 +9,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/dat267/pier/ai"
 	"github.com/dat267/pier/coding"
 	"github.com/dat267/pier/internal/offloop"
 	"github.com/dat267/pier/tui"
@@ -87,6 +88,8 @@ type AppOptions struct {
 	// InitialMessage/InitialMessages are sent after startup.
 	InitialMessage  string
 	InitialMessages []string
+	// InitialImages are @file image attachments for InitialMessage.
+	InitialImages []ai.ImageContent
 	// ModelFallbackMessage explains a model restore or resolution fallback; it is
 	// shown as a chat warning at startup.
 	ModelFallbackMessage string
@@ -626,6 +629,7 @@ func (a *App) Run(ctx context.Context) {
 		ModelFallbackMessage: a.options.ModelFallbackMessage,
 		InitialMessage:       a.options.InitialMessage,
 		InitialMessages:      a.options.InitialMessages,
+		InitialImages:        a.options.InitialImages,
 		ModelDefaultMessage:  modelDefault.Message,
 		ModelDefaultWarning:  modelDefault.Warning,
 	})

@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dat267/pier/ai"
 	"github.com/dat267/pier/coding"
 	"github.com/dat267/pier/tui"
 )
@@ -93,7 +94,10 @@ type RunWiring struct {
 	// TakeCrash returns the unnotified crash record.
 	TakeCrash func() *coding.CrashRecord
 	// Prompt sends a prompt to the session.
-	Prompt func(ctx context.Context, text string) error
+	// Prompt submits a prompt; images ride with it the way upstream's
+	// session.prompt(text, images) attaches them (@file images on the first
+	// message).
+	Prompt func(ctx context.Context, text string, images []ai.ImageContent) error
 	// Events applies session events. Only the run loop calls it.
 	Events *EventDispatcher
 	// SessionEvents carries the lossless session events and PartialEvents the
@@ -470,7 +474,7 @@ func (w *RunWiring) Run(ctx context.Context, options InitOptions, runOptions Run
 	}
 	initial = append(initial, runOptions.InitialMessages...)
 
-	w.runLoop(ctx, initial)
+	w.runLoop(ctx, initial, runOptions.InitialImages)
 }
 
 // renderTicks returns the active renderer's tick channel (nil when the
@@ -670,7 +674,7 @@ func (h runLoopHost) RenderTicks() <-chan struct{} { return h.w.renderTicks() }
 // in arrival order and runs blocking work in a goroutine so a turn's events
 // keep draining while it runs (upstream awaits the prompt and processes the
 // event queue meanwhile; D-row: see AGENTS.md).
-func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
+func (w *RunWiring) runLoop(ctx context.Context, initialWork []string, initialImages []ai.ImageContent) {
 	inputs := w.Startup.Inputs()
 	// The schedule owns the loop's timers and its work queue; the select below
 	// is the only thing that waits on them (interactivemode_schedule.go). It
@@ -690,11 +694,16 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 	}()
 	var animationCh <-chan time.Time
 
-	for _, text := range initialWork {
+	for index, text := range initialWork {
 		text := text
-		// The first starts, the rest queue behind it.
+		// The first starts, the rest queue behind it. Upstream attaches the @file
+		// images to the initial message, so only the first prompt carries them.
+		images := initialImages
+		if index > 0 {
+			images = nil
+		}
 		schedule.runWork(func(context.Context) error {
-			return w.Prompt(ctx, text)
+			return w.Prompt(ctx, text, images)
 		})
 	}
 
@@ -806,7 +815,8 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 		case <-schedule.paintChannel():
 			schedule.paintNow()
 		case text := <-inputsCh:
-			schedule.runWork(func(context.Context) error { return w.Prompt(ctx, text) })
+			// Typed input carries no images; only the @file initial message does.
+			schedule.runWork(func(context.Context) error { return w.Prompt(ctx, text, nil) })
 		case err := <-doneCh:
 			schedule.finishWork()
 			if err != nil {
@@ -841,6 +851,9 @@ type RunOptions struct {
 	ModelDefaultWarning bool
 	InitialMessage      string
 	InitialMessages     []string
+	// InitialImages are the @file image attachments belonging to InitialMessage
+	// (upstream attaches them to that first message).
+	InitialImages []ai.ImageContent
 }
 
 // StartupDiagnostic is a pre-init diagnostic.
@@ -908,7 +921,9 @@ func newRunWiring(app *App) *RunWiring {
 		StallLogPath:      stallLogPath(app.options.AgentDir),
 		StallLogThreshold: stallLogThreshold(),
 
-		Prompt:      func(ctx context.Context, text string) error { return app.session.Prompt(ctx, text, nil) },
+		Prompt: func(ctx context.Context, text string, images []ai.ImageContent) error {
+			return app.session.Prompt(ctx, text, &coding.PromptOptions{Images: images})
+		},
 		ShowStatus:  func(message string) { app.transcript.ShowStatus(message) },
 		ShowError:   app.runnerShowChatError,
 		ShowWarning: app.runnerShowChatWarning,

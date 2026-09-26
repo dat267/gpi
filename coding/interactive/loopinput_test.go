@@ -2,6 +2,7 @@ package interactive
 
 import (
 	"context"
+	"github.com/dat267/pier/ai"
 	"os"
 	"strings"
 	"sync"
@@ -236,10 +237,10 @@ func TestCompactCommandDuringTurnDoesNotQueueBehindIt(t *testing.T) {
 	releaseTurn := make(chan struct{})
 	turnStarted := make(chan struct{})
 	previousPrompt := app.runner.Prompt
-	app.runner.Prompt = func(ctx context.Context, text string) error {
+	app.runner.Prompt = func(ctx context.Context, text string, images []ai.ImageContent) error {
 		close(turnStarted)
 		<-releaseTurn
-		return previousPrompt(ctx, text)
+		return previousPrompt(ctx, text, images)
 	}
 
 	stop := startLoopApp(t, app)

@@ -2,6 +2,7 @@ package interactive
 
 import (
 	"context"
+	"github.com/dat267/pier/ai"
 	"strings"
 	"sync"
 	"testing"
@@ -232,7 +233,7 @@ func TestRunLoop(t *testing.T) {
 		defer promptsMu.Unlock()
 		return append([]string{}, prompts...)
 	}
-	wiring.Prompt = func(_ context.Context, text string) error {
+	wiring.Prompt = func(_ context.Context, text string, images []ai.ImageContent) error {
 		promptsMu.Lock()
 		defer promptsMu.Unlock()
 		prompts = append(prompts, text)

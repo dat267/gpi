@@ -2,6 +2,7 @@ package interactive
 
 import (
 	"context"
+	"github.com/dat267/pier/ai"
 	"os"
 	"runtime"
 	"strings"
@@ -252,7 +253,7 @@ func TestRunLoopAppliesEventsWhileTurnRuns(t *testing.T) {
 
 	promptStarted := make(chan struct{})
 	releasePrompt := make(chan struct{})
-	app.runner.Prompt = func(context.Context, string) error {
+	app.runner.Prompt = func(context.Context, string, []ai.ImageContent) error {
 		close(promptStarted)
 		<-releasePrompt
 		return nil

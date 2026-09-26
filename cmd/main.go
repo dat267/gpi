@@ -338,14 +338,14 @@ func run(appName string, args *coding.Args) error {
 		return err
 	}
 	coding.Time("prepareInitialMessage", coding.TimingMain)
-	if len(initialPrompt.Images) > 0 {
-		// The interactive mode has no image-input path, so an @file image cannot
-		// be attached the way upstream attaches it. Say so rather than let the
-		// model be asked about an image it never received (D153).
+	if printMode && len(initialPrompt.Images) > 0 {
+		// Interactive mode attaches @file images to the initial message the way
+		// upstream does. Print mode's prompt path is text-only, so an image there
+		// is still reported rather than silently absent from the request.
 		fmt.Fprintln(os.Stderr, coding.FormatCLIDiagnostic(coding.CLIDiagnostic{
 			Type: "warning",
 			Message: fmt.Sprintf(
-				"%d image(s) from @file arguments were ignored: this build cannot send image content",
+				"%d image(s) from @file arguments were ignored: print mode cannot send image content",
 				len(initialPrompt.Images)),
 		}))
 	}
@@ -455,6 +455,7 @@ func run(appName string, args *coding.Args) error {
 		// message; the rest stay queued behind it.
 		InitialMessage:       initialPrompt.Message,
 		InitialMessages:      initialPrompt.Rest,
+		InitialImages:        initialPrompt.Images,
 		InitialThemeSetting:  args.UseTheme,
 		ProjectTrustOverride: args.ProjectTrustOverride,
 		InitialProjectTrust:  &trusted,
