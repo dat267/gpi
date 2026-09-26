@@ -563,6 +563,7 @@ UI state, plus one documented `coding/` exception:
 | `inputLatencyRecorder.mu` | `coding/interactive/inputlatency.go:29` | keystroke-latency log appends from the off-loop logger | **retained**: log I/O only |
 | `stallWriteMu` | `coding/interactive/interactivemode_run.go:610` | the stall-log append, shared by the UI goroutine and the watchdog timer | **retained**: log I/O only |
 | `FooterDataProvider.mu` | `coding/footerdata.go` | cwd/git/status + listener registry, shared with its 500 ms git-HEAD watcher | **retained (D149)**: closing it needs the poll result posted to the loop and the listener fan-out delivered outside the lock; a `coding/` change outside this refactor |
+| `AgentSession.promptOptionsMu` | `coding/agent_session.go` | `SystemPromptOptions`, re-read by the prompt/tool loadout between turns | **retained**: the work goroutine re-applies the loadout while the UI loop rebuilds the options on `/reload` and tool changes; only a struct copy is taken under it |
 
 Retired along the way (all struck from the code; `grep 'sync.Mutex'
 tui/ coding/interactive/` outside tests returns only the locks tabulated above):
