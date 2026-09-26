@@ -302,6 +302,15 @@ func SliceWithWidth(line string, startCol int, length int, strict bool) SlicedLi
 	for i < len(line) {
 		if code, codeLength := ExtractANSICode(line, i); code != "" {
 			if currentCol >= startCol && currentCol < endCol {
+				// Carry the style from before the slice across the boundary first.
+				// A code that applies at the slice's own first column — a reset
+				// ending an inline-code span, say — must come after the prefix it
+				// belongs after; written first, the reset lands ahead of the colour
+				// it cancels, and the slice's text keeps a style that had ended.
+				if pendingAnsi != "" {
+					result.WriteString(pendingAnsi)
+					pendingAnsi = ""
+				}
 				result.WriteString(code)
 			} else if currentCol < startCol {
 				pendingAnsi += code

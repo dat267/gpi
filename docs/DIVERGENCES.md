@@ -596,3 +596,16 @@ only as the code comment that introduced them. The range is **D1–D166**.
   `onChanged` remains upstream's `updateEditorBorderColor`. Tests:
   `TestThemeHandleResolvesTheCurrentTheme`,
   `TestMarkdownThemeRecolorsAfterASwitch`.
+
+- D167 — **a slice keeps ANSI order across its start boundary**. Upstream's
+  `sliceWithWidth` (`utils.ts`) writes a code met inside the range as it is met,
+  but buffers the codes from before the range and flushes them when the first
+  text is written. A code that applies at the range's first column therefore
+  lands ahead of the prefix it belongs after. A selection ending exactly where an
+  inline-code span's reset sits is the case that shows it: the span renders
+  without its backticks, so a double-click on the word inside it ends on the
+  reset, the tail slice wrote the reset before the colour it cancels, and the
+  rest of the line kept the span's colour — the remaining text turned yellow.
+  The port flushes the carried prefix before writing an in-range code. The golden
+  corpus is unchanged (it never covers a slice starting on a reset), and
+  `tui/sliceansiorder_test.go` pins the order.
