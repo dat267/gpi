@@ -56,14 +56,16 @@ func TestThemeSourcesFollowProjectTrust(t *testing.T) {
 	// setting is not read either.
 	untrusted := false
 	untrustedSettings := coding.NewSettingsManagerFromFiles(project, agentDir, coding.SettingsManagerCreateOptions{ProjectTrusted: &untrusted})
-	applyThemeSources(args, untrustedSettings, agentDir, project, false)
+	boot := interactive.NewThemeBoot()
+	boot.EnableCapabilities()
+	applyThemeSources(boot, args, untrustedSettings, agentDir, project, false)
 	if containsTheme(interactive.AvailableThemes(), "projtheme") {
 		t.Errorf("an untrusted project's theme was discovered: %v", interactive.AvailableThemes())
 	}
 
 	// Trusted: the theme is discovered and it is the active one, because the
 	// project settings name it.
-	applyThemeSources(args, runtimeSettings, agentDir, project, true)
+	applyThemeSources(boot, args, runtimeSettings, agentDir, project, true)
 	if !containsTheme(interactive.AvailableThemes(), "projtheme") {
 		t.Fatalf("the trusted project's theme was not discovered: %v", interactive.AvailableThemes())
 	}
@@ -73,7 +75,7 @@ func TestThemeSourcesFollowProjectTrust(t *testing.T) {
 
 	// --no-themes keeps the named paths but drops discovery, project themes
 	// included (upstream's noThemes).
-	applyThemeSources(&coding.Args{NoThemes: true}, runtimeSettings, agentDir, project, true)
+	applyThemeSources(boot, &coding.Args{NoThemes: true}, runtimeSettings, agentDir, project, true)
 	if containsTheme(interactive.AvailableThemes(), "projtheme") {
 		t.Errorf("--no-themes kept the discovered project theme: %v", interactive.AvailableThemes())
 	}

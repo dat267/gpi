@@ -36,16 +36,6 @@ func executableName() string {
 	return name
 }
 
-// installThemeCapabilities enables the port's colour depth and installs its
-// palette. Both --export and the interactive run need it, and the install has to
-// follow the capability switch: a theme bakes its 256-colour or truecolor
-// escapes when it is created (D154).
-func installThemeCapabilities() {
-	interactive.SetTrueColorSupport(true)
-	interactive.SetStyleColorsEnabled(true)
-	interactive.InstallPierTheme()
-}
-
 // errAlreadyReported marks a failure that has already been written to stderr as
 // a diagnostic, so main only has to set the exit status.
 var errAlreadyReported = errors.New("already reported")
@@ -87,7 +77,7 @@ func Execute() {
 		if len(args.Messages) > 0 {
 			outputPath = args.Messages[0]
 		}
-		installThemeCapabilities()
+		interactive.NewThemeBoot().EnableCapabilities()
 		result, err := interactive.ExportFromFile(*args.Export, outputPath, "")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, coding.FormatCLIDiagnostic(coding.CLIDiagnostic{Type: "error", Message: err.Error()}))
@@ -167,12 +157,11 @@ func run(appName string, args *coding.Args) error {
 	// glance which build is running. The embedded upstream palettes stay as the
 	// fallback for library consumers and as what the upstream-parity test corpus
 	// renders with.
-	installThemeCapabilities()
-	// Custom themes come from the agent's themes directory plus any theme paths
-	// the settings or --theme name. --no-themes drops the discovered set and
-	// keeps the named ones (upstream's noThemes). Project-local themes need the
-	// trust decision, so this happens again once it is made (applyThemeSources).
-	applyThemeSources(args, settings, agentDir, cwd, false)
+	theme := interactive.NewThemeBoot()
+	theme.EnableCapabilities()
+	// The source stage runs twice: project-local themes need the trust decision,
+	// which the pre-boot install cannot read (ThemeBoot explains the sequence).
+	applyThemeSources(theme, args, settings, agentDir, cwd, false)
 	coding.Time("initTheme", coding.TimingMain)
 
 	// Session manager: resume the newest session or start a fresh one. A metadata
@@ -286,7 +275,7 @@ func run(appName string, args *coding.Args) error {
 	}
 	// Now that the project's trust is known, its themes and its theme setting are
 	// readable (the pre-boot install could read neither).
-	applyThemeSources(args, settings, agentDir, runtimeCwd, trusted)
+	applyThemeSources(theme, args, settings, agentDir, runtimeCwd, trusted)
 
 	// Resolve the CLI model/thinking overrides.
 	var model *ai.Model
@@ -521,26 +510,28 @@ func readPipedStdin() (string, bool, error) {
 	return string(data), true, nil
 }
 
-// applyThemeSources installs the theme discovery sources and loads the resulting
-// theme. Trust gates the project's own theme directory (<cwd>/.pi/themes, which
-// upstream's resource loader discovers next to the agent's), and the project's
-// theme setting is only readable once the project is trusted, so cmd calls this
-// once before the trust decision for the -r picker and again after it.
-func applyThemeSources(args *coding.Args, settings *coding.SettingsManager, agentDir, cwd string, trusted bool) {
-	paths := themePathsFor(args, settings, cwd)
-	if trusted && !args.NoThemes {
-		paths = append(paths, filepath.Join(cwd, coding.ConfigDirName, "themes"))
-	}
-	interactive.SetCustomThemeSources(interactive.CustomThemeSources{
-		Dir:         filepath.Join(agentDir, "themes"),
-		Paths:       paths,
-		NoDiscovery: args.NoThemes,
+// applyThemeSources performs the theme boot's source stage (ThemeBoot owns the
+// sequence itself). The theme setting is only readable once the project is
+// trusted, so cmd calls this once before the trust decision for the -r picker
+// and again after it.
+func applyThemeSources(boot *interactive.ThemeBoot, args *coding.Args, settings *coding.SettingsManager, agentDir, cwd string, trusted bool) {
+	boot.ApplySources(interactive.ThemeSources{
+		AgentDir:   agentDir,
+		Cwd:        cwd,
+		ThemeName:  themeNameFor(settings),
+		ThemePaths: themePathsFor(args, settings, cwd),
+		Trusted:    trusted,
+		NoThemes:   args.NoThemes,
 	})
-	themeName := "dark"
+}
+
+// themeNameFor resolves the configured theme, falling back to the port's default
+// (D154: the port's palette is what the upstream theme names resolve to).
+func themeNameFor(settings *coding.SettingsManager) string {
 	if setting := settings.GetTheme(); setting != nil && *setting != "" {
-		themeName = *setting
+		return *setting
 	}
-	interactive.InitTheme(themeName, false)
+	return "dark"
 }
 
 // themePathsFor resolves the theme files and directories named by the settings
