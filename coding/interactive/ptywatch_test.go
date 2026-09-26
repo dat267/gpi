@@ -223,6 +223,28 @@ func (s *ptySession) output() string {
 	return s.buf.String()
 }
 
+// ansiPattern matches the sequences a terminal adds around text (OSC 8
+// hyperlinks, SGR colour, cursor and mode changes) so a match can ignore them.
+var ansiPattern = regexp.MustCompile(`\x1b\][^\x07]*\x07|\x1b\[[0-9;?]*[a-zA-Z]|\x1b[()][A-Z0-9]`)
+
+// unwrapped removes what the terminal itself adds: escape sequences, and the
+// line breaks and the indent/trailing padding that a wrapped token is surrounded
+// by — the box indents every line, so the two halves of a wrapped path are
+// separated by that indent as well as by the newline.
+// The trust prompt prints a project path, which is longer than the terminal on a
+// device whose temporary directory is deep, so the path arrives split
+// mid-segment — a substring of it can never be found contiguously in the raw
+// stream. Matching the unwrapped text is what makes these assertions about
+// behaviour rather than about the terminal's width.
+func unwrapped(output string) string {
+	output = ansiPattern.ReplaceAllString(output, "")
+	var joined strings.Builder
+	for _, line := range strings.Split(output, "\n") {
+		joined.WriteString(strings.TrimSpace(line))
+	}
+	return joined.String()
+}
+
 // waitForOutput polls until substr appears in the output or the timeout
 // elapses; reports whether it was seen.
 func (s *ptySession) waitForOutput(substr string, timeout time.Duration) bool {
@@ -234,6 +256,22 @@ func (s *ptySession) waitForOutput(substr string, timeout time.Duration) bool {
 		time.Sleep(50 * time.Millisecond)
 	}
 	return strings.Contains(s.output(), substr)
+}
+
+// waitForWrappedOutput is waitForOutput for a token the terminal wraps: a long
+// path is split across lines and surrounded by the box's indent, so it can never
+// be found contiguously in the raw stream. Only the tests that name such a token
+// use this; matching every assertion unwrapped would loosen the others.
+func (s *ptySession) waitForWrappedOutput(substr string, timeout time.Duration) bool {
+	want := unwrapped(substr)
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if strings.Contains(unwrapped(s.output()), want) {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return strings.Contains(unwrapped(s.output()), want)
 }
 
 // typeAndSubmit types text and presses Enter twice: the first Enter accepts

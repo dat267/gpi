@@ -63,7 +63,7 @@ func TestResumedSessionAsksTrustForItsOwnProject(t *testing.T) {
 		if !session.waitForOutput("Trust project folder?", 30*time.Second) {
 			t.Fatalf("the session's project was not asked about:\n%s", session.output())
 		}
-		if !session.waitForOutput(project, 5*time.Second) {
+		if !session.waitForWrappedOutput(project, 5*time.Second) {
 			t.Fatalf("the prompt named another directory:\n%s", session.output())
 		}
 	})
