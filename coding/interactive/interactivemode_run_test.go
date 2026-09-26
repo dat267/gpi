@@ -127,9 +127,15 @@ func TestRunChecksRenderOnTheUILoop(t *testing.T) {
 		t.Fatal("the release card was rendered off the UI loop")
 	}
 	wiring.UI.RenderNow(true)
-	if !strings.Contains(rendered(), "Update Available") {
-		t.Fatal("the release card never reached the loop")
-	}
+	// The post is enqueued by notifyNewVersion after CheckVersion (which is what
+	// signalled `checked`) returns, so one pass can drain an empty queue and the
+	// card land afterwards (CI runs 36266574631/36266816766). Keep painting until
+	// it is picked up; the negative half above still pins no render before the
+	// loop's render pass.
+	waitForConditionWithin(t, func() bool {
+		wiring.UI.RenderNow(true)
+		return strings.Contains(rendered(), "Update Available")
+	}, 5*time.Second)
 
 	// Headless: no loop to post to, so the work runs where it is.
 	headless, _ := newRunTestWiring(t)
