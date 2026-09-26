@@ -244,7 +244,12 @@ Stage 2 (rendering on the loop) has landed:
   renderer's animation walk between paints (`loopSchedule.scanValid`, dropped
   by a paint or, for a "nothing animates" answer, boxed by
   `loopSchedule.scanAt`) because the walk visits every mounted component and
-  the loop asked for it once per input event. That walk descends through
+  the loop asked for it once per input event. Asking for a frame also invalidates what animates
+  (upstream's tick calls `context.invalidate()`): clock-driven content changes
+  with no Invalidate firing, so a revision-carrying wrapper would report an
+  unchanged revision while its output has moved and a parent's cache would
+  serve the previous frame — a shell elapsed label stuck until a click
+  invalidates the block. That walk descends through
   `childrenHolder` (`Container`, `Box`, and now `ScrollView`/`MouseRegion`): a
   single-child wrapper that forgets `childComponents` hides any animator inside
   it, which is how the elapsed-time label on a running tool froze (the

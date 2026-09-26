@@ -250,6 +250,14 @@ func nextAnimationFor(components []Component, now time.Time) (bool, time.Duratio
 		}
 		if animator, ok := component.(Animator); ok {
 			if want, delay := animator.AnimationFrame(now); want {
+				// Asking for a frame invalidates what animates. Upstream's per-call
+				// setInterval calls context.invalidate(), and the invalidate is the
+				// half that matters: a revision-carrying wrapper around clock-driven
+				// content changes without any Invalidate firing, so a parent
+				// comparing revisions concludes "unchanged" and serves its previous
+				// frame — a frozen elapsed label on a tool nothing else invalidates.
+				// The tick is what bumps the revision.
+				component.Invalidate()
 				if delay <= 0 {
 					delay = time.Millisecond
 				}
