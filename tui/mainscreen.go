@@ -731,7 +731,7 @@ func (s *MainScreen) renderLocked(width int) []string {
 }
 
 func (s *MainScreen) hasOverlayEntriesLocked() bool {
-	return len(s.overlayStack) > 0
+	return s.overlays.HasEntries()
 }
 
 var _ Component = (*MainScreen)(nil)

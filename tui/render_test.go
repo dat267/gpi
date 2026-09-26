@@ -213,7 +213,7 @@ func TestCompositeOverlays(t *testing.T) {
 		}
 	}
 
-	handle := renderer.overlayStack[0]
+	handle := renderer.overlays.Entries()[0]
 	if !handle.hasBounds {
 		t.Fatal("bounds not recorded")
 	}

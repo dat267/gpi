@@ -67,16 +67,6 @@ type TuiStopOptions struct {
 // MinRenderIntervalMS is the floor between throttled renders.
 const MinRenderIntervalMS = 16
 
-type overlayEntry struct {
-	component  Component
-	options    *OverlayOptions
-	preFocus   Component
-	hidden     bool
-	focusOrder int
-	bounds     *OverlayBounds
-	hasBounds  bool
-}
-
 type renderedOverlayLayout struct {
 	entry  *overlayEntry
 	row    int
@@ -98,13 +88,6 @@ type OverlayHandle interface {
 }
 
 // overlayFocusRestoreState models upstream's inactive|eligible|blocked union.
-type overlayFocusRestoreState struct {
-	status   string // "inactive" | "eligible" | "blocked"
-	overlay  *overlayEntry
-	blocked  Component
-	resumeTo bool // true = restore-overlay, false = focus-target
-	target   Component
-}
 
 // Renderer is the base for the terminal screens.
 type Renderer struct {
@@ -135,8 +118,14 @@ type Renderer struct {
 	// LogDirectory, when set, enables debug/crash logs.
 	LogDirectory string
 
-	focusedComponent Component
-	inputListeners   []TuiInputListener
+	// The overlay stack and its focus-restore state machine live in
+	// overlaystack.go; the renderer keeps the public overlay surface as
+	// delegators and owns the painted overlay layouts.
+	overlays *overlayStack
+	// renderedOverlayLayouts is the paint-time layout of the visible overlays,
+	// used for overlay hit-testing and GetBounds.
+	renderedOverlayLayouts []renderedOverlayLayout
+	inputListeners         []TuiInputListener
 	// postMu guards the posted-callback queue: Post is called from off-loop
 	// goroutines (loaders, watchers) and drained by the owner's render pass
 	// (D146: queue serialization only — no UI state under the lock).
@@ -152,11 +141,6 @@ type Renderer struct {
 	// `CSI ? 2031` toggle belong to the terminalQueries module; this renderer
 	// forwards its public methods to it (port of the TuiBase query surface).
 	queries terminalQueries
-
-	overlayStack           []*overlayEntry
-	renderedOverlayLayouts []renderedOverlayLayout
-	focusOrderCounter      int
-	overlayFocusRestore    overlayFocusRestoreState
 
 	clock func() time.Time
 
@@ -181,13 +165,14 @@ type Renderer struct {
 
 // NewRenderer creates a renderer rooted at the given terminal.
 func NewRenderer(terminal Terminal) *Renderer {
-	return &Renderer{
-		Terminal:            terminal,
-		KeyReleaseDetector:  IsKeyRelease,
-		clock:               time.Now,
-		renderTicks:         make(chan struct{}, 1),
-		overlayFocusRestore: overlayFocusRestoreState{status: "inactive"},
+	renderer := &Renderer{
+		Terminal:           terminal,
+		KeyReleaseDetector: IsKeyRelease,
+		clock:              time.Now,
+		renderTicks:        make(chan struct{}, 1),
 	}
+	renderer.overlays = newOverlayStack(renderer)
+	return renderer
 }
 
 // FullRedraws returns the number of full redraws performed.
@@ -195,7 +180,7 @@ func (t *Renderer) FullRedraws() int { return t.fullRedrawCount }
 
 // GetFocusedComponent returns the component with keyboard focus.
 func (t *Renderer) GetFocusedComponent() Component {
-	return t.focusedComponent
+	return t.overlays.Focused()
 }
 
 // GetShowHardwareCursor reports whether the hardware cursor is enabled.
@@ -230,7 +215,7 @@ func (t *Renderer) Invalidate() {
 	for _, root := range t.GetMountedRoots() {
 		root.Invalidate()
 	}
-	for _, overlay := range t.overlayStack {
+	for _, overlay := range t.overlays.Entries() {
 		overlay.component.Invalidate()
 	}
 }
@@ -548,42 +533,18 @@ func (t *Renderer) HandleTerminalInput(data string) {
 		return
 	}
 
-	// If the focused component is an overlay, verify it is still visible
-	// (visibility can change due to terminal resize or a visible() callback).
-	focusedOverlay := t.findOverlay(t.focusedComponent)
-	if focusedOverlay != nil && !t.isOverlayVisible(focusedOverlay) {
-		if topVisible := t.getTopmostVisibleOverlay(); topVisible != nil {
-			t.setFocusInternal(topVisible.component, "clear")
-		} else {
-			t.setFocusInternal(focusedOverlay.preFocus, "preserve")
-		}
-	}
-
-	focusIsOverlay := t.isOverlayComponent(t.focusedComponent)
-	if !focusIsOverlay {
-		status, overlay, blockedBy, resumeTo, target := t.getVisibleOverlayFocusRestore()
-		switch status {
-		case "eligible":
-			t.setFocusInternal(overlay.component, "clear")
-		case "blocked":
-			if blockedBy != t.focusedComponent {
-				if resumeTo {
-					t.setFocusInternal(overlay.component, "clear")
-				} else {
-					t.clearOverlayFocusRestore()
-					t.setFocusInternal(target, "clear")
-				}
-			}
-		}
-	}
+	// A focused overlay can stop being visible (a resize or a visible()
+	// callback), and a pending restore can resume or be abandoned.
+	t.overlays.ReconcileFocus()
 
 	// Pass input to the focused component (including Ctrl+C); the component
 	// decides how to handle it. No locks are held: input and paints share the
 	// owner goroutine (D146).
-	handler, ok := t.focusedComponent.(InputHandler)
-	if ok && t.focusedComponent != nil {
+	focused := t.overlays.Focused()
+	handler, ok := focused.(InputHandler)
+	if ok && focused != nil {
 		if releaseDetector := t.KeyReleaseDetector; releaseDetector != nil && releaseDetector(data) {
-			if wanter, ok := t.focusedComponent.(KeyReleaseWanter); !ok || !wanter.WantsKeyRelease() {
+			if wanter, ok := focused.(KeyReleaseWanter); !ok || !wanter.WantsKeyRelease() {
 				return
 			}
 		}
@@ -598,115 +559,21 @@ func (t *Renderer) HandleTerminalInput(data string) {
 
 // SetFocus sets keyboard focus.
 func (t *Renderer) SetFocus(component Component) {
-	t.setFocusInternal(component, "clear")
+	t.overlays.SetFocus(component)
 }
 
-func (t *Renderer) setFocusInternal(component Component, overlayFocusRestore string) {
-	previousFocus := t.focusedComponent
-	nextFocus := component
-
-	previousFocusedOverlay := (*overlayEntry)(nil)
-	if previousFocus != nil {
-		if entry := t.findOverlay(previousFocus); entry != nil && t.isOverlayVisible(entry) {
-			previousFocusedOverlay = entry
-		}
+// overlayVisible implements overlayHost: the terminal-dependent half of overlay
+// visibility (the entry's own Visible callback for the current terminal size).
+func (t *Renderer) overlayVisible(entry *overlayEntry) bool {
+	if entry.options == nil || entry.options.Visible == nil {
+		return true
 	}
-	nextFocusIsOverlay := nextFocus != nil && t.isOverlayComponent(nextFocus)
-	restoreStatus, restoreOverlay, restoreBlockedBy, restoreResumeTo, restoreTarget := t.getVisibleOverlayFocusRestore()
-
-	if nextFocus != nil && !nextFocusIsOverlay {
-		if restoreStatus == "blocked" && restoreBlockedBy == previousFocus {
-			if !restoreResumeTo || !t.isComponentMounted(restoreBlockedBy) {
-				nextFocus = t.resolveBlockedOverlayFocusResume(restoreOverlay, restoreResumeTo, restoreTarget)
-			} else {
-				t.overlayFocusRestore = overlayFocusRestoreState{
-					status: "blocked", overlay: restoreOverlay, blocked: nextFocus,
-					resumeTo: restoreResumeTo, target: restoreTarget,
-				}
-			}
-		} else if previousFocusedOverlay != nil && restoreStatus != "inactive" &&
-			restoreOverlay == previousFocusedOverlay && !t.isOverlayFocusAncestor(previousFocusedOverlay, nextFocus) {
-			t.overlayFocusRestore = overlayFocusRestoreState{
-				status: "blocked", overlay: previousFocusedOverlay, blocked: nextFocus, resumeTo: true,
-			}
-		}
-	} else if nextFocus == nil {
-		if restoreStatus == "blocked" && restoreBlockedBy == previousFocus {
-			nextFocus = t.resolveBlockedOverlayFocusResume(restoreOverlay, restoreResumeTo, restoreTarget)
-		} else if overlayFocusRestore == "clear" {
-			t.clearOverlayFocusRestore()
-		}
-	}
-
-	if focusable, ok := t.focusedComponent.(Focusable); ok && t.focusedComponent != nil {
-		focusable.SetFocused(false)
-	}
-
-	t.focusedComponent = nextFocus
-
-	if focusable, ok := nextFocus.(Focusable); ok && nextFocus != nil {
-		focusable.SetFocused(true)
-	}
-
-	if nextFocus != nil {
-		if entry := t.findOverlay(nextFocus); entry != nil && t.isOverlayVisible(entry) {
-			t.overlayFocusRestore = overlayFocusRestoreState{status: "eligible", overlay: entry}
-		}
-	}
+	return entry.options.Visible(t.Terminal.Columns(), t.Terminal.Rows())
 }
 
-func (t *Renderer) clearOverlayFocusRestore() {
-	t.overlayFocusRestore = overlayFocusRestoreState{status: "inactive"}
-}
-
-func (t *Renderer) clearOverlayFocusRestoreFor(overlay *overlayEntry) {
-	if t.overlayFocusRestore.status != "inactive" && t.overlayFocusRestore.overlay == overlay {
-		t.clearOverlayFocusRestore()
-	}
-}
-
-func (t *Renderer) resolveBlockedOverlayFocusResume(overlay *overlayEntry, resumeTo bool, target Component) Component {
-	if overlay != nil && resumeTo {
-		return overlay.component
-	}
-	t.clearOverlayFocusRestore()
-	return target
-}
-
-func (t *Renderer) getVisibleOverlayFocusRestore() (string, *overlayEntry, Component, bool, Component) {
-	state := t.overlayFocusRestore
-	if state.status == "inactive" {
-		return "inactive", nil, nil, false, nil
-	}
-	if !t.overlayInStack(state.overlay) || !t.isOverlayVisible(state.overlay) {
-		return "inactive", nil, nil, false, nil
-	}
-	return state.status, state.overlay, state.blocked, state.resumeTo, state.target
-}
-
-func (t *Renderer) isOverlayFocusAncestor(entry *overlayEntry, component Component) bool {
-	visited := map[Component]bool{}
-	current := entry.preFocus
-	for current != nil && !visited[current] {
-		visited[current] = true
-		if current == component {
-			return true
-		}
-		if parent := t.findOverlay(current); parent != nil {
-			current = parent.preFocus
-		} else {
-			current = nil
-		}
-	}
-	return false
-}
-
-func (t *Renderer) retargetOverlayPreFocus(removed *overlayEntry) {
-	for _, overlay := range t.overlayStack {
-		if overlay != removed && overlay.preFocus == removed.component {
-			overlay.preFocus = removed.preFocus
-		}
-	}
+// componentMounted implements overlayHost: whether a component is still mounted.
+func (t *Renderer) componentMounted(component Component) bool {
+	return t.isComponentMounted(component)
 }
 
 func (t *Renderer) isComponentMounted(component Component) bool {
@@ -737,43 +604,15 @@ func (t *Renderer) containsComponent(root Component, target Component) bool {
 	return false
 }
 
-func (t *Renderer) findOverlay(component Component) *overlayEntry {
-	return t.findOverlayIn(t.overlayStack, component)
-}
-
-func (t *Renderer) findOverlayIn(stack []*overlayEntry, component Component) *overlayEntry {
-	if component == nil {
-		return nil
-	}
-	for _, entry := range stack {
-		if entry.component == component {
-			return entry
-		}
-	}
-	return nil
-}
-
-func (t *Renderer) isOverlayComponent(component Component) bool {
-	return t.findOverlay(component) != nil
-}
-
 // ---- Overlay stack ----
 
 // ShowOverlay shows an overlay component with configurable positioning. The
 // returned handle controls the overlay's visibility.
 func (t *Renderer) ShowOverlay(component Component, options *OverlayOptions) OverlayHandle {
-	t.focusOrderCounter++
-	entry := &overlayEntry{
-		component:  component,
-		options:    options,
-		preFocus:   t.focusedComponent,
-		focusOrder: t.focusOrderCounter,
-	}
-	t.overlayStack = append(t.overlayStack, entry)
-
+	entry := t.overlays.Push(component, options)
 	nonCapturing := options != nil && options.NonCapturing
-	if !nonCapturing && t.isOverlayVisible(entry) {
-		t.setFocusInternal(component, "clear")
+	if !nonCapturing && t.overlays.Visible(entry) {
+		t.overlays.SetFocus(component)
 	}
 	t.Terminal.HideCursor()
 	t.requestRender(false)
@@ -790,21 +629,10 @@ type overlayHandle struct {
 
 func (h *overlayHandle) Hide() {
 	t := h.renderer
-	index := t.overlayIndexOf(h.entry)
-	if index == -1 {
+	if !t.overlays.Hide(h.entry) {
 		return
 	}
-	t.clearOverlayFocusRestoreFor(h.entry)
-	t.retargetOverlayPreFocus(h.entry)
-	t.overlayStack = append(t.overlayStack[:index], t.overlayStack[index+1:]...)
-	if t.focusedComponent == h.component {
-		if topVisible := t.getTopmostVisibleOverlay(); topVisible != nil {
-			t.setFocusInternal(topVisible.component, "clear")
-		} else {
-			t.setFocusInternal(h.entry.preFocus, "clear")
-		}
-	}
-	if len(t.overlayStack) == 0 {
+	if !t.overlays.HasEntries() {
 		t.Terminal.HideCursor()
 	}
 	t.requestRender(false)
@@ -812,23 +640,8 @@ func (h *overlayHandle) Hide() {
 
 func (h *overlayHandle) SetHidden(hidden bool) {
 	t := h.renderer
-	if h.entry.hidden == hidden {
+	if !t.overlays.SetHidden(h.entry, hidden, h.nonCapturing) {
 		return
-	}
-	h.entry.hidden = hidden
-	if hidden {
-		t.clearOverlayFocusRestoreFor(h.entry)
-		if t.focusedComponent == h.component {
-			if topVisible := t.getTopmostVisibleOverlay(); topVisible != nil {
-				t.setFocusInternal(topVisible.component, "clear")
-			} else {
-				t.setFocusInternal(h.entry.preFocus, "clear")
-			}
-		}
-	} else if !h.nonCapturing && t.isOverlayVisible(h.entry) {
-		t.focusOrderCounter++
-		h.entry.focusOrder = t.focusOrderCounter
-		t.setFocusInternal(h.component, "clear")
 	}
 	t.requestRender(false)
 }
@@ -839,57 +652,27 @@ func (h *overlayHandle) IsHidden() bool {
 
 func (h *overlayHandle) Focus() {
 	t := h.renderer
-	if t.overlayIndexOf(h.entry) == -1 || !t.isOverlayVisible(h.entry) {
+	if !t.overlays.FocusEntry(h.entry) {
 		return
 	}
-	t.focusOrderCounter++
-	h.entry.focusOrder = t.focusOrderCounter
-	t.setFocusInternal(h.component, "clear")
 	t.requestRender(false)
 }
 
 func (h *overlayHandle) Unfocus(target Component, hasTarget bool) {
 	t := h.renderer
-	isFocused := t.focusedComponent == h.component
-	state := t.overlayFocusRestore
-	hasPendingRestore := state.status != "inactive" && state.overlay == h.entry
-	if !isFocused && !hasPendingRestore {
+	if !t.overlays.Unfocus(h.entry, target, hasTarget) {
 		return
-	}
-	if state.status == "blocked" && state.overlay == h.entry && t.focusedComponent == state.blocked {
-		if hasTarget {
-			t.overlayFocusRestore = overlayFocusRestoreState{
-				status: "blocked", overlay: h.entry, blocked: state.blocked, target: target,
-			}
-		} else {
-			t.clearOverlayFocusRestore()
-		}
-		t.requestRender(false)
-		return
-	}
-	t.clearOverlayFocusRestoreFor(h.entry)
-	if isFocused || hasTarget {
-		topVisible := t.getTopmostVisibleOverlay()
-		fallbackTarget := h.entry.preFocus
-		if topVisible != nil && topVisible != h.entry {
-			fallbackTarget = topVisible.component
-		}
-		if hasTarget {
-			t.setFocusInternal(target, "clear")
-		} else {
-			t.setFocusInternal(fallbackTarget, "clear")
-		}
 	}
 	t.requestRender(false)
 }
 
 func (h *overlayHandle) IsFocused() bool {
-	return h.renderer.focusedComponent == h.component
+	return h.renderer.overlays.Focused() == h.component
 }
 
 func (h *overlayHandle) GetBounds() (OverlayBounds, bool) {
 	t := h.renderer
-	if t.overlayIndexOf(h.entry) == -1 || !t.isOverlayVisible(h.entry) || !h.entry.hasBounds {
+	if !t.overlays.Contains(h.entry) || !t.overlays.Visible(h.entry) || !h.entry.hasBounds {
 		return OverlayBounds{}, false
 	}
 	return *h.entry.bounds, true
@@ -897,21 +680,10 @@ func (h *overlayHandle) GetBounds() (OverlayBounds, bool) {
 
 // HideOverlay hides the topmost overlay and restores previous focus.
 func (t *Renderer) HideOverlay() {
-	if len(t.overlayStack) == 0 {
+	if t.overlays.HideTop() == nil {
 		return
 	}
-	overlay := t.overlayStack[len(t.overlayStack)-1]
-	t.clearOverlayFocusRestoreFor(overlay)
-	t.retargetOverlayPreFocus(overlay)
-	t.overlayStack = t.overlayStack[:len(t.overlayStack)-1]
-	if t.focusedComponent == overlay.component {
-		if topVisible := t.getTopmostVisibleOverlay(); topVisible != nil {
-			t.setFocusInternal(topVisible.component, "clear")
-		} else {
-			t.setFocusInternal(overlay.preFocus, "clear")
-		}
-	}
-	if len(t.overlayStack) == 0 {
+	if !t.overlays.HasEntries() {
 		t.Terminal.HideCursor()
 	}
 	t.requestRender(false)
@@ -919,65 +691,17 @@ func (t *Renderer) HideOverlay() {
 
 // HasOverlay reports whether any overlay is visible.
 func (t *Renderer) HasOverlay() bool {
-	for _, entry := range t.overlayStack {
-		if t.isOverlayVisible(entry) {
-			return true
-		}
-	}
-	return false
+	return t.overlays.HasVisible()
 }
 
 // HasOverlayEntries reports whether the overlay stack is non-empty.
 func (t *Renderer) HasOverlayEntries() bool {
-	return len(t.overlayStack) > 0
+	return t.overlays.HasEntries()
 }
 
 // IsOverlayFocused reports whether the focused component is a visible overlay.
 func (t *Renderer) IsOverlayFocused() bool {
-	entry := t.findOverlay(t.focusedComponent)
-	return entry != nil && t.isOverlayVisible(entry)
-}
-
-func (t *Renderer) overlayIndexOf(entry *overlayEntry) int {
-	for i, existing := range t.overlayStack {
-		if existing == entry {
-			return i
-		}
-	}
-	return -1
-}
-
-func (t *Renderer) overlayInStack(entry *overlayEntry) bool {
-	return entry != nil && t.overlayIndexOf(entry) != -1
-}
-
-// isOverlayVisible reports whether an overlay entry is currently visible.
-func (t *Renderer) isOverlayVisible(entry *overlayEntry) bool {
-	if entry == nil || entry.hidden {
-		return false
-	}
-	if entry.options != nil && entry.options.Visible != nil {
-		return entry.options.Visible(t.Terminal.Columns(), t.Terminal.Rows())
-	}
-	return true
-}
-
-// getTopmostVisibleOverlay finds the visual-frontmost visible capturing
-// overlay, if any.
-func (t *Renderer) getTopmostVisibleOverlay() *overlayEntry {
-	var topmost *overlayEntry
-	for _, overlay := range t.overlayStack {
-		if overlay.options != nil && overlay.options.NonCapturing {
-			continue
-		}
-		if !t.isOverlayVisible(overlay) {
-			continue
-		}
-		if topmost == nil || overlay.focusOrder > topmost.focusOrder {
-			topmost = overlay
-		}
-	}
-	return topmost
+	return t.overlays.IsFocused()
 }
 
 // DispatchMouseToOverlay dispatches to the visually topmost overlay under the
@@ -1010,9 +734,9 @@ func (t *Renderer) DispatchMouseToOverlay(event TuiMouseEvent) (bool, *TuiMouseD
 // ResolveMouseFocusTarget keeps overlay containers as keyboard focus owners
 // when a nested control is clicked.
 func (t *Renderer) ResolveMouseFocusTarget(component Component) Component {
-	for index := len(t.overlayStack) - 1; index >= 0; index-- {
-		overlay := t.overlayStack[index]
-		if t.isOverlayVisible(overlay) && t.containsComponent(overlay.component, component) {
+	for index := len(t.overlays.Entries()) - 1; index >= 0; index-- {
+		overlay := t.overlays.Entries()[index]
+		if t.overlays.Visible(overlay) && t.containsComponent(overlay.component, component) {
 			return overlay.component
 		}
 	}
@@ -1022,13 +746,13 @@ func (t *Renderer) ResolveMouseFocusTarget(component Component) Component {
 // CompositeOverlays composites all overlays into content lines (sorted by
 // focusOrder, higher = on top).
 func (t *Renderer) CompositeOverlays(lines []string, termWidth int, termHeight int) []string {
-	if len(t.overlayStack) == 0 {
+	if len(t.overlays.Entries()) == 0 {
 		t.renderedOverlayLayouts = nil
 		return lines
 	}
 	result := append([]string(nil), lines...)
 
-	for _, entry := range t.overlayStack {
+	for _, entry := range t.overlays.Entries() {
 		entry.hasBounds = false
 	}
 
@@ -1042,9 +766,9 @@ func (t *Renderer) CompositeOverlays(lines []string, termWidth int, termHeight i
 	var rendered []renderedOverlay
 	minLinesNeeded := len(result)
 
-	visibleEntries := make([]*overlayEntry, 0, len(t.overlayStack))
-	for _, entry := range t.overlayStack {
-		if t.isOverlayVisible(entry) {
+	visibleEntries := make([]*overlayEntry, 0, len(t.overlays.Entries()))
+	for _, entry := range t.overlays.Entries() {
+		if t.overlays.Visible(entry) {
 			visibleEntries = append(visibleEntries, entry)
 		}
 	}
