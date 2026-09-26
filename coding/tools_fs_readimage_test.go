@@ -144,14 +144,3 @@ func TestReadToolHandlesSpacedImageNames(t *testing.T) {
 		t.Fatalf("the narrow-space variant did not resolve: %#v", result.Content)
 	}
 }
-
-// The description carries the literal-path sentence (D172): the path field is not
-// a shell argument, so a model that quotes or escapes a spaced path sends
-// characters that are not in the filename.
-func TestReadToolDescriptionStatesPathsAreLiteral(t *testing.T) {
-	for _, want := range []string{"spaces included", "do not add quotes or backslash escapes"} {
-		if !strings.Contains(ReadToolDescription, want) {
-			t.Errorf("the description lost %q:\n%s", want, ReadToolDescription)
-		}
-	}
-}

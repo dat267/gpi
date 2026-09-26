@@ -57,10 +57,8 @@ func mustSchemaJSON(v any) json.RawMessage {
 	return enc
 }
 
-// ReadToolDescription is upstream's read description with one sentence added
-// (D172): the path field is literal, and a model that reaches for shell habits
-// sends characters that are not in the filename.
-const ReadToolDescription = "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete. Pass the path exactly as it appears, spaces included: this field is used literally, so do not add quotes or backslash escapes."
+// ReadToolDescription is upstream's read description.
+const ReadToolDescription = "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete."
 
 // CreateReadTool builds the read tool.
 func CreateReadTool(cwd string, options *ReadToolOptions) agent.AgentTool {
