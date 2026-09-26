@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dat267/pier/agent"
 	"github.com/dat267/pier/ai"
 )
 
@@ -118,12 +119,31 @@ func TestBashAbort(t *testing.T) {
 	dir := t.TempDir()
 	tool := CreateBashTool(dir, nil)
 	ctx, cancel := context.WithCancel(context.Background())
+	// Abort *after* the command has produced output, not after a fixed delay: the
+	// assertion below is that an abort keeps the partial output, and cancelling on
+	// a 100ms timer raced the shell's own start-up. On a loaded runner the abort
+	// won that race and the test failed wanting "started" in output that had never
+	// been echoed. The watchdog is a hang guard, not an expectation.
+	started := make(chan struct{}, 1)
+	onUpdate := func(result agent.AgentToolResult) {
+		for _, content := range result.Content {
+			if text, ok := content.(ai.TextContent); ok && strings.Contains(text.Text, "started") {
+				select {
+				case started <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}
 	go func() {
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-started:
+		case <-time.After(15 * time.Second):
+		}
 		cancel()
 	}()
 	start := time.Now()
-	_, err := tool.Execute("c", json.RawMessage(`{"command":"echo started; sleep 30"}`), ctx, nil)
+	_, err := tool.Execute("c", json.RawMessage(`{"command":"echo started; sleep 30"}`), ctx, onUpdate)
 	if err == nil || !strings.Contains(err.Error(), "Command aborted") {
 		t.Fatalf("err = %v", err)
 	}
