@@ -99,6 +99,61 @@ func decodeCompatObject(raw []byte) map[string]any {
 }
 
 // applyModelOverride applies a models.json model override to a base model.
+// mergeInputLimits merges a models.json inputLimits override over the model's
+// limits the way upstream mergeInputLimits does: a shallow spread at the top
+// level, a shallow spread of images, and a shallow spread of images.resize. A
+// block that sets one key therefore keeps the rest of the model's limits.
+//
+// A zero value means absent: every field in the schema has a minimum of 1, so an
+// explicit zero cannot clear a limit.
+func mergeInputLimits(base, override *ai.ModelInputLimits) *ai.ModelInputLimits {
+	if override == nil {
+		return base
+	}
+	merged := ai.ModelInputLimits{}
+	if base != nil {
+		merged = *base
+	}
+	if override.MaxRequestBytes != 0 {
+		merged.MaxRequestBytes = override.MaxRequestBytes
+	}
+	if override.Images != nil {
+		images := ai.ModelImageLimits{}
+		if merged.Images != nil {
+			images = *merged.Images
+		}
+		if override.Images.MaxPerMessage != 0 {
+			images.MaxPerMessage = override.Images.MaxPerMessage
+		}
+		if override.Images.MaxPerRequest != 0 {
+			images.MaxPerRequest = override.Images.MaxPerRequest
+		}
+		if override.Images.Resize != nil {
+			resize := ai.ModelImageResize{}
+			if images.Resize != nil {
+				resize = *images.Resize
+			}
+			if override.Images.Resize.MaxWidth != 0 {
+				resize.MaxWidth = override.Images.Resize.MaxWidth
+			}
+			if override.Images.Resize.MaxHeight != 0 {
+				resize.MaxHeight = override.Images.Resize.MaxHeight
+			}
+			if override.Images.Resize.MaxBytes != 0 {
+				resize.MaxBytes = override.Images.Resize.MaxBytes
+			}
+			if override.Images.Resize.JPEGQuality != 0 {
+				resize.JPEGQuality = override.Images.Resize.JPEGQuality
+			}
+			resizeCopy := resize
+			images.Resize = &resizeCopy
+		}
+		imagesCopy := images
+		merged.Images = &imagesCopy
+	}
+	return &merged
+}
+
 func applyModelOverride(model *ai.Model, override ModelsJSONModelOverride) (*ai.Model, error) {
 	updated := *model
 	if override.Name != "" {
@@ -119,6 +174,9 @@ func applyModelOverride(model *ai.Model, override ModelsJSONModelOverride) (*ai.
 	}
 	if override.Input != nil {
 		updated.Input = append([]string{}, override.Input...)
+	}
+	if override.InputLimits != nil {
+		updated.InputLimits = mergeInputLimits(model.InputLimits, override.InputLimits)
 	}
 	if override.Cost != nil {
 		cost := model.Cost
@@ -267,6 +325,7 @@ func modelFromJSON(providerID string, definition ModelsJSONModel, providerConfig
 		Reasoning:        reasoning,
 		ThinkingLevelMap: definition.ThinkingLevelMap,
 		Input:            append([]string{}, input...),
+		InputLimits:      definition.InputLimits,
 		Cost:             cost,
 		ContextWindow:    contextWindow,
 		MaxTokens:        maxTokens,

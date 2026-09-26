@@ -203,19 +203,20 @@ type ModelsJSONCompat struct {
 
 // ModelsJSONModel is one model definition in models.json.
 type ModelsJSONModel struct {
-	ID               string              `json:"id"`
-	Name             string              `json:"name,omitempty"`
-	API              string              `json:"api,omitempty"`
-	BaseURL          string              `json:"baseUrl,omitempty"`
-	Reasoning        *bool               `json:"reasoning,omitempty"`
-	ThinkingLevelMap ai.ThinkingLevelMap `json:"thinkingLevelMap,omitempty"`
-	Input            []string            `json:"input,omitempty"`
-	Cost             *ModelsJSONCost     `json:"cost,omitempty"`
-	ContextWindow    *float64            `json:"contextWindow,omitempty"`
-	MaxTokens        *float64            `json:"maxTokens,omitempty"`
-	SamplingParams   map[string]any      `json:"samplingParams,omitempty"`
-	Headers          map[string]string   `json:"headers,omitempty"`
-	Compat           *ModelsJSONCompat   `json:"compat,omitempty"`
+	ID               string               `json:"id"`
+	Name             string               `json:"name,omitempty"`
+	API              string               `json:"api,omitempty"`
+	BaseURL          string               `json:"baseUrl,omitempty"`
+	Reasoning        *bool                `json:"reasoning,omitempty"`
+	ThinkingLevelMap ai.ThinkingLevelMap  `json:"thinkingLevelMap,omitempty"`
+	Input            []string             `json:"input,omitempty"`
+	InputLimits      *ai.ModelInputLimits `json:"inputLimits,omitempty"`
+	Cost             *ModelsJSONCost      `json:"cost,omitempty"`
+	ContextWindow    *float64             `json:"contextWindow,omitempty"`
+	MaxTokens        *float64             `json:"maxTokens,omitempty"`
+	SamplingParams   map[string]any       `json:"samplingParams,omitempty"`
+	Headers          map[string]string    `json:"headers,omitempty"`
+	Compat           *ModelsJSONCompat    `json:"compat,omitempty"`
 }
 
 // ModelsJSONModelOverride is a partial override of a built-in model.
@@ -224,6 +225,7 @@ type ModelsJSONModelOverride struct {
 	Reasoning        *bool                   `json:"reasoning,omitempty"`
 	ThinkingLevelMap ai.ThinkingLevelMap     `json:"thinkingLevelMap,omitempty"`
 	Input            []string                `json:"input,omitempty"`
+	InputLimits      *ai.ModelInputLimits    `json:"inputLimits,omitempty"`
 	Cost             *ModelsJSONCostOverride `json:"cost,omitempty"`
 	ContextWindow    *float64                `json:"contextWindow,omitempty"`
 	MaxTokens        *float64                `json:"maxTokens,omitempty"`
@@ -498,6 +500,7 @@ func validateModelDefinition(value any, path string, errors *[]validationError) 
 	validateOptionalBool(model, "reasoning", path, errors)
 	validateThinkingLevelMap(model, path, errors)
 	validateInputList(model, path, errors)
+	validateInputLimits(model, path, errors)
 	if cost, ok := model["cost"]; ok {
 		validateCost(cost, path+".cost", true, errors)
 	}
@@ -520,6 +523,7 @@ func validateModelOverride(value any, path string, errors *[]validationError) {
 	validateOptionalBool(model, "reasoning", path, errors)
 	validateThinkingLevelMap(model, path, errors)
 	validateInputList(model, path, errors)
+	validateInputLimits(model, path, errors)
 	if cost, ok := model["cost"]; ok {
 		validateCost(cost, path+".cost", false, errors)
 	}
@@ -530,6 +534,47 @@ func validateModelOverride(value any, path string, errors *[]validationError) {
 	if compat, ok := model["compat"]; ok {
 		validateCompat(compat, path+".compat", errors)
 	}
+}
+
+// validateInputLimits checks the inputLimits block's shape: maxRequestBytes and
+// the images counters are positive integers, and images.resize carries positive
+// integers with jpegQuality also bounded above by 100.
+func validateInputLimits(record map[string]any, path string, errors *[]validationError) {
+	value, ok := record["inputLimits"]
+	if !ok || value == nil {
+		return
+	}
+	limits, ok := value.(map[string]any)
+	if !ok {
+		*errors = append(*errors, validationError{path: path + ".inputLimits", message: expectedMessage("object")})
+		return
+	}
+	validateOptionalNumber(limits, "maxRequestBytes", path+".inputLimits", errors)
+	imagesValue, ok := limits["images"]
+	if !ok || imagesValue == nil {
+		return
+	}
+	images, ok := imagesValue.(map[string]any)
+	if !ok {
+		*errors = append(*errors, validationError{path: path + ".inputLimits.images", message: expectedMessage("object")})
+		return
+	}
+	validateOptionalNumber(images, "maxPerMessage", path+".inputLimits.images", errors)
+	validateOptionalNumber(images, "maxPerRequest", path+".inputLimits.images", errors)
+	resizeValue, ok := images["resize"]
+	if !ok || resizeValue == nil {
+		return
+	}
+	resize, ok := resizeValue.(map[string]any)
+	if !ok {
+		*errors = append(*errors, validationError{path: path + ".inputLimits.images.resize", message: expectedMessage("object")})
+		return
+	}
+	resizePath := path + ".inputLimits.images.resize"
+	validateOptionalNumber(resize, "maxWidth", resizePath, errors)
+	validateOptionalNumber(resize, "maxHeight", resizePath, errors)
+	validateOptionalNumber(resize, "maxBytes", resizePath, errors)
+	validateOptionalNumber(resize, "jpegQuality", resizePath, errors)
 }
 
 func validateThinkingLevelMap(record map[string]any, path string, errors *[]validationError) {
