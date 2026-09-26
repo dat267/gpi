@@ -753,10 +753,16 @@ func (c *AltScreenFlashContainer) Flash(message string, durationMS int) {
 	}
 }
 
-// AnimationFrame implements Animator: flashes need one frame at the next
-// expiry.
+// AnimationFrame implements Animator: flashes need a frame at the next expiry,
+// and one to paint a removal.
 func (c *AltScreenFlashContainer) AnimationFrame(now time.Time) (bool, time.Duration) {
-	c.expire(now)
+	if c.expire(now) {
+		// Upstream's timer removes the entry and calls requestRender() in the same
+		// callback, because the removal cannot paint itself: without this the walk
+		// stops asking for frames the moment nothing is pending, and the last frame
+		// still shows the flash.
+		return true, time.Millisecond
+	}
 	if len(c.entries) == 0 {
 		return false, 0
 	}
@@ -773,15 +779,19 @@ func (c *AltScreenFlashContainer) AnimationFrame(now time.Time) (bool, time.Dura
 	return true, delay
 }
 
-// expire drops entries whose deadline passed.
-func (c *AltScreenFlashContainer) expire(now time.Time) {
+// expire drops entries whose deadline passed, reporting whether any went.
+func (c *AltScreenFlashContainer) expire(now time.Time) bool {
 	kept := c.entries[:0]
+	removed := false
 	for _, entry := range c.entries {
 		if entry.expiresAt.After(now) {
 			kept = append(kept, entry)
+		} else {
+			removed = true
 		}
 	}
 	c.entries = kept
+	return removed
 }
 
 // Dispose clears all pending flashes.

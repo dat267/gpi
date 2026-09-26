@@ -1530,18 +1530,27 @@ const selectionAutoScrollIntervalMS = 50
 // AnimationFrame implements Animator: a held selection drag scrolls at the
 // legacy cadence.
 func (s *AltScreen) AnimationFrame(now time.Time) (bool, time.Duration) {
+	// A flash is composited over the screen rather than parented to it, so the
+	// tree walk never reaches its container: upstream gave each flash its own
+	// setTimeout, and D146 hands the deadline to the consumer's walk instead, so
+	// the screen has to forward it or nothing wakes at the expiry and the flash
+	// stays up until some unrelated repaint.
+	want, delay := s.flashes.AnimationFrame(now)
 	interval := selectionAutoScrollIntervalMS * time.Millisecond
 	if s.selectionAutoScrollDirection == 0 || s.selectionAnchor == nil || s.selectionDragPointer == nil {
-		return false, 0
+		return want, delay
 	}
 	if s.lastSelectionAutoScrollAt.IsZero() || now.Sub(s.lastSelectionAutoScrollAt) >= interval {
 		s.lastSelectionAutoScrollAt = now
 		s.autoScrollSelection()
 	}
 	if s.selectionAutoScrollDirection == 0 {
-		return false, 0
+		return want, delay
 	}
-	return true, interval
+	if !want || interval < delay {
+		want, delay = true, interval
+	}
+	return want, delay
 }
 
 func (s *AltScreen) autoScrollSelection() {
