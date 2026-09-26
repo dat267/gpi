@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -104,6 +105,12 @@ func checkSelectorGolden(t *testing.T, golden map[string]string, label string, g
 
 // TestSelectorsAgainstUpstreamGolden replays the upstream selector corpus.
 func TestSelectorsAgainstUpstreamGolden(t *testing.T) {
+	// The corpus drives Unix paths (/tmp/project) and the golden bakes in how
+	// they render, so the trust prompt's parent-folder label and the paths come
+	// out with the platform separator here and cannot match a Unix recording.
+	if runtime.GOOS == "windows" {
+		t.Skip("the golden embeds Unix paths")
+	}
 	SetCustomThemesDir(t.TempDir())
 	SetRegisteredThemes(nil)
 	SetTrueColorSupport(true)

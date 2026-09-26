@@ -88,6 +88,9 @@ func TestFileCompletionUnderHomeFiltersInsideHome(t *testing.T) {
 		}
 	}
 	t.Setenv("HOME", home)
+	// os.UserHomeDir reads USERPROFILE on Windows; pinning only HOME left this
+	// test completing against the developer's real home directory there.
+	t.Setenv("USERPROFILE", home)
 
 	provider := NewCombinedAutocompleteProvider(nil, home, "")
 	suggestions := provider.GetSuggestions(context.Background(), []string{"~/."}, 0, len("~/."), true)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -190,6 +191,13 @@ func TestLsToolSortingAndLimits(t *testing.T) {
 }
 
 func TestPathResolutionVariants(t *testing.T) {
+	// The cases below feed POSIX paths and expect POSIX answers (/etc/passwd is
+	// absolute, a file:// URL renders as /tmp/...). On Windows neither holds:
+	// Node's path.isAbsolute("/etc/passwd") is false there too, so the port's
+	// answer is the platform-correct one.
+	if runtime.GOOS == "windows" {
+		t.Skip("asserts POSIX path semantics")
+	}
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "Capture d'écran.png"), []byte("x"), 0o644)
 

@@ -658,11 +658,16 @@ func CreateShellTool(cwd string, config ShellToolConfig, options *BashToolOption
 				// convention so callers never mistake them for success (the
 				// upstream D68 note covers signals Node cannot name).
 				outputText, _ := formatOutput("")
+				// The timeout flag is authoritative, so it is checked first. Windows
+				// has no signals and its WaitStatus never reports Signaled(), which
+				// is where this check used to live, so a timed-out command there was
+				// reported as "Command exited with code 1" — an ordinary-looking
+				// failure with no hint that the timeout fired.
+				if timedOut.Load() {
+					return agent.AgentToolResult{}, fmt.Errorf("%s", appendStatus(outputText, fmt.Sprintf("Command timed out after %g seconds", *input.Timeout)))
+				}
 				if ws, ok := waitErr.(*exec.ExitError); ok {
 					if status, ok := ws.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-						if timedOut.Load() {
-							return agent.AgentToolResult{}, fmt.Errorf("%s", appendStatus(outputText, fmt.Sprintf("Command timed out after %g seconds", *input.Timeout)))
-						}
 						return agent.AgentToolResult{}, fmt.Errorf("%s", appendStatus(outputText, fmt.Sprintf("Command exited with code %d", 128+int(status.Signal()))))
 					}
 					return agent.AgentToolResult{}, fmt.Errorf("%s", appendStatus(outputText, fmt.Sprintf("Command exited with code %d", ws.ExitCode())))

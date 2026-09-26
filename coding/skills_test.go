@@ -20,13 +20,23 @@ func writeSkill(t *testing.T, dir string, name string, description string) strin
 	return path
 }
 
+// setHomeDir pins the home directory for both of os.UserHomeDir's inputs:
+// HOME on Unix and USERPROFILE on Windows. Pinning only HOME left a Windows run
+// reading the developer's real ~/.pi, so these tests loaded the real skills dir
+// alongside the fixture and saw extra entries.
+func setHomeDir(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
+
 // TestLoadSkillsDedupesDefaultsAndPaths covers upstream loadSkills' real-path
 // dedupe: the default agent-dir skills dir and a settings skill path pointing
 // at the same directory (e.g. ~/.pi/agent/skills) must load each skill once,
 // with no diagnostic. The port appended both, so every skill appeared twice.
 func TestLoadSkillsDedupesDefaultsAndPaths(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHomeDir(t, home)
 	agentDir := filepath.Join(home, ".pi", "agent")
 	writeSkill(t, filepath.Join(agentDir, "skills"), "tdd", "TDD")
 
@@ -76,7 +86,7 @@ func TestLoadSkillsCollisionDiagnostic(t *testing.T) {
 // a "~" path resolves instead of producing a "does not exist" warning.
 func TestLoadSkillsResolvesTildePath(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHomeDir(t, home)
 	skillsDir := filepath.Join(home, "myskills")
 	writeSkill(t, skillsDir, "custom", "custom")
 
@@ -99,7 +109,7 @@ func TestLoadSkillsResolvesTildePath(t *testing.T) {
 // the system prompt.
 func TestLoadSkillsSkipsUntrustedProject(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHomeDir(t, home)
 	agentDir := filepath.Join(home, ".pi", "agent")
 
 	cwd := t.TempDir()

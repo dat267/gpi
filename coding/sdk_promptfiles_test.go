@@ -58,7 +58,11 @@ func TestCreateAgentSessionLoadsSystemPromptFiles(t *testing.T) {
 		t.Fatalf("APPEND_SYSTEM.md was not appended to the prompt:\n%s", prompt)
 	}
 	// The append lands before the environment/project context sections.
-	appendIndex, cwdIndex := strings.Index(prompt, "Always answer briefly."), strings.LastIndex(prompt, cwd)
+	// The cwd section renders the path with forward slashes (upstream's
+	// `promptSections.cwd = cwd.replace(/\\/g, "/")`), so a Windows cwd appears
+	// slash-normalized and the raw path is not a substring of the prompt.
+	normalizedCwd := strings.ReplaceAll(cwd, "\\", "/")
+	appendIndex, cwdIndex := strings.Index(prompt, "Always answer briefly."), strings.LastIndex(prompt, normalizedCwd)
 	if cwdIndex == -1 || appendIndex > cwdIndex {
 		t.Fatalf("append section order: append@%d cwd@%d\n%s", appendIndex, cwdIndex, prompt)
 	}

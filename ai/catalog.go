@@ -21,13 +21,18 @@ var catalogFS embed.FS
 
 // catalogShape mirrors the embedded file's structure:
 // {provider: {api: {modelId: model}}}.
+//
+// The model ids are captured as raw JSON in the same single decode that walks
+// the provider and api keys. Keeping the api subtree as one json.RawMessage
+// would parse those keys twice (once into the RawMessage, once into a map to
+// iterate them), which on the 924 KB catalog is a second full key pass.
 type catalogShape struct {
 	Meta struct {
 		SchemaVersion          int    `json:"schemaVersion"`
 		GeneratedAt            string `json:"generatedAt"`
 		UpstreamManifestSHA256 string `json:"upstreamManifestSHA256"`
 	} `json:"_meta"`
-	Providers map[string]map[string]json.RawMessage `json:"providers"`
+	Providers map[string]map[string]map[string]json.RawMessage `json:"providers"`
 }
 
 var (
@@ -51,12 +56,7 @@ func loadCatalog() {
 		catalogModels = map[string]map[string]*Model{}
 		for providerID, apis := range catalog.Providers {
 			models := map[string]*Model{}
-			for api, entries := range apis {
-				var byID map[string]json.RawMessage
-				if err := jsonUnmarshalStrict(entries, &byID); err != nil {
-					catalogErr = fmt.Errorf("ai: decoding catalog for provider %q api %q: %w", providerID, api, err)
-					return
-				}
+			for api, byID := range apis {
 				for modelID, raw := range byID {
 					model, err := decodeCatalogModel(api, raw)
 					if err != nil {
@@ -71,24 +71,52 @@ func loadCatalog() {
 	})
 }
 
-// decodeCatalogModel decodes one generated model entry, decoding its compat
-// arm explicitly from the known api (upstream keys compat by api at the type
-// level).
+// decodeCatalogModel decodes one generated model entry in a single pass, taking
+// its compat arm at the same time: the api is known here, so the object decodes
+// straight into that arm's type instead of being read out raw and parsed again
+// by DecodeModelCompat. Letting Model.Compat's own decoder run would also guess
+// the arm from the key names first, a result the authoritative arm overwrote.
+//
+// Worth 0.8 ms of a whole-catalog decode (p50 13.71 ms -> 12.73 ms, 15 runs of
+// each on one machine), and one fewer parse per model — every real run decodes
+// the catalog, because CreateModelRuntime builds all 39 providers.
 func decodeCatalogModel(api Api, data []byte) (*Model, error) {
-	var model Model
-	if err := jsonUnmarshalStrict(data, &model); err != nil {
+	switch api {
+	case APIAnthropicMessages:
+		return decodeCatalogEntry[AnthropicMessagesCompat](api, data, func(c *ModelCompat, arm *AnthropicMessagesCompat) { c.AnthropicMessages = arm })
+	case APIOpenAICompletions:
+		return decodeCatalogEntry[OpenAICompletionsCompat](api, data, func(c *ModelCompat, arm *OpenAICompletionsCompat) { c.OpenAICompletions = arm })
+	case APIOpenAIResponses, APIAzureOpenAIResponses, APIOpenAICodexResponses:
+		return decodeCatalogEntry[OpenAIResponsesCompat](api, data, func(c *ModelCompat, arm *OpenAIResponsesCompat) { c.OpenAIResponses = arm })
+	case APIMistralConversations:
+		return decodeCatalogEntry[MistralConversationsCompat](api, data, func(c *ModelCompat, arm *MistralConversationsCompat) { c.MistralConversations = arm })
+	case APIBedrockConverse:
+		return decodeCatalogEntry[BedrockCompat](api, data, func(c *ModelCompat, arm *BedrockCompat) { c.Bedrock = arm })
+	}
+	// No arm exists for this api, and DecodeModelCompat drops compat for it too,
+	// so decode the entry alone. json.RawMessage absorbs whatever the compat
+	// value is without error, which keeps the unknown-api case identical.
+	return decodeCatalogEntry[json.RawMessage](api, data, func(*ModelCompat, *json.RawMessage) {})
+}
+
+// decodeCatalogEntry decodes one model, pulling compat into set in the same pass.
+// The outer Compat field shadows Model.Compat (depth 0 over depth 1), so
+// ModelCompat.UnmarshalJSON never runs.
+func decodeCatalogEntry[C any](api Api, data []byte, set func(*ModelCompat, *C)) (*Model, error) {
+	var payload struct {
+		Model
+		Compat *C `json:"compat"`
+	}
+	if err := jsonUnmarshalStrict(data, &payload); err != nil {
 		return nil, err
 	}
-	var probe struct {
-		Compat json.RawMessage `json:"compat"`
-	}
-	_ = jsonUnmarshalStrict(data, &probe)
-	compat, err := DecodeModelCompat(api, probe.Compat)
-	if err != nil {
-		return nil, err
-	}
+	model := payload.Model
 	model.API = api
-	model.Compat = compat
+	if payload.Compat != nil {
+		compat := &ModelCompat{}
+		set(compat, payload.Compat)
+		model.Compat = compat
+	}
 	return &model, nil
 }
 

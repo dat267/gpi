@@ -2,6 +2,7 @@ package coding
 
 import (
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -38,8 +39,18 @@ func TestResolveCLIPaths(t *testing.T) {
 		t.Errorf("ResolveCLIPaths(nil) = %#v, want nil", got)
 	}
 
-	got := ResolveCLIPaths(cwd, []string{"./skills", "npm:pkg", "/abs/skills"})
-	want := []string{filepath.Join(cwd, "skills"), "npm:pkg", "/abs/skills"}
+	// Use a path that is absolute on this platform. "/abs/skills" is neither
+	// absolute nor rooted-with-a-drive on Windows, and Node's path.isAbsolute
+	// agrees, so the port resolves it against cwd exactly as upstream would.
+	// ("\abs\skills" would not do either: Windows calls that rooted, not
+	// absolute.)
+	absolute := "/abs/skills"
+	if runtime.GOOS == "windows" {
+		absolute = filepath.VolumeName(cwd) + `\abs\skills`
+	}
+
+	got := ResolveCLIPaths(cwd, []string{"./skills", "npm:pkg", absolute})
+	want := []string{filepath.Join(cwd, "skills"), "npm:pkg", absolute}
 	if len(got) != len(want) {
 		t.Fatalf("ResolveCLIPaths = %#v, want %#v", got, want)
 	}

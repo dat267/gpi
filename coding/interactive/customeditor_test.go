@@ -3,6 +3,7 @@ package interactive
 import (
 	"encoding/json"
 	"os"
+	"runtime"
 	"testing"
 
 	"github.com/dat267/pier/tui"
@@ -82,6 +83,12 @@ func TestCustomEditorAgainstUpstreamGolden(t *testing.T) {
 
 	for _, label := range sortedKeys(corpus.Input) {
 		spec := corpus.Input[label]
+		// The paste-image binding is platform-keyed (pasteImageKeys(windows)), and
+		// this golden recorded the Unix key, so replaying it there asserts the
+		// other labels without inventing a second recording.
+		if runtime.GOOS == "windows" && label == "paste-image" {
+			continue
+		}
 		editor := NewCustomEditor(editorTestHost{}, editorTheme, keybindings, CustomEditorOptions{})
 		editor.SetText(spec.Text)
 		var events []string

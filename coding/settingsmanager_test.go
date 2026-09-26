@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -329,7 +330,12 @@ func TestSettingsExternalEditorAndTUISettings(t *testing.T) {
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "")
 	manager := NewInMemorySettingsManager(nil, SettingsManagerCreateOptions{})
-	if got := manager.GetExternalEditorCommand(); got != "nano" {
+	// settings-manager.ts:995 is process.platform === "win32" ? "notepad" : "nano".
+	wantDefault := "nano"
+	if runtime.GOOS == "windows" {
+		wantDefault = "notepad"
+	}
+	if got := manager.GetExternalEditorCommand(); got != wantDefault {
 		t.Fatalf("editor = %s", got)
 	}
 	editor := "  custom-editor  "

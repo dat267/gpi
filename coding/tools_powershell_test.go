@@ -46,11 +46,17 @@ func TestGetShellConfigResolution(t *testing.T) {
 	if isLegacyWslBashPath(`C:\Program Files\Git\bin\bash.exe`) {
 		t.Fatal("Git Bash must not use stdin transport")
 	}
-	config, err = GetShellConfig("/bin/sh")
+	// A custom shell path is honored. /bin/sh exists only on Unix, so use a
+	// shell the platform actually has.
+	customShell := "/bin/sh"
+	if runtime.GOOS == "windows" {
+		customShell = config.Shell
+	}
+	config, err = GetShellConfig(customShell)
 	if err != nil {
 		t.Fatalf("custom shell: %v", err)
 	}
-	if config.Shell != "/bin/sh" || config.Args[0] != "-c" {
+	if config.Shell != customShell || config.Args[0] != "-c" {
 		t.Fatalf("config = %#v", config)
 	}
 }

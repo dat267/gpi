@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -92,7 +93,9 @@ func TestUnixEndToEndHandshakeAndSessionRouting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	// Windows has no Unix permission bits: Go synthesizes 0666 for every file,
+	// so the owner-only default mode is a Unix assertion.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("socket mode = %v", info.Mode().Perm())
 	}
 	if info.Mode()&os.ModeSocket == 0 {
