@@ -65,20 +65,18 @@ func TestAnimationScanCacheIsDroppedByAPaint(t *testing.T) {
 	app.Init(context.Background())
 	wiring := newRunWiring(app)
 
-	timer := time.NewTimer(time.Hour)
-	timer.Stop()
-	defer timer.Stop()
-	var deadline time.Time
+	schedule := newLoopSchedule(runLoopHost{wiring}, wiring.renderUI, nil)
+	defer schedule.close()
 
 	// Idle: the walk finds no animator, and the loop caches that answer.
-	if ch := wiring.armAnimation(timer, &deadline); ch != nil {
-		t.Fatal("idle armAnimation armed an animation timer")
+	if ch := schedule.arm(); ch != nil {
+		t.Fatal("idle arm armed an animation timer")
 	}
 
 	app.UIState.ShowStatusIndicator(NewCompactionStatusIndicator(app.UI, "manual"))
-	wiring.renderUI() // the paint that shows the indicator
+	schedule.paintNow() // the paint that shows the indicator
 
-	if ch := wiring.armAnimation(timer, &deadline); ch == nil {
+	if ch := schedule.arm(); ch == nil {
 		t.Fatal("a paint that started an animation did not re-arm the animation timer")
 	}
 }

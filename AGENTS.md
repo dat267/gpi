@@ -234,15 +234,16 @@ Stage 2 (rendering on the loop) has landed:
   delta burst cannot paint back-to-back; resize and animation paints stay
   immediate.
 - **D164 input does not paint by default.** The terminal input arms paint only
-  when the dispatch queued a render request (`RunWiring.paintIfRequested`,
+  when the dispatch queued a render request (`loopSchedule.paintIfRequested`,
   which consumes the coalesced tick the request left) and first drain every
   raw chunk already queued, so one input burst is one paint. Fullscreen mode
   enables `?1003h`, so a bare pointer movement arrives as an event per pixel,
   and one frame is O(the whole transcript): painting per chunk spent the loop's
   entire budget on full repaints. Measured on the port: 60 mouse moves plus a
   keystroke now cost 2–3 paints, down from 63. The loop also caches the
-  renderer's animation walk between paints (`RunWiring.animationScanValid`,
-  dropped by `renderUI`) because the walk visits every mounted component and
+  renderer's animation walk between paints (`loopSchedule.scanValid`, dropped
+  by a paint or, for a "nothing animates" answer, boxed by
+  `loopSchedule.scanAt`) because the walk visits every mounted component and
   the loop asked for it once per input event. That walk descends through
   `childrenHolder` (`Container`, `Box`, and now `ScrollView`/`MouseRegion`): a
   single-child wrapper that forgets `childComponents` hides any animator inside

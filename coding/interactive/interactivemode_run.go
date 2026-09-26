@@ -114,8 +114,10 @@ type RunWiring struct {
 	// running; callers must be on the loop goroutine.
 	StartWork func(fn func(context.Context) error)
 
-	// work is the loop-owned work queue (see runLoop).
-	work runnerWorkState
+	// schedule is the loop's scheduling state: the work queue, the animation
+	// scan cache and the paint coalescing (interactivemode_schedule.go). runLoop
+	// installs it and only the loop goroutine touches it; nil outside the loop.
+	schedule *loopSchedule
 	// beats counts loop iterations (the watchdog beat: a stalled loop stops
 	// advancing it, so a watchdog can detect a hang).
 	beats atomic.Uint64
@@ -129,20 +131,6 @@ type RunWiring struct {
 	RawInputs <-chan string
 	// RawTerminal is the raw-input terminal (nil for sequence mode).
 	RawTerminal tui.RawInputTerminal
-	// animationScanValid/animationScanNeeds cache the renderer's animation walk
-	// between paints (see armAnimation). The walk visits every mounted
-	// component, and the loop asked for it once per iteration — once per input
-	// event — so an uncached walk charged the whole transcript to every mouse
-	// move. A paint is what changes a component's animation state, so renderUI
-	// drops the cache and the next iteration re-walks and re-arms. A cached
-	// "nothing animates" is time-boxed by animationScanAt: a component can start
-	// animating between scans (a tool's elapsed label is built after its call
-	// event, and only a paint drops the cache), so trusting it indefinitely left
-	// such a label with nothing that repainted it. Loop-owned; no other goroutine
-	// touches it.
-	animationScanValid bool
-	animationScanNeeds bool
-	animationScanAt    time.Time
 	// ShowStatus/ShowError/ShowWarning report messages.
 	ShowStatus  func(message string)
 	ShowError   func(message string)
@@ -530,18 +518,15 @@ func (w *RunWiring) drainReadyEvents() {
 	}
 }
 
-// minInteractiveFrameInterval bounds the coalesced render-tick paint rate
-// (60 fps). Input, resize and animation paints are not bounded: they are
-// already rare and latency-sensitive.
-const minInteractiveFrameInterval = 16 * time.Millisecond
-
 // renderUI paints the current state (loop goroutine only). A paint is the only
 // thing that can change a component's animation state, so it also invalidates
 // the cached animation walk (D164): the next loop iteration re-walks and
 // re-arms the animation timer.
 func (w *RunWiring) renderUI() {
 	defer w.phase("render")()
-	w.animationScanValid = false
+	if w.schedule != nil {
+		w.schedule.invalidateScan()
+	}
 	if w.UI != nil {
 		w.UI.RenderNow(false)
 	}
@@ -630,144 +615,56 @@ func (w *RunWiring) writeStallRecord(name string, elapsed time.Duration, note st
 	_ = pprof.Lookup("goroutine").WriteTo(file, 1)
 }
 
-// armAnimation points the loop's timer at the next component animation frame
-// and returns the channel to select on (nil when nothing animates). An already
-// armed, equal-or-earlier deadline is left alone, so a busy event stream cannot
-// starve the animation.
-func (w *RunWiring) armAnimation(timer *time.Timer, deadline *time.Time) <-chan time.Time {
-	// The input flush deadline (a lone ESC, an incomplete sequence, a split
-	// keyboard-protocol response) shares the loop timer: waking for it is
-	// handled in the fire path via flushExpiredInput.
-	if w.RawTerminal != nil {
-		if flushDeadline, ok := w.RawTerminal.NextInputFlushDeadline(); ok {
-			if delay := time.Until(flushDeadline); delay <= 0 {
-				// Already expired: flush on this beat, before painting.
-				w.flushExpiredInput()
-			} else if deadline.IsZero() || flushDeadline.Before(*deadline) {
-				timer.Reset(delay)
-				*deadline = flushDeadline
-				return timer.C
-			}
-		}
-	}
-	if w.UI == nil {
-		return nil
-	}
-	// The animation walk visits every mounted component, and this runs once per
-	// loop iteration — once per input event. Reuse the last walk while it still
-	// describes the tree: a paint (which renderUI uses to invalidate) is what
-	// changes a component's animation state, so an input event that paints
-	// nothing must not pay for the walk (D164). A walk that reported no animator
-	// stays valid until the next paint; a walk with a deadline stays valid until
-	// that deadline passes, which is when the owner must ask again.
-	// A cached "no animator" is only trustworthy when no turn is running: a tool
-	// with a live timer can be built between the scan and the next paint, and the
-	// paint is the only thing that invalidates the cache. While work is active the
-	// fallback below must run, so do not short-circuit here.
-	if w.animationScanValid && !w.animationScanNeeds && deadline.IsZero() && !w.work.active &&
-		time.Since(w.animationScanAt) < time.Second {
-		return nil
-	}
-	if w.animationScanValid && w.animationScanNeeds && !deadline.IsZero() && time.Now().Before(*deadline) {
-		return timer.C
-	}
-	needs, delay := w.UI.NextAnimation()
-	w.animationScanAt = time.Now()
-	// A running turn can hold a live timer (the shell elapsed label) even when
-	// the animation walk did not report one: the walk descends through wrappers
-	// and may not reach a freshly built component before the next paint. Tick at
-	// least once a second while work is active so such a label cannot freeze.
-	if w.work.active && (!needs || delay > time.Second) {
-		needs, delay = true, time.Second
-	}
-	w.animationScanValid = true
-	w.animationScanNeeds = needs
-	if !needs {
-		if !deadline.IsZero() {
-			timer.Stop()
-			*deadline = time.Time{}
-		}
-		return nil
-	}
-	if delay <= 0 {
-		delay = time.Millisecond
-	}
-	next := time.Now().Add(delay)
-	if !deadline.IsZero() && !next.Before(*deadline) {
-		return timer.C
-	}
-	timer.Reset(delay)
-	*deadline = next
-	return timer.C
-}
-
-// flushExpiredInput dispatches sequences whose input deadlines have expired
-// (a lone ESC, an incomplete sequence, a split keyboard-protocol response).
-func (w *RunWiring) flushExpiredInput() {
-	if w.RawTerminal == nil || w.UI == nil {
-		return
-	}
-	for _, sequence := range w.RawTerminal.FlushPendingInput() {
-		w.UI.HandleTerminalInput(sequence)
-	}
-}
-
 // LoopBeats reports the loop's iteration count (watchdog beat).
 func (w *RunWiring) LoopBeats() uint64 { return w.beats.Load() }
 
-// runnerWorkState is the loop-owned work bookkeeping: at most one blocking
-// unit (a turn, a compaction-queue flush) runs at a time, with the rest
-// queued. Nothing here is shared with other goroutines: only the loop
-// goroutine mutates it.
-type runnerWorkState struct {
-	done    chan error
-	ctx     context.Context
-	active  bool
-	pending []func(context.Context) error
-}
-
 // RunWork schedules blocking work on the loop. It never blocks, and it may
 // only be called from the loop goroutine (handlers dispatch work this way);
-// external goroutines must not touch the loop-owned work state.
+// external goroutines must not touch the loop-owned work state. It is a no-op
+// when no loop is running.
 func (w *RunWiring) RunWork(fn func(context.Context) error) {
-	if fn == nil {
-		return
+	if w.schedule != nil {
+		w.schedule.runWork(fn)
 	}
-	if !w.work.active {
-		w.startWork(fn)
-		return
-	}
-	w.work.pending = append(w.work.pending, fn)
 }
 
 // LoopContext returns the run loop's work context. Only the loop goroutine
 // may call it (the context is loop-owned state).
-func (w *RunWiring) LoopContext() context.Context { return w.work.ctx }
-
-// startWork launches fn in its own goroutine and records the completion
-// channel. A panic is surfaced like a returned error instead of killing the
-// process.
-func (w *RunWiring) startWork(fn func(context.Context) error) {
-	done := make(chan error, 1)
-	w.work.done = done
-	w.work.active = true
-	workCtx := w.work.ctx
-	if workCtx == nil {
-		workCtx = context.Background()
+func (w *RunWiring) LoopContext() context.Context {
+	if w.schedule == nil {
+		return nil
 	}
-	go func() {
-		var err error
-		func() {
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					err = fmt.Errorf("panic: %v", recovered)
-				}
-			}()
-			err = fn(workCtx)
-		}()
-		done <- err
-	}()
+	return w.schedule.workContext()
 }
+
+// runLoopHost adapts the wiring's renderer and raw terminal to the schedule's
+// seam (loopHost). Every method tolerates a missing renderer or terminal.
+type runLoopHost struct{ w *RunWiring }
+
+func (h runLoopHost) NextAnimation() (bool, time.Duration) {
+	if h.w.UI == nil {
+		return false, 0
+	}
+	return h.w.UI.NextAnimation()
+}
+
+func (h runLoopHost) NextInputFlushDeadline() (time.Time, bool) {
+	if h.w.RawTerminal == nil {
+		return time.Time{}, false
+	}
+	return h.w.RawTerminal.NextInputFlushDeadline()
+}
+
+func (h runLoopHost) FlushPendingInput() {
+	if h.w.RawTerminal == nil || h.w.UI == nil {
+		return
+	}
+	for _, sequence := range h.w.RawTerminal.FlushPendingInput() {
+		h.w.UI.HandleTerminalInput(sequence)
+	}
+}
+
+func (h runLoopHost) RenderTicks() <-chan struct{} { return h.w.renderTicks() }
 
 // runLoop is the UI's single writer. It applies session events and user input
 // in arrival order and runs blocking work in a goroutine so a turn's events
@@ -775,72 +672,30 @@ func (w *RunWiring) startWork(fn func(context.Context) error) {
 // event queue meanwhile; D-row: see AGENTS.md).
 func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 	inputs := w.Startup.Inputs()
-	w.work.ctx = ctx
+	// The schedule owns the loop's timers and its work queue; the select below
+	// is the only thing that waits on them (interactivemode_schedule.go). It
+	// paints through w.renderUI, which is also what invalidates the animation
+	// scan. Coalesced render requests paint at most once per frame interval, so
+	// a fast event stream (streaming deltas) cannot saturate the loop with
+	// back-to-back full repaints; resize and animation paints stay immediate.
+	schedule := newLoopSchedule(runLoopHost{w}, w.renderUI, w.markInputRead)
+	w.schedule = schedule
+	schedule.setContext(ctx)
 	w.StartWork = w.RunWork
-	w.animationScanValid = false
-	// One loop-owned timer drives component animation (loaders, flashes): the
-	// renderer reports the next frame delay and the loop wakes to paint it.
-	animationTimer := time.NewTimer(time.Hour)
-	animationTimer.Stop()
 	defer func() {
-		animationTimer.Stop()
+		schedule.close()
+		schedule.setContext(nil)
+		w.schedule = nil
 		w.StartWork = nil
-		w.work.ctx = nil
 	}()
-	var (
-		animationCh       <-chan time.Time
-		animationDeadline time.Time
-	)
-
-	// Coalesced render requests paint at most once per frame interval, so a
-	// fast event stream (streaming deltas) cannot saturate the loop with
-	// back-to-back full repaints. Resize and animation paints stay immediate:
-	// they are latency-sensitive and already rate-limited. Input paints on the
-	// next frame when the dispatch asked for one (paintIfRequested).
-	paintTimer := time.NewTimer(time.Hour)
-	paintTimer.Stop()
-	defer paintTimer.Stop()
-	var (
-		paintCh   <-chan time.Time
-		lastPaint = time.Now()
-	)
-	paint := func() {
-		w.renderUI()
-		lastPaint = time.Now()
-		if paintCh != nil {
-			paintTimer.Stop()
-			paintCh = nil
-		}
-	}
-	// paintIfRequested paints when the dispatch queued a render request.
-	// RequestRender coalesces onto the tick channel (cap 1), so a pending tick is
-	// exactly "a paint is wanted"; consuming it here also stops the 16 ms frame
-	// timer from repainting the same request.
-	//
-	// Input that changed nothing — a bare mouse move, a key release, a terminal
-	// reply, an already-correct hover — asks for nothing and therefore costs no
-	// frame. A full frame is O(the transcript), so painting per mouse event was
-	// what made mouse interaction unusable on a large session (D164).
-	paintIfRequested := func() {
-		select {
-		case <-w.renderTicks():
-		default:
-			return
-		}
-		w.markInputRead()
-		paint()
-	}
+	var animationCh <-chan time.Time
 
 	for _, text := range initialWork {
 		text := text
-		w.work.pending = append(w.work.pending, func(context.Context) error {
+		// The first starts, the rest queue behind it.
+		schedule.runWork(func(context.Context) error {
 			return w.Prompt(ctx, text)
 		})
-	}
-	if len(w.work.pending) > 0 {
-		next := w.work.pending[0]
-		w.work.pending = w.work.pending[1:]
-		w.startWork(next)
 	}
 
 	for {
@@ -853,14 +708,14 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 		}
 		var (
 			inputsCh <-chan string
-			doneCh   chan error
+			doneCh   <-chan error
 		)
-		if !w.work.active {
+		if !schedule.workActive() {
 			inputsCh = inputs
 		} else {
-			doneCh = w.work.done
+			doneCh = schedule.workDone()
 		}
-		animationCh = w.armAnimation(animationTimer, &animationDeadline)
+		animationCh = schedule.arm()
 
 		select {
 		case <-ctx.Done():
@@ -907,7 +762,7 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 				w.drainReadyRawInput()
 			}()
 			w.drainReadyEvents()
-			paintIfRequested()
+			schedule.paintIfRequested()
 		case data, ok := <-w.InputEvents:
 			if !ok {
 				w.InputEvents = nil
@@ -922,13 +777,13 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 				}()
 			}
 			w.drainReadyEvents()
-			paintIfRequested()
+			schedule.paintIfRequested()
 		case _, ok := <-w.ResizeEvents:
 			if !ok {
 				w.ResizeEvents = nil
 				continue
 			}
-			paint()
+			schedule.paintNow()
 		case sig, ok := <-w.SignalEvents:
 			if !ok {
 				w.SignalEvents = nil
@@ -938,33 +793,22 @@ func (w *RunWiring) runLoop(ctx context.Context, initialWork []string) {
 				w.OnSignal(sig)
 			}
 		case <-animationCh:
-			animationDeadline = time.Time{}
-			w.flushExpiredInput()
-			paint()
+			// A beat that woke for an expired input flush does that in arm();
+			// here the animation deadline clears so the next iteration re-walks.
+			schedule.animationFired()
+			schedule.flushExpiredInput()
+			schedule.paintNow()
 		case <-w.renderTicks():
 			// Coalesce: apply every event already queued, then paint once, so
 			// a burst of N messages produces one render rather than N.
 			w.drainReadyEvents()
-			if wait := minInteractiveFrameInterval - time.Since(lastPaint); wait > 0 {
-				if paintCh == nil {
-					paintTimer.Reset(wait)
-					paintCh = paintTimer.C
-				}
-			} else {
-				paint()
-			}
-		case <-paintCh:
-			paint()
+			schedule.coalescePaint()
+		case <-schedule.paintChannel():
+			schedule.paintNow()
 		case text := <-inputsCh:
-			w.startWork(func(context.Context) error { return w.Prompt(ctx, text) })
+			schedule.runWork(func(context.Context) error { return w.Prompt(ctx, text) })
 		case err := <-doneCh:
-			w.work.active = false
-			w.work.done = nil
-			if pending := w.work.pending; len(pending) > 0 {
-				next := pending[0]
-				w.work.pending = pending[1:]
-				w.startWork(next)
-			}
+			schedule.finishWork()
 			if err != nil {
 				w.ShowChatError(err.Error())
 			}

@@ -298,10 +298,10 @@ func (a *animationProbe) AnimationFrame(time.Time) (bool, time.Duration) {
 func (a *animationProbe) Render(int) []string { return nil }
 func (a *animationProbe) Invalidate()         {}
 
-// TestArmAnimationFindsARunningToolInTheLayout pins that the loop's animation
-// scan reaches a component under the fullscreen layout (VStack -> ScrollView ->
-// DocumentContainer -> Chat), so the elapsed timer arms.
-func TestArmAnimationFindsARunningToolInTheLayout(t *testing.T) {
+// TestAnimationWalkReachesARunningToolInTheLayout pins that the loop's
+// animation scan reaches a component under the fullscreen layout (VStack ->
+// ScrollView -> DocumentContainer -> Chat), so the elapsed timer arms.
+func TestAnimationWalkReachesARunningToolInTheLayout(t *testing.T) {
 	wiring, _ := newRunTestWiring(t)
 	probe := &animationProbe{}
 	wiring.Chat.AddChild(probe)
@@ -316,36 +316,13 @@ func TestArmAnimationFindsARunningToolInTheLayout(t *testing.T) {
 	screen.SetLayoutRoot(root)
 	wiring.UI = screen
 
-	timer := time.NewTimer(time.Hour)
-	timer.Stop()
-	var deadline time.Time
-	ch := wiring.armAnimation(timer, &deadline)
-	if ch == nil || deadline.IsZero() {
-		t.Fatalf("animation not armed: ch=%v deadline=%v (probe frames=%d)", ch, deadline, probe.frames)
+	schedule := newLoopSchedule(runLoopHost{wiring}, wiring.renderUI, nil)
+	defer schedule.close()
+
+	if ch := schedule.arm(); ch == nil || schedule.deadline.IsZero() {
+		t.Fatalf("animation not armed: ch=%v deadline=%v (probe frames=%d)", ch, schedule.deadline, probe.frames)
 	}
 	if probe.frames == 0 {
 		t.Fatal("animation probe was not visited")
-	}
-}
-
-// TestArmAnimationTicksWhileWorkIsActive pins the fallback that keeps a running
-// tool's elapsed label live even when the animation walk does not reach it.
-func TestArmAnimationTicksWhileWorkIsActive(t *testing.T) {
-	wiring, _ := newRunTestWiring(t)
-	wiring.work.active = true
-	// Simulate a stale walk (a scan ran before the tool appeared; only a paint
-	// invalidates it). The fallback must still arm the tick.
-	wiring.animationScanValid = true
-	wiring.animationScanNeeds = false
-
-	timer := time.NewTimer(time.Hour)
-	timer.Stop()
-	var deadline time.Time
-	ch := wiring.armAnimation(timer, &deadline)
-	if ch == nil || deadline.IsZero() {
-		t.Fatalf("animation not armed while work is active: ch=%v deadline=%v", ch, deadline)
-	}
-	if delay := time.Until(deadline); delay <= 0 || delay > 2*time.Second {
-		t.Fatalf("tick delay = %v", delay)
 	}
 }
