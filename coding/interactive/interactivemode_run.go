@@ -134,10 +134,15 @@ type RunWiring struct {
 	// component, and the loop asked for it once per iteration — once per input
 	// event — so an uncached walk charged the whole transcript to every mouse
 	// move. A paint is what changes a component's animation state, so renderUI
-	// drops the cache and the next iteration re-walks and re-arms. Loop-owned;
-	// no other goroutine touches it.
+	// drops the cache and the next iteration re-walks and re-arms. A cached
+	// "nothing animates" is time-boxed by animationScanAt: a component can start
+	// animating between scans (a tool's elapsed label is built after its call
+	// event, and only a paint drops the cache), so trusting it indefinitely left
+	// such a label with nothing that repainted it. Loop-owned; no other goroutine
+	// touches it.
 	animationScanValid bool
 	animationScanNeeds bool
+	animationScanAt    time.Time
 	// ShowStatus/ShowError/ShowWarning report messages.
 	ShowStatus  func(message string)
 	ShowError   func(message string)
@@ -659,13 +664,15 @@ func (w *RunWiring) armAnimation(timer *time.Timer, deadline *time.Time) <-chan 
 	// with a live timer can be built between the scan and the next paint, and the
 	// paint is the only thing that invalidates the cache. While work is active the
 	// fallback below must run, so do not short-circuit here.
-	if w.animationScanValid && !w.animationScanNeeds && deadline.IsZero() && !w.work.active {
+	if w.animationScanValid && !w.animationScanNeeds && deadline.IsZero() && !w.work.active &&
+		time.Since(w.animationScanAt) < time.Second {
 		return nil
 	}
 	if w.animationScanValid && w.animationScanNeeds && !deadline.IsZero() && time.Now().Before(*deadline) {
 		return timer.C
 	}
 	needs, delay := w.UI.NextAnimation()
+	w.animationScanAt = time.Now()
 	// A running turn can hold a live timer (the shell elapsed label) even when
 	// the animation walk did not report one: the walk descends through wrappers
 	// and may not reach a freshly built component before the next paint. Tick at
