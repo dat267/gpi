@@ -327,14 +327,25 @@ func NewAgentSession(config *SessionConfig) (*AgentSession, error) {
 
 	// Auto-compaction runs before the next assistant response, mirroring
 	// upstream's _compactBeforeNextAssistantResponse; the refreshed message
-	// list replaces the turn context.
+	// list replaces the turn context. The agent state is also re-read here so a
+	// model or thinking-level switch made while the turn is running reaches the
+	// next assistant request in that same turn, not only the next prompt
+	// (upstream agent-session.ts prepareNextTurnWithContext, applied by the loop
+	// as nextTurnSnapshot); the tool set is refreshed with it.
 	a.PrepareNextTurnWithContext = func(turn *agent.ShouldStopAfterTurnContext, ctx context.Context) (*agent.AgentLoopTurnUpdate, error) {
 		if err := s.maybeAutoCompact(ctx); err != nil {
 			return nil, err
 		}
+		state := s.Agent.State()
 		updated := turn.Context
-		updated.Messages = s.Agent.State().Messages
-		return &agent.AgentLoopTurnUpdate{Context: &updated}, nil
+		updated.Messages = state.Messages
+		updated.Tools = append([]agent.AgentTool{}, state.Tools...)
+		return &agent.AgentLoopTurnUpdate{
+			Context:          &updated,
+			Model:            state.Model,
+			ThinkingLevel:    state.ThinkingLevel,
+			HasThinkingLevel: true,
+		}, nil
 	}
 	return s, nil
 }
