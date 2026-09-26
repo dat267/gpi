@@ -232,6 +232,32 @@ func (c *ModelCompat) UnmarshalJSON(data []byte) error {
 type ModelPromptCache map[CacheRetention]int
 
 // Model is the unified model descriptor.
+// ModelInputLimits bound what a model accepts in one request (upstream
+// ModelInputLimitsSchema). Only user models.json overrides set these; no builtin
+// model in the catalogue carries them, which is why callers fall back to their
+// own defaults.
+type ModelInputLimits struct {
+	MaxRequestBytes int64             `json:"maxRequestBytes,omitempty"`
+	Images          *ModelImageLimits `json:"images,omitempty"`
+}
+
+// ModelImageLimits bound image input for a model.
+type ModelImageLimits struct {
+	Resize        *ModelImageResize `json:"resize,omitempty"`
+	MaxPerMessage int64             `json:"maxPerMessage,omitempty"`
+	MaxPerRequest int64             `json:"maxPerRequest,omitempty"`
+}
+
+// ModelImageResize is the per-model inline-image resize contract (upstream
+// ImageResizeSchema). Unset fields fall back to the caller's defaults, the way
+// upstream spreads the object over DEFAULT_OPTIONS.
+type ModelImageResize struct {
+	MaxWidth    int64 `json:"maxWidth,omitempty"`
+	MaxHeight   int64 `json:"maxHeight,omitempty"`
+	MaxBytes    int64 `json:"maxBytes,omitempty"`
+	JPEGQuality int64 `json:"jpegQuality,omitempty"`
+}
+
 type Model struct {
 	ID       string     `json:"id"`
 	Name     string     `json:"name"`
@@ -239,12 +265,13 @@ type Model struct {
 	Provider ProviderId `json:"provider"`
 	BaseURL  string     `json:"baseUrl"`
 	// Reasoning reports whether the model supports thinking/reasoning.
-	Reasoning        bool             `json:"reasoning"`
-	ThinkingLevelMap ThinkingLevelMap `json:"thinkingLevelMap,omitempty"`
-	Input            []string         `json:"input"` // "text" | "image"
-	Cost             ModelCost        `json:"cost"`
-	ContextWindow    int64            `json:"contextWindow"`
-	MaxTokens        int64            `json:"maxTokens"`
+	Reasoning        bool              `json:"reasoning"`
+	ThinkingLevelMap ThinkingLevelMap  `json:"thinkingLevelMap,omitempty"`
+	Input            []string          `json:"input"` // "text" | "image"
+	InputLimits      *ModelInputLimits `json:"inputLimits,omitempty"`
+	Cost             ModelCost         `json:"cost"`
+	ContextWindow    int64             `json:"contextWindow"`
+	MaxTokens        int64             `json:"maxTokens"`
 	// SamplingParams are default sampling parameters for this model. See
 	// StreamOptions.SamplingParams; per-request keys override these.
 	SamplingParams map[string]json.RawMessage `json:"samplingParams,omitempty"`
