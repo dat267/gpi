@@ -13,9 +13,9 @@ import (
 // Port of the startup "loaded resources" area of interactive-mode.ts
 // (showLoadedResources and the source-scope display helpers).
 //
-// The Skills section is ported; Context/Prompts/Themes/Extensions are not yet
-// (the Go loader exposes no themes/extensions and the context display needs
-// formatContextPath). Extension mechanics stay out of scope (D41/D140).
+// Context, Skills, Prompts and Themes are ported. Extensions are not: extension
+// mechanics stay out of scope (D41/D140), so the loader exposes no extensions to
+// list.
 
 var npmPackagePathPattern = regexp.MustCompile(`node_modules/(@?[^/]+(?:/[^/]+)?)/(.*)`)
 
@@ -324,10 +324,42 @@ func (a *App) showLoadedResources(force bool) {
 		addLoadedSection("Prompts", formatCompactList(labels), expandedBody)
 	}
 
+	// Custom themes only: a built-in theme has no source path (upstream filters
+	// the loaded themes the same way).
+	if names, expandedBody := loadedThemes(AvailableThemesWithPaths()); len(names) > 0 {
+		addLoadedSection("Themes", formatCompactList(names), expandedBody)
+	}
+
 	diagnostics := a.session.SkillDiagnostics()
 	if len(diagnostics) > 0 {
 		a.loadedResourcesContainer.AddChild(tui.NewText(
 			theme.Fg("warning", "[Skill conflicts]")+"\n"+formatSkillDiagnostics(diagnostics), 0, 0, nil))
 		a.loadedResourcesContainer.AddChild(tui.NewSpacer(1))
 	}
+}
+
+// loadedThemes turns the registered themes into the Themes section's input: the
+// names for the compact list and the scope-grouped paths for the expanded body.
+// Built-in themes have no source path and are not listed (upstream filters on
+// sourcePath the same way).
+//
+// The port's theme registry carries only a name and a path, not the resource
+// loader's SourceInfo, so every custom theme groups under the local/project scope
+// where upstream groups by source.
+func loadedThemes(infos []ThemeInfo) (names []string, expandedBody string) {
+	items := make([]scopeGroupItem, 0, len(infos))
+	for _, info := range infos {
+		if info.Path == "" {
+			continue
+		}
+		items = append(items, scopeGroupItem{path: info.Path})
+		names = append(names, info.Name)
+	}
+	if len(items) == 0 {
+		return nil, ""
+	}
+	groups := buildScopeGroups(items)
+	return names, formatScopeGroups(groups,
+		func(item scopeGroupItem) string { return formatDisplayPath(item.path) },
+		func(item scopeGroupItem, source string) string { return getShortPath(item.path, item.sourceInfo) })
 }
