@@ -13,11 +13,15 @@ import (
 // log is disabled by default.
 func TestStallLogRecordsSlowPhases(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pier-stall.log")
-	wiring := &RunWiring{StallLogPath: path, StallLogThreshold: time.Millisecond}
+	// The threshold needs real headroom: the "fast" phase below is an empty
+	// closure, and at a 1ms threshold that is a race against the scheduler — it
+	// failed on CI under -race, where an empty phase can exceed a millisecond. A
+	// sleep is a lower bound, so 150ms against 50ms is decidable.
+	wiring := &RunWiring{StallLogPath: path, StallLogThreshold: 50 * time.Millisecond}
 
 	func() {
 		defer wiring.phase("render")()
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 	}()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -92,10 +96,10 @@ func TestStallLogThresholdDefaultsOn(t *testing.T) {
 // assertion that the capture is mid-flight and not post hoc.
 func TestMidPhaseWatchdogRecordsWhileStillRunning(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pier-stall.log")
-	wiring := &RunWiring{StallLogPath: path, StallLogThreshold: 5 * time.Millisecond}
+	wiring := &RunWiring{StallLogPath: path, StallLogThreshold: 50 * time.Millisecond}
 	done := wiring.phase("render")
 
-	time.Sleep(40 * time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
 	mid, err := os.ReadFile(path)
 	if err != nil {
 		done()
