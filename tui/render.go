@@ -148,14 +148,10 @@ type Renderer struct {
 	renderRequested bool
 	fullRedrawCount int
 
-	// terminal color queries (port of the TuiBase query surface)
-	pendingOSC11Replies  int
-	pendingOSC11Queries  []*pendingOSC11Query
-	colorSchemeListeners []colorSchemeListener
-	colorSchemeNotifyOn  atomic.Bool
-	nextColorSchemeID    int
-	backgroundListeners  []backgroundListener
-	nextBackgroundID     int
+	// terminal color queries: the OSC 11 probe, the color-scheme reports and the
+	// `CSI ? 2031` toggle belong to the terminalQueries module; this renderer
+	// forwards its public methods to it (port of the TuiBase query surface).
+	queries terminalQueries
 
 	overlayStack           []*overlayEntry
 	renderedOverlayLayouts []renderedOverlayLayout
@@ -306,9 +302,7 @@ func (t *Renderer) Start() {
 	// A color-scheme notification toggle requested before Start only flips the
 	// flag; replay it now, after the terminal is in raw mode, so the mode sequence
 	// is not echoed into the input stream.
-	if t.colorSchemeNotifyOn.Load() {
-		t.Terminal.Write("\x1b[?2031h")
-	}
+	t.queries.NotifyOnStart(t.Terminal)
 	if t.OnAfterTerminalStart != nil {
 		t.OnAfterTerminalStart()
 	}
@@ -319,15 +313,9 @@ func (t *Renderer) Start() {
 // Stop stops the renderer and restores the terminal.
 func (t *Renderer) Stop(options TuiStopOptions) {
 	t.stopped.Store(true)
-	started := t.started.Load()
 	t.started.Store(false)
-	if started && t.colorSchemeNotifyOn.Load() {
-		t.colorSchemeNotifyOn.Store(false)
-		t.Terminal.Write("\x1b[?2031l")
-	}
-	if false {
-		t.Terminal.Write("[?2031l")
-	}
+	// Disables the `CSI ? 2031` notifications if they were on.
+	t.queries.NotifyOnStop(t.Terminal)
 	if t.OnBeforeTerminalStop != nil {
 		t.OnBeforeTerminalStop(options)
 	}
@@ -493,45 +481,10 @@ func (t *Renderer) drainPosted() {
 	}
 }
 
-// HandleTerminalInput routes input: listeners first, then the focused
-// component. Keyboard input preempts the throttled render path.
-// pendingOSC11Query is one in-flight OSC 11 query.
-type pendingOSC11Query struct {
-	settled bool
-	result  chan osc11Result
-}
-
-type osc11Result struct {
-	color RgbColor
-	ok    bool
-}
-
-type colorSchemeListener struct {
-	id       int
-	listener func(TerminalColorScheme)
-}
-
-type backgroundListener struct {
-	id       int
-	listener func(RgbColor)
-}
-
-// OnTerminalBackgroundColorChange subscribes to OSC 11 background-color
-// replies. The listener runs on the owner loop (input dispatch); registration
-// happens during setup/teardown only, so the registry needs no lock.
+// OnTerminalBackgroundColorChange subscribes to OSC 11 background-color replies
+// (terminalqueries.go). The listener runs on the owner loop (input dispatch).
 func (t *Renderer) OnTerminalBackgroundColorChange(listener func(RgbColor)) func() {
-	t.nextBackgroundID++
-	id := t.nextBackgroundID
-	t.backgroundListeners = append(t.backgroundListeners, backgroundListener{id: id, listener: listener})
-	return func() {
-		filtered := t.backgroundListeners[:0]
-		for _, entry := range t.backgroundListeners {
-			if entry.id != id {
-				filtered = append(filtered, entry)
-			}
-		}
-		t.backgroundListeners = filtered
-	}
+	return t.queries.OnBackgroundChange(listener)
 }
 
 // RequestTerminalBackgroundColor writes the OSC 11 query. It never blocks: the
@@ -539,157 +492,37 @@ func (t *Renderer) OnTerminalBackgroundColorChange(listener func(RgbColor)) func
 // owner loop. Callers must invoke it only after the terminal is in raw mode and
 // the input reader is live, so the reply is dispatched rather than echoed (D165).
 func (t *Renderer) RequestTerminalBackgroundColor() {
-	if t.Terminal == nil || t.stopped.Load() {
-		return
-	}
-	t.Terminal.Write("\x1b]11;?\x07")
+	t.queries.RequestBackground(t.Terminal)
 }
 
 // OnTerminalColorSchemeChange subscribes to terminal color-scheme reports.
 func (t *Renderer) OnTerminalColorSchemeChange(listener func(TerminalColorScheme)) func() {
-	t.nextColorSchemeID++
-	id := t.nextColorSchemeID
-	t.colorSchemeListeners = append(t.colorSchemeListeners, colorSchemeListener{id: id, listener: listener})
-	return func() {
-		filtered := t.colorSchemeListeners[:0]
-		for _, entry := range t.colorSchemeListeners {
-			if entry.id != id {
-				filtered = append(filtered, entry)
-			}
-		}
-		t.colorSchemeListeners = filtered
-	}
+	return t.queries.OnColorSchemeChange(listener)
 }
 
 // SetTerminalColorSchemeNotifications enables the `CSI ? 2031` notifications.
 func (t *Renderer) SetTerminalColorSchemeNotifications(enabled bool) {
-	if t.colorSchemeNotifyOn.Load() == enabled {
-		return
-	}
-	t.colorSchemeNotifyOn.Store(enabled)
-	// Before the terminal is started the request only flips the flag: Start
-	// replays it once raw mode is active, so the sequence is never echoed into
-	// the input stream (the SSH-launch freeze).
-	if !t.started.Load() {
-		return
-	}
-	stopped := t.stopped.Load()
-	terminal := t.Terminal
-	if !stopped && terminal != nil {
-		if enabled {
-			terminal.Write("[?2031h")
-		} else {
-			terminal.Write("[?2031l")
-		}
-	}
+	t.queries.SetNotify(t.Terminal, enabled)
 }
 
 // QueryTerminalBackgroundColor queries the terminal's background color with
 // OSC 11. It returns ok=false on timeout or an unparsable reply.
 func (t *Renderer) QueryTerminalBackgroundColor(timeoutMS int) (RgbColor, bool) {
-	query := &pendingOSC11Query{result: make(chan osc11Result, 1)}
-	t.pendingOSC11Queries = append(t.pendingOSC11Queries, query)
-	t.pendingOSC11Replies++
-	terminal := t.Terminal
-
-	if terminal == nil {
-		return RgbColor{}, false
-	}
-	terminal.Write("]11;?")
-
-	timer := time.NewTimer(time.Duration(timeoutMS) * time.Millisecond)
-	defer timer.Stop()
-	select {
-	case result := <-query.result:
-		return result.color, result.ok
-	case <-timer.C:
-		if !query.settled {
-			query.settled = true
-		}
-		return RgbColor{}, false
-	}
+	return t.queries.QueryBackground(t.Terminal, timeoutMS)
 }
 
 // QueryTerminalColorScheme queries the terminal's color-scheme preference with
 // DSR (`CSI ? 996 n`).
 func (t *Renderer) QueryTerminalColorScheme(timeoutMS int) (TerminalColorScheme, bool) {
-	results := make(chan TerminalColorScheme, 1)
-	unsubscribe := t.OnTerminalColorSchemeChange(func(scheme TerminalColorScheme) {
-		select {
-		case results <- scheme:
-		default:
-		}
-	})
-	defer unsubscribe()
-	terminal := t.Terminal
-	if terminal == nil {
-		return "", false
-	}
-	terminal.Write("[?996n")
-
-	timer := time.NewTimer(time.Duration(timeoutMS) * time.Millisecond)
-	defer timer.Stop()
-	select {
-	case scheme := <-results:
-		return scheme, true
-	case <-timer.C:
-		return "", false
-	}
+	return t.queries.QueryColorScheme(t.Terminal, timeoutMS)
 }
 
-// consumeOSC11BackgroundResponse resolves the oldest pending OSC 11 query and
-// notifies the background listeners. An OSC 11 reply is never user input, so it
-// is consumed even when no query is pending; otherwise a proactive probe's reply
-// would leak into the editor.
-func (t *Renderer) consumeOSC11BackgroundResponse(data string) bool {
-	if !IsOsc11BackgroundColorResponse(data) {
-		return false
-	}
-	color, ok := ParseOsc11BackgroundColor(data)
-
-	if t.pendingOSC11Replies > 0 {
-		t.pendingOSC11Replies--
-		var query *pendingOSC11Query
-		if len(t.pendingOSC11Queries) > 0 {
-			query = t.pendingOSC11Queries[0]
-			t.pendingOSC11Queries = t.pendingOSC11Queries[1:]
-		}
-		if query != nil && !query.settled {
-			query.settled = true
-			select {
-			case query.result <- osc11Result{color: color, ok: ok}:
-			default:
-			}
-		}
-	}
-
-	if ok && len(t.backgroundListeners) > 0 {
-		listeners := append([]backgroundListener{}, t.backgroundListeners...)
-		for _, entry := range listeners {
-			entry.listener(color)
-		}
-	}
-	return true
-}
-
-// consumeTerminalColorSchemeReport notifies the color-scheme listeners.
-func (t *Renderer) consumeTerminalColorSchemeReport(data string) bool {
-	scheme, ok := ParseTerminalColorSchemeReport(data)
-	if !ok {
-		return false
-	}
-	listeners := append([]colorSchemeListener{}, t.colorSchemeListeners...)
-	for _, entry := range listeners {
-		entry.listener(scheme)
-	}
-	return true
-}
-
+// HandleTerminalInput routes input: listeners first, then the focused
+// component. Keyboard input preempts the throttled render path.
 func (t *Renderer) HandleTerminalInput(data string) {
-	if t.consumeOSC11BackgroundResponse(data) {
-		return
-	}
-	if t.consumeTerminalColorSchemeReport(data) {
+	// Terminal query replies (an OSC 11 reply, a color-scheme report) are
+	// consumed before any listener sees them: a reply is never user input.
+	if t.queries.ConsumeInput(data) {
 		return
 	}
 	// Listeners are user code and may call back into the renderer. They run
