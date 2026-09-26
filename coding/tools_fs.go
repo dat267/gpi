@@ -155,6 +155,50 @@ func splitLinesKeepCount(content string) []string {
 	return lines
 }
 
+// nonVisionImageNote is upstream getNonVisionImageNote: a note appended when the
+// model cannot accept images at all, so the text says the image will be omitted
+// rather than implying it was sent.
+func nonVisionImageNote(model *ai.Model) string {
+	if model == nil {
+		return ""
+	}
+	for _, input := range model.Input {
+		if input == "image" {
+			return ""
+		}
+	}
+	return "[Current model does not support images. The image will be omitted from this request.]"
+}
+
+// imageResizeOptionsFor resolves the model's resize limits over the defaults, the
+// way upstream spreads model.inputLimits.images.resize over DEFAULT_OPTIONS: a
+// partially specified block keeps the default for every key it leaves out. No
+// builtin model carries the block (the catalogue the port embeds has no
+// inputLimits), so the defaults are the common case.
+func imageResizeOptionsFor(model *ai.Model) ImageResizeOptions {
+	options := DefaultImageResizeOptions
+	if model == nil || model.InputLimits == nil || model.InputLimits.Images == nil {
+		return options
+	}
+	resize := model.InputLimits.Images.Resize
+	if resize == nil {
+		return options
+	}
+	if resize.MaxWidth > 0 {
+		options.MaxWidth = int(resize.MaxWidth)
+	}
+	if resize.MaxHeight > 0 {
+		options.MaxHeight = int(resize.MaxHeight)
+	}
+	if resize.MaxBytes > 0 {
+		options.MaxBytes = resize.MaxBytes
+	}
+	if resize.JPEGQuality > 0 {
+		options.JPEGQuality = int(resize.JPEGQuality)
+	}
+	return options
+}
+
 // readImageFile reads an image; resizing lands with the image round (D8).
 func readImageFile(absolutePath, mimeType, originalPath string, autoResize bool) (agent.AgentToolResult, error) {
 	data, err := os.ReadFile(absolutePath)
