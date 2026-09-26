@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -123,13 +124,28 @@ type CopilotModelCatalog struct {
 
 // builtinCopilotModelIDs is the set of catalog model ids the policy fallback
 // checks (upstream GITHUB_COPILOT_MODELS).
-var builtinCopilotModelIDs = func() map[string]bool {
-	ids := map[string]bool{}
-	for _, model := range GetBuiltinModels("github-copilot") {
-		ids[model.ID] = true
-	}
-	return ids
-}()
+//
+// It is built on first use rather than at package init. GetBuiltinModels
+// decodes the whole embedded catalog (every model of every provider), so a
+// package-level call here made every process start pay for it — measured at
+// 49 ms clock and 41,295 allocations in the `ai` init task, on the 924 KB
+// models_catalog.json, before main ran and even for `--version`. The set is
+// identical, just later; nothing else in the package reads the catalog at init.
+var (
+	builtinCopilotModelIDsOnce sync.Once
+	builtinCopilotModelIDsSet  map[string]bool
+)
+
+func builtinCopilotModelIDs() map[string]bool {
+	builtinCopilotModelIDsOnce.Do(func() {
+		ids := map[string]bool{}
+		for _, model := range GetBuiltinModels("github-copilot") {
+			ids[model.ID] = true
+		}
+		builtinCopilotModelIDsSet = ids
+	})
+	return builtinCopilotModelIDsSet
+}
 
 // ParseGitHubCopilotModelCatalog parses the Copilot models response
 // (upstream parseGitHubCopilotModelCatalog).
@@ -193,7 +209,7 @@ func ParseGitHubCopilotModelCatalog(raw map[string]any, allowPolicyFallback bool
 		if model.policyState != "unconfigured" {
 			continue
 		}
-		if !builtinCopilotModelIDs[model.id] {
+		if !builtinCopilotModelIDs()[model.id] {
 			continue
 		}
 		if model.pickerEnabled || usePolicyFallback {

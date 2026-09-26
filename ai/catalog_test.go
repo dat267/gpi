@@ -1,10 +1,15 @@
 package ai
 
 import (
-	"encoding/json"
+	"bytes"
+	"os"
+	"os/exec"
 	"testing"
 	"time"
 )
+
+// catalogInitProbeEnv marks the child of TestCatalogIsNotDecodedAtPackageInit.
+const catalogInitProbeEnv = "PIER_TEST_CATALOG_INIT_PROBE"
 
 // Catalog tests. Ground truth: upstream's generated data (see catalog.go
 // header for the regeneration procedure).
@@ -68,11 +73,7 @@ func TestCatalogCompatArmMatchesAPI(t *testing.T) {
 		t.Fatal(catalogErr)
 	}
 	for providerID, apis := range catalog.Providers {
-		for api, entries := range apis {
-			var byID map[string]json.RawMessage
-			if err := jsonUnmarshalStrict(entries, &byID); err != nil {
-				t.Fatal(err)
-			}
+		for api, byID := range apis {
 			for modelID := range byID {
 				m := GetBuiltinModel(providerID, modelID)
 				if m == nil {
@@ -137,6 +138,38 @@ func TestCatalogGeneratedAt(t *testing.T) {
 	}
 	if ts.IsZero() || ts.After(time.Now().Add(time.Hour)) {
 		t.Fatalf("generatedAt implausible: %v", ts)
+	}
+}
+
+// The embedded catalog is 924 KB; decoding it costs ~13 ms and ~24k allocations.
+// It must stay out of package init, because that cost lands on every process
+// start — including `--version`, which never reads the catalog. A package-level
+// var that called GetBuiltinModels (builtinCopilotModelIDs) put it back in init
+// once and cost every start 49 ms.
+//
+// The probe needs an untouched process: every other test in this package decodes
+// the catalog, and tests share one process. It re-executes the test binary with
+// -test.run narrowed to just this test (the pattern ptywatch_test.go uses).
+func TestCatalogIsNotDecodedAtPackageInit(t *testing.T) {
+	if os.Getenv(catalogInitProbeEnv) == "1" {
+		// Package init has run; -test.run filtered out every other test.
+		if catalogModels != nil || catalogErr != nil {
+			t.Fatalf("the catalog was decoded during package init; that cost lands on every process start")
+		}
+		return
+	}
+
+	var out bytes.Buffer
+	cmd := exec.Command(os.Args[0], "-test.run=^TestCatalogIsNotDecodedAtPackageInit$")
+	cmd.Env = append(os.Environ(), catalogInitProbeEnv+"=1")
+	cmd.Stdout, cmd.Stderr = &out, &out
+	// A start failure is environmental (a noexec temp dir, a sandbox), not a
+	// regression, so it skips the way ptywatch_test.go skips an unavailable pty.
+	if err := cmd.Start(); err != nil {
+		t.Skipf("cannot re-exec the test binary: %v", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("a fresh process decoded the catalog during init: %v\n%s", err, out.String())
 	}
 }
 

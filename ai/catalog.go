@@ -21,13 +21,18 @@ var catalogFS embed.FS
 
 // catalogShape mirrors the embedded file's structure:
 // {provider: {api: {modelId: model}}}.
+//
+// The model ids are captured as raw JSON in the same single decode that walks
+// the provider and api keys. Keeping the api subtree as one json.RawMessage
+// would parse those keys twice (once into the RawMessage, once into a map to
+// iterate them), which on the 924 KB catalog is a second full key pass.
 type catalogShape struct {
 	Meta struct {
 		SchemaVersion          int    `json:"schemaVersion"`
 		GeneratedAt            string `json:"generatedAt"`
 		UpstreamManifestSHA256 string `json:"upstreamManifestSHA256"`
 	} `json:"_meta"`
-	Providers map[string]map[string]json.RawMessage `json:"providers"`
+	Providers map[string]map[string]map[string]json.RawMessage `json:"providers"`
 }
 
 var (
@@ -51,12 +56,7 @@ func loadCatalog() {
 		catalogModels = map[string]map[string]*Model{}
 		for providerID, apis := range catalog.Providers {
 			models := map[string]*Model{}
-			for api, entries := range apis {
-				var byID map[string]json.RawMessage
-				if err := jsonUnmarshalStrict(entries, &byID); err != nil {
-					catalogErr = fmt.Errorf("ai: decoding catalog for provider %q api %q: %w", providerID, api, err)
-					return
-				}
+			for api, byID := range apis {
 				for modelID, raw := range byID {
 					model, err := decodeCatalogModel(api, raw)
 					if err != nil {
@@ -74,19 +74,29 @@ func loadCatalog() {
 // decodeCatalogModel decodes one generated model entry, decoding its compat
 // arm explicitly from the known api (upstream keys compat by api at the type
 // level).
+//
+// compat is captured as raw JSON in the same pass rather than left to
+// Model.Compat's own decoder: *ModelCompat.UnmarshalJSON guesses the arm from
+// the key names, and the api decides it here, so that guess was always thrown
+// away — for a model with compat the object was parsed four times (the guess's
+// keys map, the guess's arm, a probe just to re-read the raw compat, then the
+// authoritative arm) and five parses of the entry overall. Capturing the raw
+// value makes the whole entry one parse plus the one authoritative arm.
 func decodeCatalogModel(api Api, data []byte) (*Model, error) {
-	var model Model
-	if err := jsonUnmarshalStrict(data, &model); err != nil {
+	// The outer CompatRaw (depth 0) shadows Model.Compat (depth 1), so the
+	// embedded decode never invokes ModelCompat.UnmarshalJSON.
+	var payload struct {
+		Model
+		CompatRaw json.RawMessage `json:"compat"`
+	}
+	if err := jsonUnmarshalStrict(data, &payload); err != nil {
 		return nil, err
 	}
-	var probe struct {
-		Compat json.RawMessage `json:"compat"`
-	}
-	_ = jsonUnmarshalStrict(data, &probe)
-	compat, err := DecodeModelCompat(api, probe.Compat)
+	compat, err := DecodeModelCompat(api, payload.CompatRaw)
 	if err != nil {
 		return nil, err
 	}
+	model := payload.Model
 	model.API = api
 	model.Compat = compat
 	return &model, nil
