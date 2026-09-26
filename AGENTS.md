@@ -108,6 +108,16 @@ runs each test twice (`-p 8` overlaps the test-binary builds; the whole gate is
   interval is a whole second, which made the OAuth tests spend ~25 s asleep;
   they swap `deviceCodeSleep` (`ai/oauthpkce.go`) for a millisecond instead.
 - `-short` skips the PTY watchdogs (they wait on real rendering).
+- **A test must never spawn the developer's editor.** `EditInExternalEditor`
+  hands this process's console (`os.Stdin`/`os.Stdout`) and its environment to
+  whatever `VISUAL`/`EDITOR` resolves to — correct when a user pressed ctrl+g,
+  wrong inside a test run. Windows makes it worse: the spawn is `cmd /c
+  <command> <tempfile>`, and a command that cannot be executed (the test handed
+  it a POSIX `editor.sh`) hands the temp file to the shell's association
+  fallback, which is how running the suite opened VS Code on random temp paths.
+  Tests stub `externalEditorRunner` (`stubExternalEditorRunner`), and `TestMain`
+  pins `VISUAL`/`EDITOR` to a path that does not exist so an accident fails
+  instead of opening an editor.
 
 The interactive mode reads credentials from `~/.pi/agent/auth.json` (or
 `PI_CODING_AGENT_DIR`). `/login` is wired, but the CLI does not install a
