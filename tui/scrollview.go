@@ -184,10 +184,16 @@ func (s *ScrollView) markScrollbarActivityLocked() {
 		return
 	}
 	s.transientScrollbarVisible = true
-	s.scrollbarHideDeadline = time.Now().Add(time.Duration(s.hideDelayMS) * time.Millisecond)
+	// Clear any pending hide first, the way upstream clears its timer, and then
+	// schedule nothing at all while the scrollbar is active: upstream returns
+	// before arming the timer when scrollbarActive is set (hovering or dragging),
+	// because a stationary pointer emits no further mouse events — an armed
+	// deadline would hide the thumb out from under the cursor.
+	s.scrollbarHideDeadline = time.Time{}
 	if s.scrollbarActive {
 		return
 	}
+	s.scrollbarHideDeadline = time.Now().Add(time.Duration(s.hideDelayMS) * time.Millisecond)
 }
 
 func (s *ScrollView) hideTransientScrollbar() {
