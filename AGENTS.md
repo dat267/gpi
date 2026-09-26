@@ -464,8 +464,8 @@ worst streaming frame 122 ms → 23 ms. Because the returned slice can now chang
 contents while keeping its backing array, slice identity is no longer a valid
 change signal; `Container` carries a `version` bumped on every rebuild and
 exposes `RenderVersion`, and `firstChangedChild`/`zoneMarkedLines` compare it
-(the `MouseRegion` pass-through and the message/tool components that return a
-container's lines forward the revision). `TestContainerRenderReusesPrefixOnTailChange`
+(the `MouseRegion` and `ScrollView` pass-throughs and the message/tool components
+that return a container's lines forward the revision). `TestContainerRenderReusesPrefixOnTailChange`
 and `TestContainerRenderDetectsInPlaceChildChange` pin both halves. The
 remaining cost is the O(components) walk above.
 

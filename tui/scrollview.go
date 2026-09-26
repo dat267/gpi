@@ -378,6 +378,20 @@ func (s *ScrollView) Render(width int) []string {
 	return out
 }
 
+// RenderVersion forwards the child's revision. Render hands back the child's own
+// lines (or a fresh padded copy of them), so a child that rewrites its suffix in
+// place — the same backing array with a bumped revision — must reach the parent,
+// which cannot see it through slice identity. The embedded container's revision
+// says nothing about what this view renders, so it must not be promoted here.
+func (s *ScrollView) RenderVersion() (uint64, bool) {
+	if versioned, ok := s.child.(renderVersioner); ok {
+		if version, has := versioned.RenderVersion(); has {
+			return version, true
+		}
+	}
+	return 0, false
+}
+
 // LayoutNode exposes the scroll view to the layout engine.
 func (s *ScrollView) LayoutNode() LayoutNode {
 	return LayoutNode{Kind: "scroll", Scroll: &ScrollLayoutNode{Type: "scroll", Component: s.child, State: s}}
