@@ -480,16 +480,16 @@ func (w *SessionWiring) HandleResumeSession(ctx context.Context, sessionPath str
 // newModelWiring assembles the ModelWiring (port of the corresponding InteractiveMode wiring).
 func newModelWiring(app *App) *ModelWiring {
 	return &ModelWiring{
-		Slot:                         app.Slot,
-		Settings:                     app.Settings,
+		Slot:                         app.slot,
+		Settings:                     app.settings,
 		Session:                      app.modelSession(),
-		UI:                           app.UI,
-		UpdateAvailableProviderCount: func() { app.Startup.UpdateAvailableProviderCount() },
+		UI:                           app.ui,
+		UpdateAvailableProviderCount: func() { app.startup.UpdateAvailableProviderCount() },
 		UpdateEditorBorderColor:      func() { app.updateEditorBorderColor() },
-		ShowStatus:                   func(message string) { app.Transcript.ShowStatus(message) },
+		ShowStatus:                   func(message string) { app.transcript.ShowStatus(message) },
 		ShowError:                    func(message string) { app.showError(message) },
 		OnModelSelected:              func(model *ai.Model) {},
-		RequestRender:                func() { app.UI.RequestRender(false) },
+		RequestRender:                func() { app.ui.RequestRender(false) },
 	}
 }
 
@@ -500,15 +500,15 @@ func newSessionWiring(app *App) *SessionWiring {
 		PromptForMissingCwd: func(ctx context.Context, issue coding.SessionCwdIssue, onCwd func(cwd string, ok bool)) {
 			app.askMissingSessionCwd(issue, onCwd)
 		},
-		Slot:                 app.Slot,
-		Settings:             app.Settings,
-		SessionInfo:          app.SessionMgr,
-		UI:                   app.UI,
-		Keybindings:          app.Keybindings.KeybindingsManager,
-		ShowStatus:           func(message string) { app.Transcript.ShowStatus(message) },
+		Slot:                 app.slot,
+		Settings:             app.settings,
+		SessionInfo:          app.sessionMgr,
+		UI:                   app.ui,
+		Keybindings:          app.keybindings.KeybindingsManager,
+		ShowStatus:           func(message string) { app.transcript.ShowStatus(message) },
 		ShowError:            func(message string) { app.showError(message) },
-		Shutdown:             func() { app.Lifecycle.Shutdown(false) },
-		RequestRender:        func() { app.UI.RequestRender(false) },
-		ClearStatusIndicator: func() { app.UIState.ClearStatusIndicator("", false) },
-		SwitchSession:        app.SwitchSession}
+		Shutdown:             func() { app.lifecycle.Shutdown(false) },
+		RequestRender:        func() { app.ui.RequestRender(false) },
+		ClearStatusIndicator: func() { app.uiState.ClearStatusIndicator("", false) },
+		SwitchSession:        app.switchSession}
 }

@@ -16,7 +16,7 @@ import (
 // SwitchSession replaces the running session with the one at sessionPath
 // (upstream AgentSessionRuntime.switchSession plus the interactive-mode
 // rebind).
-func (a *App) SwitchSession(ctx context.Context, sessionPath string, cwdOverride string) (*SessionSwitchResult, error) {
+func (a *App) switchSession(ctx context.Context, sessionPath string, cwdOverride string) (*SessionSwitchResult, error) {
 	sessionManager, err := coding.OpenSession(sessionPath, "", cwdOverride)
 	if err != nil {
 		return nil, err
@@ -38,12 +38,12 @@ func (a *App) importFromJSONL(_ context.Context, inputPath string, cwdOverride s
 		return nil, fmt.Errorf("File not found: %s", resolved)
 	}
 
-	sessionDir := a.SessionMgr.GetSessionDir()
+	sessionDir := a.sessionMgr.GetSessionDir()
 	if sessionDir == "" {
 		// An in-memory session (--no-session) has no directory of its own yet;
 		// an import has to land in the default one, the same place a persisted
 		// manager would have resolved at creation.
-		sessionDir = coding.DefaultSessionDir(a.SessionMgr.GetCwd(), "")
+		sessionDir = coding.DefaultSessionDir(a.sessionMgr.GetCwd(), "")
 	}
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		return nil, err
@@ -95,13 +95,13 @@ func copyFileExclusive(src string, dst string) error {
 
 // SessionNew starts a fresh session in the current session directory (upstream
 // AgentSessionRuntime.newSession).
-func (a *App) SessionNew(ctx context.Context) (*SessionSwitchResult, error) {
-	sessionDir := a.SessionMgr.GetSessionDir()
-	persist := a.SessionMgr.IsPersisted()
-	sessionManager := coding.NewSessionManager(a.SessionMgr.GetCwd(), &coding.SessionManagerOptions{
+func (a *App) sessionNew(ctx context.Context) (*SessionSwitchResult, error) {
+	sessionDir := a.sessionMgr.GetSessionDir()
+	persist := a.sessionMgr.IsPersisted()
+	sessionManager := coding.NewSessionManager(a.sessionMgr.GetCwd(), &coding.SessionManagerOptions{
 		SessionDir: sessionDir,
 		Persist:    &persist,
-		WriteQueue: a.SessionMgr.GetWriteQueue(),
+		WriteQueue: a.sessionMgr.GetWriteQueue(),
 	})
 	return a.applySessionReplacement(sessionManager)
 }
@@ -112,8 +112,8 @@ func (a *App) SessionNew(ctx context.Context) (*SessionSwitchResult, error) {
 // no-ops in this port, D41).
 func (a *App) applySessionReplacement(sessionManager *coding.SessionManager) (*SessionSwitchResult, error) {
 	// teardownCurrent: settle any active response, dispose, unsubscribe.
-	a.Session.Abort(context.Background())
-	a.Session.Dispose()
+	a.session.Abort(context.Background())
+	a.session.Dispose()
 	if a.unsubscribe != nil {
 		a.unsubscribe()
 		a.unsubscribe = nil
@@ -133,8 +133,8 @@ func (a *App) applySessionReplacement(sessionManager *coding.SessionManager) (*S
 		Cwd:             sessionManager.GetCwd(),
 		AgentDir:        a.options.AgentDir,
 		SessionManager:  sessionManager,
-		ModelRuntime:    a.Runtime,
-		SettingsManager: a.Settings,
+		ModelRuntime:    a.runtime,
+		SettingsManager: a.settings,
 	})
 	if err != nil {
 		return nil, err
@@ -142,28 +142,28 @@ func (a *App) applySessionReplacement(sessionManager *coding.SessionManager) (*S
 
 	// The *AppSession pointer is shared by every wiring, so swapping the
 	// embedded AgentSession rebinds them all at once.
-	a.Session.AgentSession = created.Session
-	a.SessionMgr = sessionManager
-	a.FooterData.SetCwd(sessionManager.GetCwd())
-	a.Transcript.SessionInfo = sessionManager
-	a.Events.SessionInfo = sessionManager
-	a.Startup.SessionInfo = sessionManager
-	a.Sessions.SessionInfo = sessionManager
-	a.Commands.SessionInfo = sessionManager
-	a.Selectors.SessionInfo = sessionManager
-	a.Trust.SessionInfo = sessionManager
-	a.Autocomplete.SessionInfo = sessionManager
+	a.session.AgentSession = created.Session
+	a.sessionMgr = sessionManager
+	a.footerData.SetCwd(sessionManager.GetCwd())
+	a.transcript.SessionInfo = sessionManager
+	a.events.SessionInfo = sessionManager
+	a.startup.SessionInfo = sessionManager
+	a.sessions.SessionInfo = sessionManager
+	a.commands.SessionInfo = sessionManager
+	a.selectors.SessionInfo = sessionManager
+	a.trust.SessionInfo = sessionManager
+	a.autocomplete.SessionInfo = sessionManager
 
 	if a.unsubscribe == nil {
-		a.unsubscribe = a.Session.Subscribe(func(event *coding.SessionEvent) {
-			a.Events.HandleEvent(event)
+		a.unsubscribe = a.session.Subscribe(func(event *coding.SessionEvent) {
+			a.events.HandleEvent(event)
 		})
 	}
-	a.Footer.Invalidate()
+	a.footer.Invalidate()
 	// upstream rebindCurrentSession({renderBeforeBind: true}) → the session's own
 	// reset, which is the initial render and not the reload's rebuild.
-	a.Startup.RenderCurrentSessionState()
-	a.UI.RequestRender(false)
+	a.startup.RenderCurrentSessionState()
+	a.ui.RequestRender(false)
 	return &SessionSwitchResult{}, nil
 }
 
@@ -171,7 +171,7 @@ func (a *App) applySessionReplacement(sessionManager *coding.SessionManager) (*S
 // resolving that project's trust first. A switch within the same project, or one
 // with no directory to resolve, keeps the current settings.
 func (a *App) rebindProjectSettings(cwd string) error {
-	if cwd == "" || cwd == a.Settings.Cwd() {
+	if cwd == "" || cwd == a.settings.Cwd() {
 		return nil
 	}
 	key := coding.CanonicalizePath(coding.ResolvePath(cwd, "", coding.PathInputOptions{}))
@@ -183,7 +183,7 @@ func (a *App) rebindProjectSettings(cwd string) error {
 		Cwd:                 cwd,
 		TrustStore:          coding.NewProjectTrustStore(a.options.AgentDir),
 		TrustOverride:       a.options.ProjectTrustOverride,
-		DefaultProjectTrust: a.Settings.GetDefaultProjectTrust(),
+		DefaultProjectTrust: a.settings.GetDefaultProjectTrust(),
 		// No UI: a switch is never the startup prompt (upstream's
 		// projectTrustContextFactory reports hasUI false off the initial runtime),
 		// so an undecided project stays untrusted.
@@ -200,11 +200,11 @@ func (a *App) rebindProjectSettings(cwd string) error {
 // applyProjectSettings points the settings manager at a project under a decided
 // trust and re-applies what follows from the swap.
 func (a *App) applyProjectSettings(cwd string, trusted bool) {
-	a.Settings.RebindProject(cwd, trusted)
+	a.settings.RebindProject(cwd, trusted)
 	// The run's own override is not part of the project scope, so re-apply it
 	// (upstream applies the CLI overrides to the runtime settings manager).
 	if a.options.InitialThemeSetting != nil {
-		a.Settings.ApplyOverrides(&coding.Settings{Theme: a.options.InitialThemeSetting})
+		a.settings.ApplyOverrides(&coding.Settings{Theme: a.options.InitialThemeSetting})
 	}
 	// Settings-derived UI state follows the manager (upstream rebindCurrentSession
 	// calls applyRuntimeSettings).
@@ -220,7 +220,7 @@ func (a *App) applyProjectSettings(cwd string, trusted bool) {
 // message, keeps its parent as the leaf and hands the message text back so the
 // editor can send it again.
 func (a *App) forkAtEntry(_ context.Context, entryID string, atPosition bool) (*SelectorForkResult, error) {
-	entry := a.SessionMgr.GetEntry(entryID)
+	entry := a.sessionMgr.GetEntry(entryID)
 	if entry == nil {
 		return nil, errors.New("Invalid entry ID for forking")
 	}
@@ -239,7 +239,7 @@ func (a *App) forkAtEntry(_ context.Context, entryID string, atPosition bool) (*
 		}
 	}
 
-	forked, err := coding.ForkSessionAtEntry(a.SessionMgr, targetLeafID, a.SessionMgr.GetCwd(), a.SessionMgr.GetSessionDir(), nil)
+	forked, err := coding.ForkSessionAtEntry(a.sessionMgr, targetLeafID, a.sessionMgr.GetCwd(), a.sessionMgr.GetSessionDir(), nil)
 	if err != nil {
 		return nil, err
 	}

@@ -20,16 +20,16 @@ func TestAutocompleteSkillCommandsWired(t *testing.T) {
 	defer cleanup()
 	app.Init(context.Background())
 
-	app.Session.SystemPromptOptions.Skills = []coding.Skill{
+	app.session.SystemPromptOptions.Skills = []coding.Skill{
 		{Name: "tdd", Description: "Test-driven development", FilePath: "/skills/tdd/SKILL.md"},
 	}
 
-	commands := app.Autocomplete.Skills()
+	commands := app.autocomplete.Skills()
 	if len(commands) != 1 || commands[0].Name != "tdd" || commands[0].FilePath != "/skills/tdd/SKILL.md" {
 		t.Fatalf("skill commands = %+v", commands)
 	}
 
-	provider, ok := app.Autocomplete.CreateBaseAutocompleteProvider().(*tui.CombinedAutocompleteProvider)
+	provider, ok := app.autocomplete.CreateBaseAutocompleteProvider().(*tui.CombinedAutocompleteProvider)
 	if !ok {
 		t.Fatal("provider is not combined")
 	}
@@ -56,14 +56,14 @@ func TestLoadedResourcesShowsSkills(t *testing.T) {
 	defer cleanup()
 	app.Init(context.Background())
 
-	app.Session.SystemPromptOptions.Skills = []coding.Skill{
+	app.session.SystemPromptOptions.Skills = []coding.Skill{
 		{Name: "tdd", Description: "Test-driven development", FilePath: "/skills/tdd/SKILL.md"},
 		{Name: "karpathy-guidelines", Description: "Guidelines", FilePath: "/skills/karpathy-guidelines/SKILL.md"},
 	}
-	app.Session.SystemPromptOptions.ContextFiles = []coding.ContextFile{{Path: "/tmp/project/AGENTS.md"}}
-	app.ShowLoadedResources(true)
+	app.session.SystemPromptOptions.ContextFiles = []coding.ContextFile{{Path: "/tmp/project/AGENTS.md"}}
+	app.showLoadedResources(true)
 
-	rendered := coding.StripAnsi(strings.Join(app.LoadedResourcesContainer.Render(80), "\n"))
+	rendered := coding.StripAnsi(strings.Join(app.loadedResourcesContainer.Render(80), "\n"))
 	if !strings.Contains(rendered, "Skills") {
 		t.Fatalf("loaded resources missing Skills section:\n%s", rendered)
 	}
@@ -84,14 +84,14 @@ func TestLoadedResourcesListsPromptSources(t *testing.T) {
 	defer cleanup()
 	app.Init(context.Background())
 
-	app.Session.SystemPromptOptions.PromptSourcePaths = []string{
+	app.session.SystemPromptOptions.PromptSourcePaths = []string{
 		filepath.Join(app.options.Cwd, ".pi", "SYSTEM.md"),
 		"/home/user/.pi/agent/APPEND_SYSTEM.md",
 	}
-	app.Session.SystemPromptOptions.ContextFiles = []coding.ContextFile{{Path: "/tmp/project/AGENTS.md"}}
-	app.ShowLoadedResources(true)
+	app.session.SystemPromptOptions.ContextFiles = []coding.ContextFile{{Path: "/tmp/project/AGENTS.md"}}
+	app.showLoadedResources(true)
 
-	rendered := coding.StripAnsi(strings.Join(app.LoadedResourcesContainer.Render(100), "\n"))
+	rendered := coding.StripAnsi(strings.Join(app.loadedResourcesContainer.Render(100), "\n"))
 	contextIndex := strings.Index(rendered, "Context")
 	systemIndex := strings.Index(rendered, "SYSTEM.md")
 	appendIndex := strings.Index(rendered, "APPEND_SYSTEM.md")
@@ -112,7 +112,7 @@ func TestReloadNowRereadsResources(t *testing.T) {
 	defer cleanup()
 	app.Init(context.Background())
 
-	if strings.Contains(app.Session.SystemPrompt(), "reloaded append") {
+	if strings.Contains(app.session.SystemPrompt(), "reloaded append") {
 		t.Fatal("the append file must not be loaded before it exists")
 	}
 	agentDir := app.options.AgentDir
@@ -127,11 +127,11 @@ func TestReloadNowRereadsResources(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err := app.Commands.ReloadNow(); err != nil {
+	if _, _, err := app.commands.ReloadNow(); err != nil {
 		t.Fatalf("reload failed: %v", err)
 	}
 
-	prompt := app.Session.SystemPrompt()
+	prompt := app.session.SystemPrompt()
 	if !strings.Contains(prompt, "reloaded append") {
 		t.Fatalf("/reload did not re-read the prompt files:\n%s", prompt)
 	}
@@ -140,8 +140,8 @@ func TestReloadNowRereadsResources(t *testing.T) {
 	}
 
 	// The loaded-resources list follows the reloaded options.
-	app.ShowLoadedResources(true)
-	rendered := coding.StripAnsi(strings.Join(app.LoadedResourcesContainer.Render(100), "\n"))
+	app.showLoadedResources(true)
+	rendered := coding.StripAnsi(strings.Join(app.loadedResourcesContainer.Render(100), "\n"))
 	if !strings.Contains(rendered, "APPEND_SYSTEM.md") || !strings.Contains(rendered, "tdd") {
 		t.Fatalf("loaded resources are stale after reload:\n%s", rendered)
 	}
@@ -155,22 +155,22 @@ func TestToolsExpandTogglesLoadedResources(t *testing.T) {
 	defer cleanup()
 	app.Init(context.Background())
 
-	app.Session.SystemPromptOptions.Skills = []coding.Skill{{
+	app.session.SystemPromptOptions.Skills = []coding.Skill{{
 		Name: "tdd", Description: "Test-driven development", FilePath: "/skills/tdd/SKILL.md",
 		SourceInfo: coding.CreateSyntheticSourceInfo("/skills/tdd/SKILL.md", "local", coding.SourceScopeUser, coding.SourceOriginTopLevel, "/skills"),
 	}}
-	app.ShowLoadedResources(true)
+	app.showLoadedResources(true)
 
 	renderLoaded := func() string {
-		return coding.StripAnsi(strings.Join(app.LoadedResourcesContainer.Render(80), "\n"))
+		return coding.StripAnsi(strings.Join(app.loadedResourcesContainer.Render(80), "\n"))
 	}
 	if strings.Contains(renderLoaded(), "/skills/tdd/SKILL.md") {
 		t.Fatalf("collapsed resources already show the expanded path:\n%s", renderLoaded())
 	}
 
-	app.Key.OnToolsExpand()
+	app.key.OnToolsExpand()
 
-	if !app.Display.ToolOutputExpanded {
+	if !app.display.ToolOutputExpanded {
 		t.Fatal("ToolOutputExpanded not set")
 	}
 	if !strings.Contains(renderLoaded(), "/skills/tdd/SKILL.md") {

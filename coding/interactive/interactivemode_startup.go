@@ -361,24 +361,24 @@ func (w *StartupWiring) MaybeWarnAboutAnthropicSubscriptionAuth(ctx context.Cont
 // newStartupWiring assembles the StartupWiring (port of the corresponding InteractiveMode wiring).
 func newStartupWiring(app *App) *StartupWiring {
 	return &StartupWiring{
-		UI:              app.UI,
-		Session:         app.Session,
-		Settings:        app.Settings,
-		Terminal:        app.UI.GetTerminal(),
-		Chat:            app.Chat,
-		PendingMessages: app.PendingMessages,
-		LoadedResources: app.LoadedResourcesContainer,
-		Transcript:      app.Transcript,
-		FooterData:      app.FooterData,
-		SessionInfo:     app.SessionMgr,
+		UI:              app.ui,
+		Session:         app.session,
+		Settings:        app.settings,
+		Terminal:        app.ui.GetTerminal(),
+		Chat:            app.chat,
+		PendingMessages: app.pendingMessages,
+		LoadedResources: app.loadedResourcesContainer,
+		Transcript:      app.transcript,
+		FooterData:      app.footerData,
+		SessionInfo:     app.sessionMgr,
 		Version:         app.options.Version,
 		ShowWarning:     func(message string) { app.showWarning(message) },
 		ShowError:       func(message string) { app.showError(message) },
-		ShowStatus:      func(message string) { app.Transcript.ShowStatus(message) },
-		RequestRender:   func() { app.UI.RequestRender(false) },
+		ShowStatus:      func(message string) { app.transcript.ShowStatus(message) },
+		RequestRender:   func() { app.ui.RequestRender(false) },
 		// The branch-navigation reset (ClearChatAndRenderInitialMessages) re-renders
 		// the transcript through this seam; leaving it unset made the reset a no-op.
-		RenderInitialMessages: func() { app.Transcript.RenderInitialMessages() },
-		ClearCompactionQueue:  app.Queue.ClearCompactionQueue,
+		RenderInitialMessages: func() { app.transcript.RenderInitialMessages() },
+		ClearCompactionQueue:  app.queue.ClearCompactionQueue,
 	}
 }

@@ -18,7 +18,7 @@ func withSessionDir(t *testing.T, app *App) string {
 	t.Helper()
 	dir := t.TempDir()
 	persist := false
-	app.SessionMgr = coding.NewSessionManager(app.SessionMgr.GetCwd(), &coding.SessionManagerOptions{
+	app.sessionMgr = coding.NewSessionManager(app.sessionMgr.GetCwd(), &coding.SessionManagerOptions{
 		SessionDir: dir, Persist: &persist,
 	})
 	return dir
@@ -28,12 +28,12 @@ func withSessionDir(t *testing.T, app *App) string {
 // option at the given index (0 = Yes/Continue).
 func answerConfirm(t *testing.T, app *App, option int) {
 	t.Helper()
-	if !app.Slot.HasActiveSelector() {
+	if !app.slot.HasActiveSelector() {
 		t.Fatal("the import flow showed no dialog")
 	}
-	selector, ok := app.Slot.ActiveSelectorComponent().(*ExtensionSelectorComponent)
+	selector, ok := app.slot.ActiveSelectorComponent().(*ExtensionSelectorComponent)
 	if !ok {
-		t.Fatalf("dialog = %T, want the extension selector", app.Slot.ActiveSelectorComponent())
+		t.Fatalf("dialog = %T, want the extension selector", app.slot.ActiveSelectorComponent())
 	}
 	for i := 0; i < option; i++ {
 		selector.HandleInput("\x1b[B")
@@ -76,10 +76,10 @@ func TestImportCommandCopiesIntoTheSessionDir(t *testing.T) {
 	if _, err := os.Stat(copied); err != nil {
 		t.Fatalf("not copied into the session dir: %v", err)
 	}
-	if got := app.SessionMgr.GetSessionFile(); got != copied {
+	if got := app.sessionMgr.GetSessionFile(); got != copied {
 		t.Errorf("session file = %q, want the copy %q", got, copied)
 	}
-	if messages := app.SessionMgr.GetEntries(); len(messages) == 0 {
+	if messages := app.sessionMgr.GetEntries(); len(messages) == 0 {
 		t.Error("the imported session has no entries")
 	}
 	if !transcriptHasStatus(app, "Session imported from: "+source) {
@@ -141,7 +141,7 @@ func TestImportCommandUsesAStoredFileInPlace(t *testing.T) {
 	newCommandWiring(app).HandleImportCommand(context.Background(), "/import "+target)
 	answerConfirm(t, app, 0)
 
-	if got := app.SessionMgr.GetSessionFile(); got != target {
+	if got := app.sessionMgr.GetSessionFile(); got != target {
 		t.Errorf("session file = %q, want the stored file %q", got, target)
 	}
 	if numbered := strings.TrimSuffix(target, ".jsonl") + "-1.jsonl"; fileExists(numbered) {
@@ -192,7 +192,7 @@ func TestImportCommandMissingCwdPrompt(t *testing.T) {
 		// The imported session lives in this project's session directory. Its name
 		// is not pinned: the first attempt copies before it fails the cwd check, so
 		// the retry takes a numbered name — upstream leaves that copy behind too.
-		imported := app.SessionMgr.GetSessionFile()
+		imported := app.sessionMgr.GetSessionFile()
 		if filepath.Dir(imported) != sessionDir {
 			t.Errorf("session file = %q, want a copy in %q", imported, sessionDir)
 		}

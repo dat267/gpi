@@ -361,25 +361,25 @@ func TestThinkingToggleRoundTrips(t *testing.T) {
 	defer cleanup()
 
 	wiring := newKeyWiring(app)
-	before := app.Settings.GetHideThinkingBlock()
-	if app.Display.HideThinkingBlock != before {
-		t.Fatalf("display %v and settings %v disagree before toggling", app.Display.HideThinkingBlock, before)
+	before := app.settings.GetHideThinkingBlock()
+	if app.display.HideThinkingBlock != before {
+		t.Fatalf("display %v and settings %v disagree before toggling", app.display.HideThinkingBlock, before)
 	}
 
 	wiring.OnThinkingToggle()
-	if got := app.Settings.GetHideThinkingBlock(); got == before {
+	if got := app.settings.GetHideThinkingBlock(); got == before {
 		t.Errorf("the setting did not toggle: %v", got)
 	}
-	if app.Display.HideThinkingBlock == before {
-		t.Errorf("the live display state did not toggle: %v", app.Display.HideThinkingBlock)
+	if app.display.HideThinkingBlock == before {
+		t.Errorf("the live display state did not toggle: %v", app.display.HideThinkingBlock)
 	}
 
 	wiring.OnThinkingToggle()
-	if got := app.Settings.GetHideThinkingBlock(); got != before {
+	if got := app.settings.GetHideThinkingBlock(); got != before {
 		t.Errorf("the second press did not toggle back: %v, want %v", got, before)
 	}
-	if app.Display.HideThinkingBlock != before {
-		t.Errorf("the live display state did not toggle back: %v", app.Display.HideThinkingBlock)
+	if app.display.HideThinkingBlock != before {
+		t.Errorf("the live display state did not toggle back: %v", app.display.HideThinkingBlock)
 	}
 }
 
@@ -389,14 +389,14 @@ func TestToolsExpandToggleRoundTrips(t *testing.T) {
 	defer cleanup()
 
 	wiring := newKeyWiring(app)
-	before := app.Display.ToolOutputExpanded
+	before := app.display.ToolOutputExpanded
 
 	wiring.OnToolsExpand()
-	if app.Display.ToolOutputExpanded == before {
-		t.Errorf("the display state did not toggle: %v", app.Display.ToolOutputExpanded)
+	if app.display.ToolOutputExpanded == before {
+		t.Errorf("the display state did not toggle: %v", app.display.ToolOutputExpanded)
 	}
 	wiring.OnToolsExpand()
-	if app.Display.ToolOutputExpanded != before {
-		t.Errorf("the second press did not toggle back: %v", app.Display.ToolOutputExpanded)
+	if app.display.ToolOutputExpanded != before {
+		t.Errorf("the second press did not toggle back: %v", app.display.ToolOutputExpanded)
 	}
 }

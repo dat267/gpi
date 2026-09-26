@@ -336,10 +336,10 @@ func TestWorkingSpinnerFollowsTheBorderColour(t *testing.T) {
 	// Spinner first, then the border colour is re-applied: the order that
 	// exposed the stale capture (thinking level, model or bash mode changes
 	// recolour the border mid-session).
-	app.UIState.ShowWorkingStatusIndicator("medium")
-	app.Queue.UpdateEditorBorderColor()
+	app.uiState.ShowWorkingStatusIndicator("medium")
+	app.queue.UpdateEditorBorderColor()
 
-	border := app.DefaultEditor.renderTopBorder(40, 0)
+	border := app.defaultEditor.renderTopBorder(40, 0)
 	lineColor := ansiBefore(t, border, "─")
 	if got := ansiBefore(t, border, "Working"); got != lineColor {
 		t.Errorf("the working message is %s but the border lines are %s", got, lineColor)

@@ -17,34 +17,34 @@ func TestDisplayOptionsSingleOwner(t *testing.T) {
 	defer cleanup()
 	app.Init(context.Background())
 
-	if app.Display == nil {
+	if app.display == nil {
 		t.Fatal("app has no display options")
 	}
 	holders := map[string]*DisplayOptions{
-		"transcript": app.Transcript.Display,
-		"events":     app.Events.Display,
-		"runner":     app.Runner.Display,
-		"trust":      app.Trust.Display,
-		"uiState":    app.UIState.Display,
+		"transcript": app.transcript.Display,
+		"events":     app.events.Display,
+		"runner":     app.runner.Display,
+		"trust":      app.trust.Display,
+		"uiState":    app.uiState.Display,
 	}
 	for name, got := range holders {
-		if got != app.Display {
+		if got != app.display {
 			t.Fatalf("%s does not share the app display options", name)
 		}
 	}
 
 	// ctrl+o flips the single owner, so components created afterwards inherit
 	// the expansion state (the dead copies kept them collapsed).
-	app.Key.OnToolsExpand()
-	if !app.Display.ToolOutputExpanded {
+	app.key.OnToolsExpand()
+	if !app.display.ToolOutputExpanded {
 		t.Fatal("tool expansion did not reach the shared display options")
 	}
 
 	// /reload re-reads the padding into the single owner, including the run
 	// wiring's error lines. OutputPad clamps to 0 or 1 (GetOutputPad).
-	app.Settings.SetOutputPad(0)
+	app.settings.SetOutputPad(0)
 	app.applyReloadedSettings()
-	if app.Display.OutputPad != 0 {
-		t.Fatalf("output pad = %d, want 0 after reload", app.Display.OutputPad)
+	if app.display.OutputPad != 0 {
+		t.Fatalf("output pad = %d, want 0 after reload", app.display.OutputPad)
 	}
 }

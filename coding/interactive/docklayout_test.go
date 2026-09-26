@@ -14,26 +14,26 @@ func TestDockPinnedAfterScroll(t *testing.T) {
 	app, cleanup := newTestAppB(t)
 	defer cleanup()
 	app.Init(context.Background())
-	screen, ok := app.Lifecycle.CurrentUI().(*tui.AltScreen)
+	screen, ok := app.lifecycle.CurrentUI().(*tui.AltScreen)
 	if !ok {
-		t.Fatalf("UI = %T", app.Lifecycle.CurrentUI())
+		t.Fatalf("UI = %T", app.lifecycle.CurrentUI())
 	}
 	screen.Start()
 	screen.DisableAutoRender()
 
 	// populate
 	for i := 0; i < 50; i++ {
-		app.Events.HandleEvent(&coding.SessionEvent{Type: coding.SessionMessageStart, Agent: agentEvent("message_start", &ai.UserMessage{Content: ai.StringOrBlocks{Text: fmt.Sprintf("message %d", i)}})})
-		app.Events.HandleEvent(&coding.SessionEvent{Type: coding.SessionMessageEnd, Agent: agentEvent("message_end", &ai.UserMessage{Content: ai.StringOrBlocks{Text: "x"}})})
+		app.events.HandleEvent(&coding.SessionEvent{Type: coding.SessionMessageStart, Agent: agentEvent("message_start", &ai.UserMessage{Content: ai.StringOrBlocks{Text: fmt.Sprintf("message %d", i)}})})
+		app.events.HandleEvent(&coding.SessionEvent{Type: coding.SessionMessageEnd, Agent: agentEvent("message_end", &ai.UserMessage{Content: ai.StringOrBlocks{Text: "x"}})})
 	}
-	app.UI.RenderNow(false)
+	app.ui.RenderNow(false)
 	screen.ScrollBy(-10)
-	app.UI.RenderNow(false)
-	t.Logf("transcriptScrollView=%T layoutRoot=%T", app.TranscriptScrollView, screen.LayoutRoot())
+	app.ui.RenderNow(false)
+	t.Logf("transcriptScrollView=%T layoutRoot=%T", app.transcriptScrollView, screen.LayoutRoot())
 
 	// the layout is pure: recompute it with the current scroll state
 	frame := tui.RenderLayoutFrame(screen.LayoutRoot(), 100, 30, func() {})
-	box, ok := tui.GetScrollViewBox(frame, app.TranscriptScrollView)
+	box, ok := tui.GetScrollViewBox(frame, app.transcriptScrollView)
 	if !ok {
 		t.Fatal("no transcript scroll box")
 	}
@@ -42,12 +42,12 @@ func TestDockPinnedAfterScroll(t *testing.T) {
 	var walk func(b *tui.LayoutBox)
 	walk = func(b *tui.LayoutBox) {
 		for name, component := range map[string]tui.Component{
-			"editor":  app.EditorContainer,
-			"footer":  app.FooterContainer,
-			"status":  app.StatusContainer,
-			"above":   app.WidgetAbove,
-			"below":   app.WidgetBelow,
-			"pending": app.PendingMessages,
+			"editor":  app.editorContainer,
+			"footer":  app.footerContainer,
+			"status":  app.statusContainer,
+			"above":   app.widgetAbove,
+			"below":   app.widgetBelow,
+			"pending": app.pendingMessages,
 		} {
 			if b.Component == component {
 				boxes[name] = b

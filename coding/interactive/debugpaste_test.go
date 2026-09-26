@@ -23,7 +23,7 @@ func TestDebugCommandWritesLog(t *testing.T) {
 	defer cleanup()
 	app.Init(context.Background())
 
-	app.Submit.HandleSubmit(context.Background(), "/debug")
+	app.submit.HandleSubmit(context.Background(), "/debug")
 
 	logPath := filepath.Join(dir, coding.AppName+"-debug.log")
 	data, err := os.ReadFile(logPath)
@@ -56,7 +56,7 @@ func TestHandleRightClickPasteInsertsClipboard(t *testing.T) {
 
 	app.handleRightClickPaste()
 
-	if got := app.DefaultEditor.GetText(); !strings.Contains(got, "hello paste") {
+	if got := app.defaultEditor.GetText(); !strings.Contains(got, "hello paste") {
 		t.Fatalf("editor text = %q, want it to contain the pasted clipboard", got)
 	}
 }

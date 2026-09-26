@@ -12,15 +12,15 @@ import (
 // address messages through GetUserMessagesForForking rather than by position.
 func appendTurn(t *testing.T, app *App, userText string) {
 	t.Helper()
-	app.SessionMgr.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: userText}})
-	app.SessionMgr.AppendMessage(&ai.AssistantMessage{
+	app.sessionMgr.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: userText}})
+	app.sessionMgr.AppendMessage(&ai.AssistantMessage{
 		API: ai.APIAnthropicMessages, Provider: "anthropic", Model: "m",
 		Content: ai.ContentList{ai.TextContent{Text: "ok"}}, StopReason: ai.StopStop,
 	})
 }
 
 func userMessageTexts(app *App) []string {
-	forks := app.Session.GetUserMessagesForForking()
+	forks := app.session.GetUserMessagesForForking()
 	texts := make([]string, 0, len(forks))
 	for _, fork := range forks {
 		texts = append(texts, fork.Text)
@@ -32,7 +32,7 @@ func userMessageTexts(app *App) []string {
 // after appendTurn).
 func lastEntryID(t *testing.T, app *App) string {
 	t.Helper()
-	entries := app.SessionMgr.GetEntries()
+	entries := app.sessionMgr.GetEntries()
 	if len(entries) == 0 {
 		t.Fatal("no entries")
 	}
@@ -51,20 +51,20 @@ func TestCloneCommandDuplicatesAtTheCurrentPosition(t *testing.T) {
 	}
 
 	appendTurn(t, app, "hello")
-	leaf := app.SessionMgr.GetLeafID()
+	leaf := app.sessionMgr.GetLeafID()
 	if leaf == nil {
 		t.Fatal("no leaf after appending a turn")
 	}
-	beforeID := app.SessionMgr.GetSessionID()
+	beforeID := app.sessionMgr.GetSessionID()
 
 	if err := run(); err != nil {
 		t.Fatal(err)
 	}
-	if app.SessionMgr.GetSessionID() == beforeID {
+	if app.sessionMgr.GetSessionID() == beforeID {
 		t.Error("the clone kept the source session id")
 	}
 	// The clone holds the same entries, so it sits at the same position.
-	if got := app.SessionMgr.GetLeafID(); got == nil || *got != *leaf {
+	if got := app.sessionMgr.GetLeafID(); got == nil || *got != *leaf {
 		t.Errorf("leaf = %v, want %q", got, *leaf)
 	}
 	if texts := userMessageTexts(app); len(texts) != 1 || texts[0] != "hello" {
@@ -82,7 +82,7 @@ func TestForkAtEntryBeforeAMessage(t *testing.T) {
 	defer cleanup()
 
 	appendTurn(t, app, "first question")
-	forks := app.Session.GetUserMessagesForForking()
+	forks := app.session.GetUserMessagesForForking()
 	if len(forks) != 1 {
 		t.Fatalf("user messages = %d, want 1", len(forks))
 	}
@@ -107,7 +107,7 @@ func TestForkAtEntryBoundaries(t *testing.T) {
 	defer cleanup()
 
 	appendTurn(t, app, "hello")
-	forks := app.Session.GetUserMessagesForForking()
+	forks := app.session.GetUserMessagesForForking()
 	if len(forks) != 1 {
 		t.Fatalf("user messages = %d, want 1", len(forks))
 	}

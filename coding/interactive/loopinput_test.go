@@ -21,7 +21,7 @@ func startLoopApp(t *testing.T, app *App) func() {
 		defer close(done)
 		app.Run(ctx)
 	}()
-	waitForConditionWithin(t, func() bool { return app.Lifecycle.IsInitialized() }, 6*time.Second)
+	waitForConditionWithin(t, func() bool { return app.lifecycle.IsInitialized() }, 6*time.Second)
 	return func() {
 		cancel()
 		select {
@@ -37,8 +37,8 @@ func startLoopApp(t *testing.T, app *App) func() {
 // read when no loop is running.
 func editorText(app *App) string {
 	done := make(chan string, 1)
-	app.UI.Post(func() {
-		text := app.DefaultEditor.GetText()
+	app.ui.Post(func() {
+		text := app.defaultEditor.GetText()
 		select {
 		case done <- text:
 		default:
@@ -49,7 +49,7 @@ func editorText(app *App) string {
 		return text
 	case <-time.After(200 * time.Millisecond):
 		// No loop consumer: read from the test goroutine.
-		return app.DefaultEditor.GetText()
+		return app.defaultEditor.GetText()
 	}
 }
 
@@ -62,7 +62,7 @@ func TestLoopDispatchesTerminalInput(t *testing.T) {
 	stop := startLoopApp(t, app)
 	defer stop()
 
-	app.PostTerminalInput("hi there")
+	app.postTerminalInput("hi there")
 	waitForConditionWithin(t, func() bool {
 		return strings.Contains(editorText(app), "hi there")
 	}, 6*time.Second)
@@ -77,13 +77,13 @@ func TestLoopDispatchesResize(t *testing.T) {
 
 	// Loop mode with the test seam: no automatic ticks, so drive one resize and
 	// observe the loop-side paint through the render counter.
-	before := app.UI.RenderCount()
+	before := app.ui.RenderCount()
 	select {
 	case app.loopResizes <- struct{}{}:
 	case <-time.After(time.Second):
 		t.Fatal("resize channel full")
 	}
-	waitForConditionWithin(t, func() bool { return app.UI.RenderCount() > before }, 6*time.Second)
+	waitForConditionWithin(t, func() bool { return app.ui.RenderCount() > before }, 6*time.Second)
 }
 
 // TestLoopDispatchesSignals asserts the signal producer path: a process signal
@@ -95,12 +95,12 @@ func TestLoopDispatchesSignals(t *testing.T) {
 
 	var handled atomic.Int64
 	// The loop's signal work is a counter here so the test does not shut down.
-	app.Runner.OnSignal = func(os.Signal) { handled.Add(1) }
+	app.runner.OnSignal = func(os.Signal) { handled.Add(1) }
 
 	stop := startLoopApp(t, app)
 	defer stop()
 
-	sink := app.Lifecycle.SignalSink()
+	sink := app.lifecycle.SignalSink()
 	if sink == nil {
 		t.Fatal("lifecycle has no signal sink wired")
 	}
@@ -139,7 +139,7 @@ func TestConcurrentTerminalProducersStayOrdered(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for i := 0; i < 20; i++ {
-				app.PostTerminalInput("ab")
+				app.postTerminalInput("ab")
 			}
 		}(producer)
 	}
@@ -172,8 +172,8 @@ func TestCompactCommandDoesNotBlockInput(t *testing.T) {
 	defer cleanup()
 
 	session := &blockingCompactSession{started: make(chan struct{}), release: make(chan struct{})}
-	session.CommandSession = app.Commands.Session
-	app.Commands.Session = session
+	session.CommandSession = app.commands.Session
+	app.commands.Session = session
 
 	stop := startLoopApp(t, app)
 	defer stop()
@@ -182,11 +182,11 @@ func TestCompactCommandDoesNotBlockInput(t *testing.T) {
 	// terminal sequence to the editor, whose submit handler runs on the loop,
 	// exactly like production). The autocomplete may consume the first Enter,
 	// so retry once.
-	app.PostTerminalInput("/compact\r")
+	app.postTerminalInput("/compact\r")
 	select {
 	case <-session.started:
 	case <-time.After(700 * time.Millisecond):
-		app.PostTerminalInput("\r")
+		app.postTerminalInput("\r")
 		select {
 		case <-session.started:
 		case <-time.After(3 * time.Second):
@@ -195,7 +195,7 @@ func TestCompactCommandDoesNotBlockInput(t *testing.T) {
 	}
 
 	// The loop is free while the compaction blocks.
-	app.PostTerminalInput("still typing")
+	app.postTerminalInput("still typing")
 	waitForConditionWithin(t, func() bool {
 		return strings.Contains(editorText(app), "still typing")
 	}, 6*time.Second)
@@ -228,15 +228,15 @@ func TestCompactCommandDuringTurnDoesNotQueueBehindIt(t *testing.T) {
 	defer cleanup()
 
 	session := &compactWhileBusySession{started: make(chan struct{}), release: make(chan struct{})}
-	session.CommandSession = app.Commands.Session
-	app.Commands.Session = session
+	session.CommandSession = app.commands.Session
+	app.commands.Session = session
 
 	// Occupy the work slot through the loop's own prompt path with a turn
 	// that never finishes on its own.
 	releaseTurn := make(chan struct{})
 	turnStarted := make(chan struct{})
-	previousPrompt := app.Runner.Prompt
-	app.Runner.Prompt = func(ctx context.Context, text string) error {
+	previousPrompt := app.runner.Prompt
+	app.runner.Prompt = func(ctx context.Context, text string) error {
 		close(turnStarted)
 		<-releaseTurn
 		return previousPrompt(ctx, text)
@@ -245,16 +245,16 @@ func TestCompactCommandDuringTurnDoesNotQueueBehindIt(t *testing.T) {
 	stop := startLoopApp(t, app)
 	defer stop()
 
-	app.PostTerminalInput("long running turn")
+	app.postTerminalInput("long running turn")
 	waitForConditionWithin(t, func() bool {
 		return strings.Contains(editorText(app), "long running turn")
 	}, 6*time.Second)
-	app.PostTerminalInput("\r")
+	app.postTerminalInput("\r")
 	select {
 	case <-turnStarted:
 	case <-time.After(700 * time.Millisecond):
 		// The autocomplete may consume the first Enter; retry once.
-		app.PostTerminalInput("\r")
+		app.postTerminalInput("\r")
 		select {
 		case <-turnStarted:
 		case <-time.After(3 * time.Second):
@@ -264,12 +264,12 @@ func TestCompactCommandDuringTurnDoesNotQueueBehindIt(t *testing.T) {
 
 	// /compact while the turn is active: the compaction must start now, not
 	// after the turn is released.
-	app.PostTerminalInput("/compact\r")
+	app.postTerminalInput("/compact\r")
 	select {
 	case <-session.started:
 	case <-time.After(700 * time.Millisecond):
 		// The autocomplete may consume the first Enter; retry once.
-		app.PostTerminalInput("\r")
+		app.postTerminalInput("\r")
 		select {
 		case <-session.started:
 		case <-time.After(3 * time.Second):

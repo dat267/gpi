@@ -22,7 +22,7 @@ func TestCompactCommandReportsErrorAndClearsIndicator(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	app.Init(ctx)
-	app.Commands.HandleCompactCommand(ctx, "")
+	app.commands.HandleCompactCommand(ctx, "")
 
 	done := make(chan struct{})
 	go func() {
@@ -43,8 +43,8 @@ func TestCompactCommandReportsErrorAndClearsIndicator(t *testing.T) {
 		t.Fatal("run loop did not exit within 2s of cancellation")
 	}
 	// The loop has stopped, so the indicator state is safe to read.
-	if app.Events.UIState != nil && app.Events.UIState.ActiveStatusIndicator != nil {
+	if app.events.UIState != nil && app.events.UIState.ActiveStatusIndicator != nil {
 		t.Fatalf("compaction status indicator still active after /compact: %T",
-			app.Events.UIState.ActiveStatusIndicator)
+			app.events.UIState.ActiveStatusIndicator)
 	}
 }

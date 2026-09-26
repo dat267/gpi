@@ -23,11 +23,11 @@ func TestExternalEditorWiring(t *testing.T) {
 	}
 	t.Setenv("VISUAL", script)
 	t.Setenv("EDITOR", script)
-	app.DefaultEditor.SetText("the original prompt")
+	app.defaultEditor.SetText("the original prompt")
 
 	newKeyWiring(app).OnExternalEditor()
 
-	if got := app.DefaultEditor.GetText(); got != "edited in the editor" {
+	if got := app.defaultEditor.GetText(); got != "edited in the editor" {
 		t.Errorf("editor text = %q, want the edited content", got)
 	}
 }
@@ -69,8 +69,8 @@ func TestTreeLabelChangeWiring(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
 
-	app.SessionMgr.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "a message to label"}})
-	entries := app.SessionMgr.GetEntries()
+	app.sessionMgr.AppendMessage(&ai.UserMessage{Content: ai.StringOrBlocks{Text: "a message to label"}})
+	entries := app.sessionMgr.GetEntries()
 	if len(entries) == 0 {
 		t.Fatal("no entries")
 	}
@@ -79,13 +79,13 @@ func TestTreeLabelChangeWiring(t *testing.T) {
 	label := "the label"
 	newSelectorWiring(app).handleTreeLabelChange(entryID, &label)
 
-	if got := app.SessionMgr.GetLabel(entryID); got != label {
+	if got := app.sessionMgr.GetLabel(entryID); got != label {
 		t.Errorf("label = %q, want %q", got, label)
 	}
 
 	// Removing it is recorded too.
 	newSelectorWiring(app).handleTreeLabelChange(entryID, nil)
-	if got := app.SessionMgr.GetLabel(entryID); got != "" {
+	if got := app.sessionMgr.GetLabel(entryID); got != "" {
 		t.Errorf("label after removal = %q, want it cleared", got)
 	}
 }
@@ -107,7 +107,7 @@ func TestFullscreenScrollbarWiring(t *testing.T) {
 // selectorIn returns the dialog currently shown.
 func selectorIn(t *testing.T, app *App) *ExtensionSelectorComponent {
 	t.Helper()
-	component := app.Slot.ActiveSelectorComponent()
+	component := app.slot.ActiveSelectorComponent()
 	selector, ok := component.(*ExtensionSelectorComponent)
 	if !ok {
 		t.Fatalf("dialog = %T, want the extension selector", component)
@@ -129,7 +129,7 @@ func TestAppConfirmDialogs(t *testing.T) {
 		if !answered || !answer {
 			t.Errorf("answered=%v answer=%v", answered, answer)
 		}
-		if app.Slot.HasActiveSelector() {
+		if app.slot.HasActiveSelector() {
 			t.Error("the dialog stayed up after an answer")
 		}
 	})
@@ -186,21 +186,21 @@ func TestClearStatusContainerIfIdleWiring(t *testing.T) {
 	defer cleanup()
 
 	idle := &IdleStatus{}
-	app.UIState.StatusContainer.AddChild(idle)
+	app.uiState.StatusContainer.AddChild(idle)
 	callbacks := newSettingsWiring(app).BuildSettingsCallbacks(func() {}, func() {})
 	callbacks.OnClearOnShrinkChange(false)
-	if got := len(app.UIState.StatusContainer.Children); got != 0 {
+	if got := len(app.uiState.StatusContainer.Children); got != 0 {
 		t.Errorf("status container still holds %d children", got)
 	}
 
 	// With an indicator up, the container is left alone.
-	app.UIState.StatusContainer.AddChild(idle)
-	indicator := NewWorkingStatusIndicator(app.UIState.UI, "Working...", nil, nil)
-	app.UIState.ActiveStatusIndicator = indicator
-	app.UIState.ClearStatusContainerIfIdle()
-	if got := len(app.UIState.StatusContainer.Children); got != 1 {
+	app.uiState.StatusContainer.AddChild(idle)
+	indicator := NewWorkingStatusIndicator(app.uiState.UI, "Working...", nil, nil)
+	app.uiState.ActiveStatusIndicator = indicator
+	app.uiState.ClearStatusContainerIfIdle()
+	if got := len(app.uiState.StatusContainer.Children); got != 1 {
 		t.Errorf("status container lost its children while an indicator was active (%d)", got)
 	}
-	app.UIState.ActiveStatusIndicator = nil
+	app.uiState.ActiveStatusIndicator = nil
 	indicator.Dispose()
 }

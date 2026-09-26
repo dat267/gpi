@@ -16,18 +16,18 @@ func TestStopModeSwitchesToRegularOnTranscriptExit(t *testing.T) {
 	app, cleanup := newTestAppB(t)
 	defer cleanup()
 	app.Init(context.Background())
-	screen, ok := app.Lifecycle.CurrentUI().(*tui.AltScreen)
+	screen, ok := app.lifecycle.CurrentUI().(*tui.AltScreen)
 	if !ok {
-		t.Fatalf("initial UI = %T", app.Lifecycle.CurrentUI())
+		t.Fatalf("initial UI = %T", app.lifecycle.CurrentUI())
 	}
 	screen.Start()
 	screen.DisableAutoRender()
 
 	app.StopMode("transcript")
 
-	current, ok := app.Lifecycle.CurrentUI().(*tui.MainScreen)
+	current, ok := app.lifecycle.CurrentUI().(*tui.MainScreen)
 	if !ok {
-		t.Fatalf("after StopMode the renderer = %T, want MainScreen", app.Lifecycle.CurrentUI())
+		t.Fatalf("after StopMode the renderer = %T, want MainScreen", app.lifecycle.CurrentUI())
 	}
 	_ = current
 	// And with "resume-hint" the alt screen is kept (only the screen state is
@@ -38,17 +38,17 @@ func TestStopModeKeepsAltScreenOnResumeHintExit(t *testing.T) {
 	app, cleanup := newTestAppB(t)
 	defer cleanup()
 	app.Init(context.Background())
-	screen, ok := app.Lifecycle.CurrentUI().(*tui.AltScreen)
+	screen, ok := app.lifecycle.CurrentUI().(*tui.AltScreen)
 	if !ok {
-		t.Fatalf("initial UI = %T", app.Lifecycle.CurrentUI())
+		t.Fatalf("initial UI = %T", app.lifecycle.CurrentUI())
 	}
 	screen.Start()
 	screen.DisableAutoRender()
 
 	app.StopMode("resume-hint")
 
-	if _, ok := app.Lifecycle.CurrentUI().(*tui.AltScreen); !ok {
-		t.Fatalf("after StopMode the renderer = %T, want AltScreen", app.Lifecycle.CurrentUI())
+	if _, ok := app.lifecycle.CurrentUI().(*tui.AltScreen); !ok {
+		t.Fatalf("after StopMode the renderer = %T, want AltScreen", app.lifecycle.CurrentUI())
 	}
 }
 
@@ -60,7 +60,7 @@ func TestStopModeStopsTheAppOffloopQueues(t *testing.T) {
 	app, cleanup := newTestAppB(t)
 	defer cleanup()
 	app.Init(context.Background())
-	queue := app.Transcript.PrerenderQueue
+	queue := app.transcript.PrerenderQueue
 	if queue == nil {
 		t.Fatal("pre-render queue not wired")
 	}

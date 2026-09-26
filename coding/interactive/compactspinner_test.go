@@ -48,13 +48,13 @@ func TestCompactionIndicatorDrivesAnimation(t *testing.T) {
 	defer cleanup()
 	app.Init(context.Background())
 
-	app.UIState.ShowStatusIndicator(NewCompactionStatusIndicator(app.UI, "manual"))
-	want, _ := app.UI.NextAnimation()
+	app.uiState.ShowStatusIndicator(NewCompactionStatusIndicator(app.ui, "manual"))
+	want, _ := app.ui.NextAnimation()
 	if !want {
 		t.Fatal("renderer animation walk must see the editor-embedded compaction indicator")
 	}
-	app.UIState.ClearStatusIndicator("", false)
-	want, _ = app.UI.NextAnimation()
+	app.uiState.ClearStatusIndicator("", false)
+	want, _ = app.ui.NextAnimation()
 	if want {
 		t.Fatal("no animation wanted after the indicator is cleared")
 	}

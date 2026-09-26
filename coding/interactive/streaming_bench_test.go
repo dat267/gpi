@@ -30,10 +30,10 @@ func BenchmarkStreamingAssistantDelta(b *testing.B) {
 			Content: ai.ContentList{ai.TextContent{Text: fmt.Sprintf(
 				"# reply %d\n\n```go\nfunc f%d() int { return %d }\n```\n\nsome paragraph with **bold** and `code` spans that wraps across the viewport width\n", i, i, i)}},
 		}
-		app.Events.HandleEvent(&coding.SessionEvent{
+		app.events.HandleEvent(&coding.SessionEvent{
 			Type: coding.SessionMessageStart, Agent: agentEvent("message_start", assistant),
 		})
-		app.Events.HandleEvent(&coding.SessionEvent{
+		app.events.HandleEvent(&coding.SessionEvent{
 			Type: coding.SessionMessageEnd, Agent: agentEvent("message_end", assistant),
 		})
 	}
@@ -44,7 +44,7 @@ func BenchmarkStreamingAssistantDelta(b *testing.B) {
 			"Paragraph %d with **bold**, `code` and a [link](https://example.com/%d) that wraps.\n\n", i, i))
 	}
 	streaming := &ai.AssistantMessage{API: ai.APIAnthropicMessages, Provider: "test", Model: "m", StopReason: ai.StopPending}
-	app.Events.HandleEvent(&coding.SessionEvent{
+	app.events.HandleEvent(&coding.SessionEvent{
 		Type: coding.SessionMessageStart, Agent: agentEvent("message_start", streaming),
 	})
 
@@ -60,9 +60,9 @@ func BenchmarkStreamingAssistantDelta(b *testing.B) {
 			API: ai.APIAnthropicMessages, Provider: "test", Model: "m", StopReason: ai.StopPending,
 			Content: ai.ContentList{ai.TextContent{Text: body.String()}},
 		}
-		app.Events.HandleEvent(&coding.SessionEvent{
+		app.events.HandleEvent(&coding.SessionEvent{
 			Type: coding.SessionMessageUpdate, Agent: agentEvent("message_update", message),
 		})
-		app.UI.RenderNow(true)
+		app.ui.RenderNow(true)
 	}
 }

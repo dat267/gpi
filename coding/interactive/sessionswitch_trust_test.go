@@ -65,18 +65,18 @@ func TestSwitchResolvesProjectTrustForTheNewCwd(t *testing.T) {
 				app.options.ProjectTrustOverride = &approved
 			}
 
-			if _, err := app.SwitchSession(context.Background(), target.GetSessionFile(), ""); err != nil {
+			if _, err := app.switchSession(context.Background(), target.GetSessionFile(), ""); err != nil {
 				t.Fatalf("SwitchSession: %v", err)
 			}
 			wantTrusted := name == "store says trust" || name == "override"
-			if got := app.Settings.IsProjectTrusted(); got != wantTrusted {
+			if got := app.settings.IsProjectTrusted(); got != wantTrusted {
 				t.Errorf("project trusted = %v, want %v", got, wantTrusted)
 			}
-			if got := projectThemeOf(app.Settings); got != expectedProjectTheme(wantTrusted) {
+			if got := projectThemeOf(app.settings); got != expectedProjectTheme(wantTrusted) {
 				t.Errorf("project theme = %q, want %q", got, expectedProjectTheme(wantTrusted))
 			}
-			if app.Settings.Cwd() != coding.NormalizePath(targetCwd, coding.PathInputOptions{}) {
-				t.Errorf("settings cwd = %q, want %q", app.Settings.Cwd(), targetCwd)
+			if app.settings.Cwd() != coding.NormalizePath(targetCwd, coding.PathInputOptions{}) {
+				t.Errorf("settings cwd = %q, want %q", app.settings.Cwd(), targetCwd)
 			}
 		})
 	}
@@ -97,17 +97,17 @@ func boolRef(value bool) *bool { return &value }
 func TestSwitchWithinTheSameCwdKeepsTheTrustDecision(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
-	cwd := app.SessionMgr.GetCwd()
+	cwd := app.sessionMgr.GetCwd()
 
 	target := makePersistedSession(t, cwd, "same project")
 	store := coding.NewProjectTrustStore(app.options.AgentDir)
 	if err := store.Set(cwd, boolRef(false)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := app.SwitchSession(context.Background(), target.GetSessionFile(), ""); err != nil {
+	if _, err := app.switchSession(context.Background(), target.GetSessionFile(), ""); err != nil {
 		t.Fatalf("SwitchSession: %v", err)
 	}
-	if !app.Settings.IsProjectTrusted() {
+	if !app.settings.IsProjectTrusted() {
 		t.Fatal("a same-cwd switch re-resolved trust from the store")
 	}
 }
@@ -122,10 +122,10 @@ func TestSwitchReusesTheTrustDecisionPerProject(t *testing.T) {
 
 	first := makeTrustRequiringProject(t, "alpha-theme")
 	firstSession := makePersistedSession(t, first, "first")
-	if _, err := app.SwitchSession(context.Background(), firstSession.GetSessionFile(), ""); err != nil {
+	if _, err := app.switchSession(context.Background(), firstSession.GetSessionFile(), ""); err != nil {
 		t.Fatal(err)
 	}
-	if app.Settings.IsProjectTrusted() {
+	if app.settings.IsProjectTrusted() {
 		t.Fatal("an undecided project must be untrusted")
 	}
 
@@ -137,16 +137,16 @@ func TestSwitchReusesTheTrustDecisionPerProject(t *testing.T) {
 	// remembered for the run.
 	elsewhere := makeTrustRequiringProject(t, "beta-theme")
 	elsewhereSession := makePersistedSession(t, elsewhere, "elsewhere")
-	if _, err := app.SwitchSession(context.Background(), elsewhereSession.GetSessionFile(), ""); err != nil {
+	if _, err := app.switchSession(context.Background(), elsewhereSession.GetSessionFile(), ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := app.SwitchSession(context.Background(), firstSession.GetSessionFile(), ""); err != nil {
+	if _, err := app.switchSession(context.Background(), firstSession.GetSessionFile(), ""); err != nil {
 		t.Fatal(err)
 	}
-	if app.Settings.IsProjectTrusted() {
+	if app.settings.IsProjectTrusted() {
 		t.Fatal("the remembered answer was re-resolved from the store")
 	}
-	if got := projectThemeOf(app.Settings); got != "" {
+	if got := projectThemeOf(app.settings); got != "" {
 		t.Errorf("project theme = %q, want the project still ignored", got)
 	}
 }

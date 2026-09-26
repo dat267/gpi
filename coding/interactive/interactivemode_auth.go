@@ -695,18 +695,18 @@ func newAuthWiring(app *App) *AuthWiring {
 			timer := time.AfterFunc(time.Duration(ms)*time.Millisecond, fn)
 			return func() { timer.Stop() }
 		},
-		Slot:                         app.Slot,
-		EditorContainer:              app.EditorContainer,
-		Editor:                       app.DefaultEditor,
-		UI:                           app.UI,
-		Session:                      app.Session,
-		Settings:                     app.Settings,
-		ShowStatus:                   func(message string) { app.Transcript.ShowStatus(message) },
+		Slot:                         app.slot,
+		EditorContainer:              app.editorContainer,
+		Editor:                       app.defaultEditor,
+		UI:                           app.ui,
+		Session:                      app.session,
+		Settings:                     app.settings,
+		ShowStatus:                   func(message string) { app.transcript.ShowStatus(message) },
 		ShowError:                    func(message string) { app.showError(message) },
 		ShowWarning:                  func(message string) { app.showWarning(message) },
-		UpdateAvailableProviderCount: func() { app.Startup.UpdateAvailableProviderCount() },
+		UpdateAvailableProviderCount: func() { app.startup.UpdateAvailableProviderCount() },
 		UpdateEditorBorderColor:      func() { app.updateEditorBorderColor() },
 		OnAuthenticated:              func(model *ai.Model, hasModel bool) {},
-		RequestRender:                func() { app.UI.RequestRender(false) },
+		RequestRender:                func() { app.ui.RequestRender(false) },
 		AuthPath:                     coding.GetAgentDir() + "/auth.json"}
 }

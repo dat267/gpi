@@ -524,50 +524,50 @@ func (w *SelectorWiring) showExtensionEditor(ctx context.Context, title string) 
 // newSelectorWiring assembles the SelectorWiring (port of the corresponding InteractiveMode wiring).
 func newSelectorWiring(app *App) *SelectorWiring {
 	return &SelectorWiring{
-		Slot:                    app.Slot,
-		Session:                 app.Session,
-		Settings:                app.Settings,
-		SessionInfo:             app.SessionMgr,
+		Slot:                    app.slot,
+		Session:                 app.session,
+		Settings:                app.settings,
+		SessionInfo:             app.sessionMgr,
 		AgentDir:                app.options.AgentDir,
-		ShowStatus:              func(message string) { app.Transcript.ShowStatus(message) },
+		ShowStatus:              func(message string) { app.transcript.ShowStatus(message) },
 		ShowError:               func(message string) { app.showError(message) },
 		UpdateEditorBorderColor: func() { app.updateEditorBorderColor() },
-		TerminalRows:            func() int { return app.UI.GetTerminal().Rows() },
+		TerminalRows:            func() int { return app.ui.GetTerminal().Rows() },
 		ShowStatusIndicator: func(kind StatusIndicatorKind) {
 			// The tree navigation is the only caller: it summarizes a branch and
 			// reports that through the branch-summary indicator.
 			if kind == StatusBranchSummary {
-				app.UIState.ShowStatusIndicator(NewBranchSummaryStatusIndicator(app.UI))
+				app.uiState.ShowStatusIndicator(NewBranchSummaryStatusIndicator(app.ui))
 			}
 		},
 		ClearStatusIndicator: func(kind StatusIndicatorKind) {
-			app.UIState.ClearStatusIndicator(kind, true)
+			app.uiState.ClearStatusIndicator(kind, true)
 		},
-		AddChatSpacer: func() { app.Chat.AddChild(tui.NewSpacer(1)) },
+		AddChatSpacer: func() { app.chat.AddChild(tui.NewSpacer(1)) },
 		EditorEscapeHandler: func() func() {
-			return app.DefaultEditor.OnEscape
+			return app.defaultEditor.OnEscape
 		},
-		SetEditorEscapeHandler: func(handler func()) { app.DefaultEditor.OnEscape = handler },
+		SetEditorEscapeHandler: func(handler func()) { app.defaultEditor.OnEscape = handler },
 		RestoreQueuedMessagesToEditor: func() {
-			text := app.DefaultEditor.GetText()
-			app.Queue.RestoreQueuedMessagesToEditor(true, text, text != "")
+			text := app.defaultEditor.GetText()
+			app.queue.RestoreQueuedMessagesToEditor(true, text, text != "")
 		},
-		OnEditorText: func(text string) { app.DefaultEditor.SetText(text) },
+		OnEditorText: func(text string) { app.defaultEditor.SetText(text) },
 		// After a branch navigation the transcript describes the branch that was
 		// just left, so the chat is cleared and re-rendered from the new context
 		// (upstream chatContainer.clear() + renderInitialMessages()).
 		RebuildChat: func() {
-			if app.Startup != nil {
-				app.Startup.ClearChatAndRenderInitialMessages()
+			if app.startup != nil {
+				app.startup.ClearChatAndRenderInitialMessages()
 			}
 		},
 		SetNavigatedEditorText: func(text string) {
 			// Upstream: result.editorText && !this.editor.getText().trim().
-			if strings.TrimSpace(app.DefaultEditor.GetText()) == "" {
-				app.DefaultEditor.SetText(text)
+			if strings.TrimSpace(app.defaultEditor.GetText()) == "" {
+				app.defaultEditor.SetText(text)
 			}
 		},
-		FlushCompactionQueue: func() { app.Queue.FlushCompactionQueue(context.Background(), false) },
+		FlushCompactionQueue: func() { app.queue.FlushCompactionQueue(context.Background(), false) },
 		// Forking from a message (the tree/user-message selector) goes through the
 		// runtime fork, which /clone shares.
 		RuntimeFork: app.forkAtEntry,

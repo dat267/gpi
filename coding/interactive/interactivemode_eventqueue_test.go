@@ -154,7 +154,7 @@ func TestRunLoopDrainsProducedEventsAndShutsDown(t *testing.T) {
 	// Observable sink on the loop side: every applied agent_settled event
 	// bumps the counter.
 	var applied int64
-	app.Events.CheckShutdownRequested = func() { atomic.AddInt64(&applied, 1) }
+	app.events.CheckShutdownRequested = func() { atomic.AddInt64(&applied, 1) }
 
 	const total = 64
 	for i := 0; i < total; i++ {
@@ -193,8 +193,8 @@ func TestRunLoopConcurrentProducerKeepsDraining(t *testing.T) {
 	defer cleanup()
 
 	var terminal, partial int64
-	app.Events.CheckShutdownRequested = func() { atomic.AddInt64(&terminal, 1) }
-	app.Runner.OnPartialEventApplied = func() { atomic.AddInt64(&partial, 1) }
+	app.events.CheckShutdownRequested = func() { atomic.AddInt64(&terminal, 1) }
+	app.runner.OnPartialEventApplied = func() { atomic.AddInt64(&partial, 1) }
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -202,7 +202,7 @@ func TestRunLoopConcurrentProducerKeepsDraining(t *testing.T) {
 		defer close(done)
 		app.Run(ctx)
 	}()
-	waitForConditionWithin(t, func() bool { return app.Lifecycle.IsInitialized() }, 6*time.Second)
+	waitForConditionWithin(t, func() bool { return app.lifecycle.IsInitialized() }, 6*time.Second)
 
 	var wg sync.WaitGroup
 	for producer := 0; producer < 3; producer++ {
@@ -242,7 +242,7 @@ func TestRunLoopAppliesEventsWhileTurnRuns(t *testing.T) {
 	defer cleanup()
 
 	applied := make(chan struct{}, 8)
-	app.Events.CheckShutdownRequested = func() {
+	app.events.CheckShutdownRequested = func() {
 		select {
 		case applied <- struct{}{}:
 		default:
@@ -251,7 +251,7 @@ func TestRunLoopAppliesEventsWhileTurnRuns(t *testing.T) {
 
 	promptStarted := make(chan struct{})
 	releasePrompt := make(chan struct{})
-	app.Runner.Prompt = func(context.Context, string) error {
+	app.runner.Prompt = func(context.Context, string) error {
 		close(promptStarted)
 		<-releasePrompt
 		return nil
@@ -264,7 +264,7 @@ func TestRunLoopAppliesEventsWhileTurnRuns(t *testing.T) {
 		app.Run(ctx)
 	}()
 
-	app.Startup.QueueUserInput("start the turn")
+	app.startup.QueueUserInput("start the turn")
 	select {
 	case <-promptStarted:
 	case <-time.After(6 * time.Second):
@@ -298,9 +298,9 @@ func TestDrainReadyEventsRendersOncePerBurst(t *testing.T) {
 	defer cleanup()
 
 	var applied int64
-	app.Events.CheckShutdownRequested = func() { atomic.AddInt64(&applied, 1) }
+	app.events.CheckShutdownRequested = func() { atomic.AddInt64(&applied, 1) }
 
-	wiring := app.Runner
+	wiring := app.runner
 	const burst = 32
 	for i := 0; i < burst; i++ {
 		app.sessionEvents.enqueue(&coding.SessionEvent{Type: coding.SessionAgentSettled})
@@ -310,14 +310,14 @@ func TestDrainReadyEventsRendersOncePerBurst(t *testing.T) {
 	}
 
 	// One drain applies the whole burst; one paint follows.
-	before := app.UI.RenderCount()
+	before := app.ui.RenderCount()
 	wiring.drainReadyEvents()
 	wiring.renderUI()
 
 	if got := atomic.LoadInt64(&applied); got != burst {
 		t.Fatalf("applied %d terminal events, want %d", got, burst)
 	}
-	if got := app.UI.RenderCount() - before; got != 1 {
+	if got := app.ui.RenderCount() - before; got != 1 {
 		t.Fatalf("renders for one burst = %d, want 1", got)
 	}
 }
@@ -331,16 +331,16 @@ func TestRenderTicksThrottlePaintRate(t *testing.T) {
 	stop := startLoopApp(t, app)
 	defer stop()
 
-	before := app.UI.RenderCount()
+	before := app.ui.RenderCount()
 	const requests = 200
 	start := time.Now()
 	for i := 0; i < requests; i++ {
-		app.UI.RequestRender(false)
+		app.ui.RequestRender(false)
 		time.Sleep(time.Millisecond)
 	}
 	elapsed := time.Since(start)
 
-	paints := app.UI.RenderCount() - before
+	paints := app.ui.RenderCount() - before
 	// Without the throttle the loop paints for (nearly) every request.
 	limit := int64(elapsed/minInteractiveFrameInterval) + 8
 	if paints > limit {
@@ -364,13 +364,13 @@ func TestLoopBeatAdvances(t *testing.T) {
 		defer close(done)
 		app.Run(ctx)
 	}()
-	waitForConditionWithin(t, func() bool { return app.Lifecycle.IsInitialized() }, 6*time.Second)
+	waitForConditionWithin(t, func() bool { return app.lifecycle.IsInitialized() }, 6*time.Second)
 
 	// Events wake the loop and advance the beat.
 	for i := 0; i < 5; i++ {
 		app.sessionEvents.enqueue(&coding.SessionEvent{Type: coding.SessionAgentSettled})
 	}
-	waitForConditionWithin(t, func() bool { return app.LoopBeats() >= 5 }, 6*time.Second)
+	waitForConditionWithin(t, func() bool { return app.loopBeats() >= 5 }, 6*time.Second)
 
 	cancel()
 	select {
@@ -378,9 +378,9 @@ func TestLoopBeatAdvances(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("loop did not exit within 2s of cancellation")
 	}
-	stopped := app.LoopBeats()
+	stopped := app.loopBeats()
 	time.Sleep(150 * time.Millisecond)
-	if beat := app.LoopBeats(); beat != stopped {
+	if beat := app.loopBeats(); beat != stopped {
 		t.Fatalf("loop kept beating after cancellation: %d -> %d", stopped, beat)
 	}
 }

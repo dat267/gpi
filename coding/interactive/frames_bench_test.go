@@ -24,10 +24,10 @@ func BenchmarkTranscriptFrameScaling(b *testing.B) {
 				screen.DisableAutoRender()
 			}
 			buildScrollTranscriptN(b, app, messages)
-			app.UI.RenderNow(false) // warm every cache
+			app.ui.RenderNow(false) // warm every cache
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				app.UI.RenderNow(false)
+				app.ui.RenderNow(false)
 			}
 		})
 	}

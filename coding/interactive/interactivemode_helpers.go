@@ -412,16 +412,16 @@ func newTrustCrashWiring(app *App) *TrustCrashWiring {
 		ShowExtensionConfirm: func(ctx context.Context, title string, message string, onAnswer func(confirmed bool)) {
 			app.askConfirm(title, message, onAnswer)
 		},
-		Chat:             app.Chat,
-		UI:               app.UI,
-		Settings:         app.Settings,
-		SessionInfo:      app.SessionMgr,
+		Chat:             app.chat,
+		UI:               app.ui,
+		Settings:         app.settings,
+		SessionInfo:      app.sessionMgr,
 		AppName:          app.options.AppName,
-		Display:          app.Display,
+		Display:          app.display,
 		AgentDir:         app.options.AgentDir,
-		SessionFile:      func() string { return app.Session.SessionFile() },
+		SessionFile:      func() string { return app.session.SessionFile() },
 		ShowError:        func(message string) { app.showError(message) },
-		RequestRender:    func() { app.UI.RequestRender(false) },
+		RequestRender:    func() { app.ui.RequestRender(false) },
 		StopThemeWatcher: func() { StopThemeWatcher() },
 		// Upstream's fatal path calls stop(), which reads the
 		// fullscreenExitOutput setting.
@@ -451,13 +451,13 @@ func ResolveAutocompleteFdPath() string {
 // newAutocompleteWiring assembles the AutocompleteWiring (port of the corresponding InteractiveMode wiring).
 func newAutocompleteWiring(app *App) *AutocompleteWiring {
 	return &AutocompleteWiring{
-		Session:        app.Session,
-		Settings:       app.Settings,
-		SessionInfo:    app.SessionMgr,
-		UI:             app.UI,
-		DefaultEditor:  app.DefaultEditor,
-		Editor:         app.DefaultEditor,
+		Session:        app.session,
+		Settings:       app.settings,
+		SessionInfo:    app.sessionMgr,
+		UI:             app.ui,
+		DefaultEditor:  app.defaultEditor,
+		Editor:         app.defaultEditor,
 		FdPath:         ResolveAutocompleteFdPath(),
-		LoginProviders: func() []AuthSelectorProvider { return app.Auth.GetLoginProviderOptions("") },
+		LoginProviders: func() []AuthSelectorProvider { return app.auth.GetLoginProviderOptions("") },
 		Skills:         app.skillCommands}
 }

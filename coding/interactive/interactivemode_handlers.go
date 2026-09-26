@@ -475,8 +475,8 @@ var pasteQueue = offloop.New()
 // newKeyWiring assembles the KeyWiring (port of the corresponding InteractiveMode wiring).
 func newKeyWiring(app *App) *KeyWiring {
 	wiring := &KeyWiring{
-		Session: app.Session,
-		Editor:  app.DefaultEditor,
+		Session: app.session,
+		Editor:  app.defaultEditor,
 		OnPasteImage: func() {
 			// Upstream handleClipboardPaste pastes a clipboard image first and
 			// falls back to text; image transports are out of scope (D41
@@ -490,91 +490,91 @@ func newKeyWiring(app *App) *KeyWiring {
 				if err != nil || text == "" {
 					return
 				}
-				app.UI.Post(func() {
-					app.DefaultEditor.InsertTextAtCursor(text)
-					app.UI.RequestRender(false)
+				app.ui.Post(func() {
+					app.defaultEditor.InsertTextAtCursor(text)
+					app.ui.RequestRender(false)
 				})
 			})
 		},
-		Settings: app.Settings,
-		UI:       app.UI,
-		Queue:    app.Queue,
-		OnExit:   func() { app.Lifecycle.Shutdown(false) },
+		Settings: app.settings,
+		UI:       app.ui,
+		Queue:    app.queue,
+		OnExit:   func() { app.lifecycle.Shutdown(false) },
 		OnSuspend: func() {
-			app.Lifecycle.HandleCtrlZ(func(message string) { app.Transcript.ShowStatus(message) }, nil)
+			app.lifecycle.HandleCtrlZ(func(message string) { app.transcript.ShowStatus(message) }, nil)
 		},
-		OnThinkingCycle:      func() { app.Queue.CycleThinkingLevel() },
-		OnModelCycleForward:  func() { _, _ = app.Queue.CycleModel(context.Background(), "forward") },
-		OnModelCycleBackward: func() { _, _ = app.Queue.CycleModel(context.Background(), "backward") },
-		OnModelSelect:        func() { app.Models.ShowModelSelector(context.Background(), "") },
+		OnThinkingCycle:      func() { app.queue.CycleThinkingLevel() },
+		OnModelCycleForward:  func() { _, _ = app.queue.CycleModel(context.Background(), "forward") },
+		OnModelCycleBackward: func() { _, _ = app.queue.CycleModel(context.Background(), "backward") },
+		OnModelSelect:        func() { app.models.ShowModelSelector(context.Background(), "") },
 		OnToolsExpand: func() {
-			expanded := app.Display.ToolOutputExpanded
-			app.Queue.ToggleToolOutputExpansion(&expanded, func(value bool) {
-				app.Queue.SetToolsExpanded(value, &app.Display.ToolOutputExpanded, app.UIState.BuiltInHeader, app.LoadedResourcesContainer)
+			expanded := app.display.ToolOutputExpanded
+			app.queue.ToggleToolOutputExpansion(&expanded, func(value bool) {
+				app.queue.SetToolsExpanded(value, &app.display.ToolOutputExpanded, app.uiState.BuiltInHeader, app.loadedResourcesContainer)
 			})
 		},
 		// ctrl+shift+e: hand the prompt to $EDITOR. The editor owns the terminal
 		// while it runs, so the TUI is stopped and restarted around it
 		// (upstream handleOpenExternalEditor).
 		OnExternalEditor: func() {
-			content := app.DefaultEditor.GetText()
-			app.UI.Stop(tui.TuiStopOptions{})
+			content := app.defaultEditor.GetText()
+			app.ui.Stop(tui.TuiStopOptions{})
 			result := EditInExternalEditor(ExternalEditorOptions{
-				Command: app.Settings.GetExternalEditorCommand(),
+				Command: app.settings.GetExternalEditorCommand(),
 				Content: content,
 			})
-			app.UI.Start()
+			app.ui.Start()
 			if result.Status == "complete" {
-				app.DefaultEditor.SetText(result.Content)
+				app.defaultEditor.SetText(result.Content)
 			}
-			app.UI.RequestRender(true)
+			app.ui.RequestRender(true)
 		},
 		OnThinkingToggle: func() {
 			// Pass the live display flag, not a copy: it is what the next toggle
 			// reads, so a copy left it stale and the second press re-derived the
 			// same state — the setting stuck after one press.
-			app.Queue.ToggleThinkingBlockVisibility(&app.Display.HideThinkingBlock)
+			app.queue.ToggleThinkingBlockVisibility(&app.display.HideThinkingBlock)
 		},
-		OnFollowUp:      func() { app.Queue.HandleFollowUp(context.Background()) },
-		OnDequeue:       app.Queue.HandleDequeue,
-		OnSessionTree:   func() { app.Selectors.ShowTreeSelector(context.Background(), "", false) },
-		OnSessionFork:   func() { app.Selectors.ShowUserMessageSelector(context.Background()) },
-		OnSessionResume: app.Sessions.ShowSessionSelector,
+		OnFollowUp:      func() { app.queue.HandleFollowUp(context.Background()) },
+		OnDequeue:       app.queue.HandleDequeue,
+		OnSessionTree:   func() { app.selectors.ShowTreeSelector(context.Background(), "", false) },
+		OnSessionFork:   func() { app.selectors.ShowUserMessageSelector(context.Background()) },
+		OnSessionResume: app.sessions.ShowSessionSelector,
 		OnSessionNew: func() {
-			if _, err := app.SessionNew(context.Background()); err != nil {
+			if _, err := app.sessionNew(context.Background()); err != nil {
 				app.showWarning(err.Error())
 			}
 		},
-		ShowTreeSelector:        func() { app.Selectors.ShowTreeSelector(context.Background(), "", false) },
-		ShowUserMessageSelector: func() { app.Selectors.ShowUserMessageSelector(context.Background()) },
+		ShowTreeSelector:        func() { app.selectors.ShowTreeSelector(context.Background(), "", false) },
+		ShowUserMessageSelector: func() { app.selectors.ShowUserMessageSelector(context.Background()) },
 	}
-	wiring.OnClear = func() { app.Lifecycle.HandleCtrlC(func() { app.DefaultEditor.SetText("") }) }
+	wiring.OnClear = func() { app.lifecycle.HandleCtrlC(func() { app.defaultEditor.SetText("") }) }
 	return wiring
 }
 
 // newSubmitWiring assembles the SubmitWiring (port of the corresponding InteractiveMode wiring).
 func newSubmitWiring(app *App) *SubmitWiring {
 	return &SubmitWiring{
-		Editor:        app.DefaultEditor,
-		Session:       app.Session,
-		Settings:      app.Settings,
-		Queue:         app.Queue,
-		OnInput:       app.Startup.QueueUserInput,
-		ShowStatus:    func(message string) { app.Transcript.ShowStatus(message) },
+		Editor:        app.defaultEditor,
+		Session:       app.session,
+		Settings:      app.settings,
+		Queue:         app.queue,
+		OnInput:       app.startup.QueueUserInput,
+		ShowStatus:    func(message string) { app.transcript.ShowStatus(message) },
 		ShowWarning:   func(message string) { app.showWarning(message) },
-		RequestRender: func() { app.UI.RequestRender(false) },
+		RequestRender: func() { app.ui.RequestRender(false) },
 		Handlers: SubmitHandlers{
-			ShowSettingsSelector: app.SettingsW.ShowSettingsSelector,
-			ShowModelsSelector:   func() error { app.Models.ShowModelsSelector(context.Background()); return nil },
+			ShowSettingsSelector: app.settingsW.ShowSettingsSelector,
+			ShowModelsSelector:   func() error { app.models.ShowModelsSelector(context.Background()); return nil },
 			HandleModelCommand: func(searchTerm string) error {
-				app.Models.ShowModelSelector(context.Background(), searchTerm)
+				app.models.ShowModelSelector(context.Background(), searchTerm)
 				return nil
 			},
-			HandleThinkingCommand: app.Selectors.HandleThinkingCommand,
-			HandleExportCommand:   func(text string) error { app.Commands.HandleExportCommand(context.Background(), text); return nil },
-			HandleImportCommand:   func(text string) error { app.Commands.HandleImportCommand(context.Background(), text); return nil },
-			HandleCopyCommand:     func() error { app.Commands.HandleCopyCommand(false, false); return nil },
-			HandleNameCommand:     app.Commands.HandleNameCommand,
+			HandleThinkingCommand: app.selectors.HandleThinkingCommand,
+			HandleExportCommand:   func(text string) error { app.commands.HandleExportCommand(context.Background(), text); return nil },
+			HandleImportCommand:   func(text string) error { app.commands.HandleImportCommand(context.Background(), text); return nil },
+			HandleCopyCommand:     func() error { app.commands.HandleCopyCommand(false, false); return nil },
+			HandleNameCommand:     app.commands.HandleNameCommand,
 			// `!command` from the editor. Upstream emits a user_bash extension event
 			// first; extension mechanics are out of scope (D41), so the built-in
 			// execution is the whole path. The command deliberately runs off the UI
@@ -583,26 +583,26 @@ func newSubmitWiring(app *App) *SubmitWiring {
 			// this goroutine.
 			HandleBashCommand: func(command string, excludeFromContext bool) error {
 				app.runDetached(func(ctx context.Context) error {
-					component := NewBashExecutionComponent(command, app.UI, excludeFromContext)
-					deferred := app.Session.IsStreaming()
-					app.UI.Post(func() {
+					component := NewBashExecutionComponent(command, app.ui, excludeFromContext)
+					deferred := app.session.IsStreaming()
+					app.ui.Post(func() {
 						if deferred {
-							app.Queue.PendingBash = append(app.Queue.PendingBash, component)
-							app.PendingMessages.AddChild(component)
+							app.queue.PendingBash = append(app.queue.PendingBash, component)
+							app.pendingMessages.AddChild(component)
 						} else {
-							app.Chat.AddChild(component)
+							app.chat.AddChild(component)
 						}
-						app.UI.RequestRender(false)
+						app.ui.RequestRender(false)
 					})
 
-					result, err := app.Session.ExecuteBash(ctx, command, func(chunk string) {
-						app.UI.Post(func() {
+					result, err := app.session.ExecuteBash(ctx, command, func(chunk string) {
+						app.ui.Post(func() {
 							component.AppendOutput(chunk)
-							app.UI.RequestRender(false)
+							app.ui.RequestRender(false)
 						})
 					}, &coding.ExecuteBashOptions{ExcludeFromContext: excludeFromContext})
 					if err != nil {
-						app.UI.Post(func() {
+						app.ui.Post(func() {
 							component.SetComplete(nil, false, nil, "")
 							app.showError("Bash command failed: " + err.Error())
 						})
@@ -613,36 +613,36 @@ func newSubmitWiring(app *App) *SubmitWiring {
 					if result.Truncated {
 						truncation = &coding.TruncationResult{Truncated: true, Content: result.Output}
 					}
-					app.UI.Post(func() {
+					app.ui.Post(func() {
 						// ExecuteBash recorded the result itself (upstream executeBash
 						// calls recordBashResult), which is what puts it in the
 						// transcript's replay and keeps the `!!` form out of the model's
 						// context. Recording it here as well wrote every `!` run to the
 						// session twice, and a reopened session rendered it twice.
 						component.SetComplete(result.ExitCode, result.Cancelled, truncation, result.FullOutputPath)
-						app.UI.RequestRender(false)
+						app.ui.RequestRender(false)
 					})
 					return nil
 				})
 				return nil
 			},
-			HandleSessionCommand:    func() { app.Commands.HandleSessionCommand(time.Now().UnixMilli()) },
-			HandleHotkeysCommand:    app.Commands.HandleHotkeysCommand,
-			ShowUserMessageSelector: func() { app.Selectors.ShowUserMessageSelector(context.Background()) },
-			ShowTreeSelector:        func() { app.Selectors.ShowTreeSelector(context.Background(), "", false) },
-			ShowTrustSelector:       app.Selectors.ShowTrustSelector,
+			HandleSessionCommand:    func() { app.commands.HandleSessionCommand(time.Now().UnixMilli()) },
+			HandleHotkeysCommand:    app.commands.HandleHotkeysCommand,
+			ShowUserMessageSelector: func() { app.selectors.ShowUserMessageSelector(context.Background()) },
+			ShowTreeSelector:        func() { app.selectors.ShowTreeSelector(context.Background(), "", false) },
+			ShowTrustSelector:       app.selectors.ShowTrustSelector,
 			HandleLoginCommand: func(providerRef string) error {
-				app.Auth.HandleLoginCommand(context.Background(), providerRef)
+				app.auth.HandleLoginCommand(context.Background(), providerRef)
 				return nil
 			},
-			ShowOAuthSelector:  func(mode string) { app.Auth.ShowOAuthSelector(context.Background(), mode) },
-			HandleClearCommand: func() error { app.Commands.HandleClearCommand(context.Background()); return nil },
+			ShowOAuthSelector:  func(mode string) { app.auth.ShowOAuthSelector(context.Background(), mode) },
+			HandleClearCommand: func() error { app.commands.HandleClearCommand(context.Background()); return nil },
 			// `/clone` duplicates the session at the current position, through the
 			// runtime fork (upstream handleCloneCommand).
 			HandleCloneCommand: func() error {
-				leafID := app.SessionMgr.GetLeafID()
+				leafID := app.sessionMgr.GetLeafID()
 				if leafID == nil || *leafID == "" {
-					app.Transcript.ShowStatus("Nothing to clone yet")
+					app.transcript.ShowStatus("Nothing to clone yet")
 					return nil
 				}
 				result, err := app.forkAtEntry(context.Background(), *leafID, true)
@@ -651,10 +651,10 @@ func newSubmitWiring(app *App) *SubmitWiring {
 					return err
 				}
 				if result != nil && result.Cancelled {
-					app.UI.RequestRender(false)
+					app.ui.RequestRender(false)
 					return nil
 				}
-				app.Transcript.ShowStatus("Cloned to new session")
+				app.transcript.ShowStatus("Cloned to new session")
 				return nil
 			},
 			HandleCompactCommand: func(instructions string) error {
@@ -664,19 +664,19 @@ func newSubmitWiring(app *App) *SubmitWiring {
 				// active run and compacts immediately, while a queued work item
 				// would leave a mid-run /compact inert until the turn finished
 				// on its own.
-				app.Commands.ClearCompactionStatus()
+				app.commands.ClearCompactionStatus()
 				app.runDetached(func(ctx context.Context) error {
-					app.Commands.CompactSession(ctx, instructions)
+					app.commands.CompactSession(ctx, instructions)
 					return nil
 				})
 				return nil
 			},
-			HandleReloadCommand:  func() error { app.Commands.HandleReloadCommand(); return nil },
+			HandleReloadCommand:  func() error { app.commands.HandleReloadCommand(); return nil },
 			HandleDebugCommand:   app.runDebugCommand,
-			HandleArminSaysHi:    func() { app.Commands.HandleArminSaysHi(app.UI, time.Now().UnixNano()) },
-			HandleDementedDelves: app.Commands.HandleDementedDelves,
-			ShowSessionSelector:  app.Sessions.ShowSessionSelector,
-			Shutdown:             func() error { app.Lifecycle.Shutdown(false); return nil },
+			HandleArminSaysHi:    func() { app.commands.HandleArminSaysHi(app.ui, time.Now().UnixNano()) },
+			HandleDementedDelves: app.commands.HandleDementedDelves,
+			ShowSessionSelector:  app.sessions.ShowSessionSelector,
+			Shutdown:             func() error { app.lifecycle.Shutdown(false); return nil },
 		},
 	}
 }

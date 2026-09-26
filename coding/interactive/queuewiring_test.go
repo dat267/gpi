@@ -10,8 +10,8 @@ import (
 // transcriptTexts collects the chat's text components, which is where a status
 // line lands (upstream showStatus appends a dim line to the chat container).
 func transcriptTexts(app *App) []string {
-	texts := make([]string, 0, len(app.Chat.Children))
-	for _, child := range app.Chat.Children {
+	texts := make([]string, 0, len(app.chat.Children))
+	for _, child := range app.chat.Children {
 		if text, ok := child.(*tui.Text); ok {
 			texts = append(texts, text.Text())
 		}
@@ -36,13 +36,13 @@ func TestQueueStatusReportersAreWired(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
 
-	if app.Queue.ShowStatus == nil {
+	if app.queue.ShowStatus == nil {
 		t.Error("the queue has no status reporter, so its statuses are silent")
 	}
-	if app.Queue.ShowError == nil {
+	if app.queue.ShowError == nil {
 		t.Error("the queue has no error reporter, so its failures are silent")
 	}
-	if app.Queue.ShowWarning == nil {
+	if app.queue.ShowWarning == nil {
 		t.Error("the queue has no warning reporter")
 	}
 }
@@ -54,7 +54,7 @@ func TestThinkingToggleEmitsTheStatus(t *testing.T) {
 	defer cleanup()
 
 	wiring := newKeyWiring(app)
-	if app.Settings.GetHideThinkingBlock() {
+	if app.settings.GetHideThinkingBlock() {
 		t.Fatal("the test app should start with thinking blocks visible")
 	}
 

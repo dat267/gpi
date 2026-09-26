@@ -10,7 +10,7 @@ import "github.com/dat267/pier/coding"
 // askChoose shows a titled list and reports the chosen option, or "" when the
 // dialog is dismissed.
 func (a *App) askChoose(title string, message string, options []string, onSelect func(option string)) {
-	a.Slot.Show(func(done func()) CreatedSelector {
+	a.slot.Show(func(done func()) CreatedSelector {
 		selector := NewExtensionSelectorComponent(title, options,
 			func(option string) {
 				done()
@@ -24,7 +24,7 @@ func (a *App) askChoose(title string, message string, options []string, onSelect
 					onSelect("")
 				}
 			},
-			ExtensionSelectorOptions{Description: message, Tui: a.UI},
+			ExtensionSelectorOptions{Description: message, Tui: a.ui},
 		)
 		return CreatedSelector{Component: selector, Focus: selector}
 	})

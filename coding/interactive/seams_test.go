@@ -23,9 +23,9 @@ func TestDebugKeyRunsTheDebugCommand(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
 
-	screen, ok := tuiConcrete(app.UI).(*tui.MainScreen)
+	screen, ok := tuiConcrete(app.ui).(*tui.MainScreen)
 	if !ok {
-		t.Fatalf("renderer = %T", tuiConcrete(app.UI))
+		t.Fatalf("renderer = %T", tuiConcrete(app.ui))
 	}
 	if screen.MatchesDebugKey == nil || screen.OnDebug == nil {
 		t.Fatal("the renderer's debug key is not wired")

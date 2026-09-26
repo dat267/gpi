@@ -24,7 +24,7 @@ func BenchmarkScrollLongTranscript(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		app.UI.RenderNow(true)
+		app.ui.RenderNow(true)
 	}
 }
 
@@ -38,11 +38,11 @@ func BenchmarkScrollWarmDiff(b *testing.B) {
 	screen.Start()
 	screen.DisableAutoRender()
 	buildScrollTranscript(b, app)
-	app.UI.RenderNow(false) // warm every cache
+	app.ui.RenderNow(false) // warm every cache
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		app.UI.RenderNow(false)
+		app.ui.RenderNow(false)
 	}
 }
 
@@ -55,7 +55,7 @@ func buildScrollTranscript(b *testing.B, app *App) {
 func buildScrollTranscriptN(tb testing.TB, app *App, n int) {
 	tb.Helper()
 	for i := 0; i < n; i++ {
-		app.Events.HandleEvent(&coding.SessionEvent{
+		app.events.HandleEvent(&coding.SessionEvent{
 			Type: coding.SessionMessageStart,
 			Agent: agentEvent("message_start", &ai.UserMessage{
 				Content: ai.StringOrBlocks{Text: fmt.Sprintf("user message %d with some reasonably long text that wraps across lines in the terminal viewport", i)},
@@ -65,10 +65,10 @@ func buildScrollTranscriptN(tb testing.TB, app *App, n int) {
 			API: ai.APIAnthropicMessages, Provider: "test", Model: "m",
 			Content: ai.ContentList{ai.TextContent{Text: fmt.Sprintf("# assistant reply %d\n\n```go\nfunc f%d() int { return %d }\n```\n\nsome paragraph with **bold** and `code` spans that wraps quite a bit as well to fill lines\n", i, i, i)}},
 		}
-		app.Events.HandleEvent(&coding.SessionEvent{
+		app.events.HandleEvent(&coding.SessionEvent{
 			Type: coding.SessionMessageStart, Agent: agentEvent("message_start", assistant),
 		})
-		app.Events.HandleEvent(&coding.SessionEvent{
+		app.events.HandleEvent(&coding.SessionEvent{
 			Type: coding.SessionMessageEnd, Agent: agentEvent("message_end", assistant),
 		})
 	}
@@ -138,7 +138,7 @@ func newTestAppB(tb testing.TB) (*App, func()) {
 	})
 	app.Init(context.Background())
 	return app, func() {
-		app.Lifecycle.UnregisterSignalHandlers()
+		app.lifecycle.UnregisterSignalHandlers()
 		tui.SetKeybindings(previous)
 	}
 }

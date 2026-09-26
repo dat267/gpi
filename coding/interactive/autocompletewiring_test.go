@@ -117,8 +117,8 @@ func TestAppAutocompleteCompletesAtMentions(t *testing.T) {
 	}
 
 	// The boot path installs the provider.
-	app.Autocomplete.SetupAutocompleteProvider()
-	provider := app.Autocomplete.Provider()
+	app.autocomplete.SetupAutocompleteProvider()
+	provider := app.autocomplete.Provider()
 	if provider == nil {
 		t.Fatal("the app installed no autocomplete provider")
 	}

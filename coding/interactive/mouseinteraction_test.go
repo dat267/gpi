@@ -27,19 +27,19 @@ func TestMouseMotionBurstDoesNotRepaint(t *testing.T) {
 	defer stop()
 
 	// Let the startup paints settle so the burst is what gets measured.
-	waitForConditionWithin(t, func() bool { return app.UI.RenderCount() > 0 }, 6*time.Second)
+	waitForConditionWithin(t, func() bool { return app.ui.RenderCount() > 0 }, 6*time.Second)
 	time.Sleep(50 * time.Millisecond)
 
 	beforeText := editorText(app)
-	before := app.UI.RenderCount()
+	before := app.ui.RenderCount()
 
 	// SGR 35 = 32 (motion) + 3 (no button held): the report a bare pointer
 	// movement produces.
 	move := "\x1b[<35;50;8M"
 	for i := 0; i < 60; i++ {
-		app.PostTerminalInput(move)
+		app.postTerminalInput(move)
 	}
-	app.PostTerminalInput("z")
+	app.postTerminalInput("z")
 	expected := beforeText + "z"
 	waitForConditionWithin(t, func() bool {
 		return strings.Contains(editorText(app), expected)
@@ -47,7 +47,7 @@ func TestMouseMotionBurstDoesNotRepaint(t *testing.T) {
 
 	// 60 moves + 1 keystroke: the keystroke's own frame, plus room for a hover
 	// transition and a coalesced tick. One paint per chunk was ~61 frames.
-	paints := app.UI.RenderCount() - before
+	paints := app.ui.RenderCount() - before
 	t.Logf("60 mouse moves + 1 keystroke: %d paints", paints)
 	if paints > 6 {
 		t.Fatalf("60 mouse moves + 1 keystroke caused %d paints, want at most 6", paints)
@@ -73,7 +73,7 @@ func TestAnimationScanCacheIsDroppedByAPaint(t *testing.T) {
 		t.Fatal("idle arm armed an animation timer")
 	}
 
-	app.UIState.ShowStatusIndicator(NewCompactionStatusIndicator(app.UI, "manual"))
+	app.uiState.ShowStatusIndicator(NewCompactionStatusIndicator(app.ui, "manual"))
 	schedule.paintNow() // the paint that shows the indicator
 
 	if ch := schedule.arm(); ch == nil {

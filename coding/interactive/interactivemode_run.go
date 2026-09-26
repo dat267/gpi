@@ -854,69 +854,69 @@ func newRunWiring(app *App) *RunWiring {
 	installInputLatencyObserver(app)
 	return &RunWiring{
 		OnBeat: func() {
-			if app.Transcript.HasDeferred() {
-				app.Transcript.MaterializeDeferred(app.terminalWidth())
+			if app.transcript.HasDeferred() {
+				app.transcript.MaterializeDeferred(app.terminalWidth())
 			}
-			app.Queue.MaterializeThinkingChunk()
+			app.queue.MaterializeThinkingChunk()
 		},
 		RawTerminal:     app.rawTerminal,
 		RawInputs:       app.loopRawInputs,
-		Startup:         app.Startup,
-		Events:          app.Events,
+		Startup:         app.startup,
+		Events:          app.events,
 		SessionEvents:   app.sessionEvents.Events(),
 		PartialEvents:   app.sessionEvents.Partials(),
 		InputEvents:     app.loopInputs,
 		ResizeEvents:    app.loopResizes,
 		SignalEvents:    app.loopSignals,
-		OnSignal:        app.Lifecycle.HandleSignal,
-		UI:              app.UI,
-		Settings:        app.Settings,
-		Terminal:        app.UI.GetTerminal(),
-		HeaderContainer: app.HeaderContainer,
-		Chat:            app.Chat,
-		Display:         app.Display,
+		OnSignal:        app.lifecycle.HandleSignal,
+		UI:              app.ui,
+		Settings:        app.settings,
+		Terminal:        app.ui.GetTerminal(),
+		HeaderContainer: app.headerContainer,
+		Chat:            app.chat,
+		Display:         app.display,
 		Verbose:         app.options.Verbose,
 		AppName:         app.options.AppName,
 		Version:         app.options.Version,
 
-		SetupKeyHandlers:      app.KeySetup,
-		SetupSubmitHandler:    app.SubmitSetup,
-		RenderInitialMessages: func() { app.Transcript.RenderInitialMessages() },
-		ShowLoadedResources:   app.ShowLoadedResources,
+		SetupKeyHandlers:      app.keySetup,
+		SetupSubmitHandler:    app.submitSetup,
+		RenderInitialMessages: func() { app.transcript.RenderInitialMessages() },
+		ShowLoadedResources:   app.showLoadedResources,
 		OnThemeChange: func(callback func()) func() {
 			// The theme watcher fires on its own goroutine; deliver the change
 			// on the UI loop (stage 4).
 			OnThemeChange(func() {
-				if app.UI != nil {
-					app.UI.Post(callback)
+				if app.ui != nil {
+					app.ui.Post(callback)
 					return
 				}
 				callback()
 			})
 			return func() {}
 		},
-		OnBranchChange: func(callback func()) func() { return app.FooterData.OnBranchChange(callback) },
+		OnBranchChange: func(callback func()) func() { return app.footerData.OnBranchChange(callback) },
 		RefreshModelCatalogs: func(ctx context.Context) error {
-			_, err := RefreshModelCatalogs(ctx, app.Runtime)
+			_, err := RefreshModelCatalogs(ctx, app.runtime)
 			return err
 		},
 		CheckVersion: checkForNewVersionNotification,
-		CheckTmux:    func() string { return app.Startup.CheckTmuxKeyboardSetup(os.Getenv("TMUX") != "") },
+		CheckTmux:    func() string { return app.startup.CheckTmuxKeyboardSetup(os.Getenv("TMUX") != "") },
 		TakeCrash: func() *coding.CrashRecord {
 			return coding.TakeUnnotifiedCrash(coding.GetCrashLogPath(app.options.AgentDir), time.Now().UnixMilli())
 		},
 		StallLogPath:      stallLogPath(app.options.AgentDir),
 		StallLogThreshold: stallLogThreshold(),
 
-		Prompt:      func(ctx context.Context, text string) error { return app.Session.Prompt(ctx, text, nil) },
-		ShowStatus:  func(message string) { app.Transcript.ShowStatus(message) },
-		ShowError:   app.RunnerShowChatError,
-		ShowWarning: app.RunnerShowChatWarning,
+		Prompt:      func(ctx context.Context, text string) error { return app.session.Prompt(ctx, text, nil) },
+		ShowStatus:  func(message string) { app.transcript.ShowStatus(message) },
+		ShowError:   app.runnerShowChatError,
+		ShowWarning: app.runnerShowChatWarning,
 		WarnAnthropic: func(ctx context.Context) {
-			app.Startup.MaybeWarnAboutAnthropicSubscriptionAuth(ctx, app.Session.Model())
+			app.startup.MaybeWarnAboutAnthropicSubscriptionAuth(ctx, app.session.Model())
 		},
-		RequestRender: func() { app.UI.RequestRender(false) },
-		OnStarted:     func() { app.Theme.ProbeTerminalBackground() },
+		RequestRender: func() { app.ui.RequestRender(false) },
+		OnStarted:     func() { app.theme.ProbeTerminalBackground() },
 	}
 }
 

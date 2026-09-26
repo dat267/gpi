@@ -20,31 +20,31 @@ func TestAppComposition(t *testing.T) {
 	defer cleanup()
 
 	app.Init(context.Background())
-	if len(app.UI.GetMountedRoots()) == 0 {
+	if len(app.ui.GetMountedRoots()) == 0 {
 		t.Fatal("no mounted roots")
 	}
-	if app.UI.GetFocusedComponent() != app.DefaultEditor {
+	if app.ui.GetFocusedComponent() != app.defaultEditor {
 		t.Fatal("editor not focused")
 	}
-	if !app.Lifecycle.IsInitialized() {
+	if !app.lifecycle.IsInitialized() {
 		t.Fatal("lifecycle not marked initialized")
 	}
 
 	// A slash command routes through the submit handler into the chat. The
 	// session panel is built off the loop and posted back to it (D159), so the
 	// test plays the loop until it lands.
-	app.Submit.HandleSubmit(context.Background(), "/session")
+	app.submit.HandleSubmit(context.Background(), "/session")
 	waitForConditionWithin(t, func() bool {
-		app.UI.RenderNow(true)
+		app.ui.RenderNow(true)
 		return strings.Contains(renderAppChat(app), "Session")
 	}, 5*time.Second)
 
 	// The key wiring installs the editor escape/action handlers.
-	app.Key.SetupKeyHandlers(func() int64 { return time.Now().UnixMilli() })
-	if app.DefaultEditor.OnEscape == nil {
+	app.key.SetupKeyHandlers(func() int64 { return time.Now().UnixMilli() })
+	if app.defaultEditor.OnEscape == nil {
 		t.Fatal("escape handler not installed")
 	}
-	if len(app.DefaultEditor.ActionHandlers) == 0 {
+	if len(app.defaultEditor.ActionHandlers) == 0 {
 		t.Fatal("action handlers not installed")
 	}
 }
@@ -62,14 +62,14 @@ func TestAppEndToEndLoop(t *testing.T) {
 		app.Run(ctx)
 	}()
 
-	waitForConditionWithin(t, func() bool { return app.Lifecycle.IsInitialized() }, 6*time.Second)
-	app.Startup.QueueUserInput("hello from the smoke test")
+	waitForConditionWithin(t, func() bool { return app.lifecycle.IsInitialized() }, 6*time.Second)
+	app.startup.QueueUserInput("hello from the smoke test")
 
 	// The loop forwards the input to the session; with no model the prompt
 	// errors, but the user message is recorded before the model call.
 	waitForConditionWithin(t, func() bool {
 		var sawUser, sawAssistant bool
-		for _, message := range app.Session.Messages() {
+		for _, message := range app.session.Messages() {
 			switch typed := message.(type) {
 			case *ai.UserMessage:
 				if ai.ContentText(typed.Content, "") == "hello from the smoke test" {
@@ -170,7 +170,7 @@ func newTestApp(t *testing.T) (*App, func()) {
 	disableAutoRenderForTest(app)
 
 	cleanup := func() {
-		app.Lifecycle.UnregisterSignalHandlers()
+		app.lifecycle.UnregisterSignalHandlers()
 		tui.SetKeybindings(previous)
 	}
 	return app, cleanup
@@ -209,8 +209,8 @@ func waitForConditionWithin(t *testing.T, condition func() bool, timeout time.Du
 // paints and the test renders directly.
 func renderAppChat(app *App) string {
 	done := make(chan []string, 1)
-	app.UI.Post(func() {
-		lines := app.Chat.Render(80)
+	app.ui.Post(func() {
+		lines := app.chat.Render(80)
 		select {
 		case done <- lines:
 		default:
@@ -221,7 +221,7 @@ func renderAppChat(app *App) string {
 		return coding.StripAnsi(strings.Join(lines, "\n"))
 	case <-time.After(200 * time.Millisecond):
 		// No loop consumer: render from the test goroutine.
-		lines := app.Chat.Render(80)
+		lines := app.chat.Render(80)
 		return coding.StripAnsi(strings.Join(lines, "\n"))
 	}
 }
@@ -238,53 +238,53 @@ func TestAppWiringCompleteness(t *testing.T) {
 		name string
 		set  bool
 	}{
-		{"Commands.WriteDebugLog", app.Commands.WriteDebugLog != nil},
-		{"Commands.CopyToClipboard", app.Commands.CopyToClipboard != nil},
-		{"Commands.ReloadNow", app.Commands.ReloadNow != nil},
-		{"Commands.ApplyReloadedSettings", app.Commands.ApplyReloadedSettings != nil},
-		{"Commands.ExportToHTML", app.Commands.ExportToHTML != nil},
-		{"Commands.MarkdownTheme", app.Commands.MarkdownTheme != nil},
-		{"Commands.RunDetached", app.Commands.RunDetached != nil},
-		{"Autocomplete.Skills", app.Autocomplete.Skills != nil},
-		{"Autocomplete.LoginProviders", app.Autocomplete.LoginProviders != nil},
-		{"Runner.ShowLoadedResources", app.Runner.ShowLoadedResources != nil},
-		{"Runner.OnSignal", app.Runner.OnSignal != nil},
-		{"Runner.Prompt", app.Runner.Prompt != nil},
-		{"Runner.RefreshModelCatalogs", app.Runner.RefreshModelCatalogs != nil},
-		{"Runner.CheckVersion", app.Runner.CheckVersion != nil},
-		{"Runner.TakeCrash", app.Runner.TakeCrash != nil},
-		{"Runner.ShowError", app.Runner.ShowError != nil},
-		{"Runner.RequestRender", app.Runner.RequestRender != nil},
-		{"Runner.SetupKeyHandlers", app.Runner.SetupKeyHandlers != nil},
-		{"Runner.SetupSubmitHandler", app.Runner.SetupSubmitHandler != nil},
-		{"Key.OnToolsExpand", app.Key.OnToolsExpand != nil},
-		{"Key.OnFollowUp", app.Key.OnFollowUp != nil},
-		{"Key.OnDequeue", app.Key.OnDequeue != nil},
-		{"Key.OnPasteImage", app.Key.OnPasteImage != nil},
-		{"Key.OnModelSelect", app.Key.OnModelSelect != nil},
-		{"Key.OnSessionTree", app.Key.OnSessionTree != nil},
-		{"Key.OnExit", app.Key.OnExit != nil},
-		{"Submit.Handlers.HandleDebugCommand", app.Submit.Handlers.HandleDebugCommand != nil},
-		{"Submit.Handlers.HandleReloadCommand", app.Submit.Handlers.HandleReloadCommand != nil},
-		{"Submit.Handlers.HandleCompactCommand", app.Submit.Handlers.HandleCompactCommand != nil},
-		{"Submit.Handlers.HandleExportCommand", app.Submit.Handlers.HandleExportCommand != nil},
-		{"Submit.Handlers.HandleHotkeysCommand", app.Submit.Handlers.HandleHotkeysCommand != nil},
-		{"Submit.Handlers.ShowTrustSelector", app.Submit.Handlers.ShowTrustSelector != nil},
-		{"Submit.Handlers.Shutdown", app.Submit.Handlers.Shutdown != nil},
-		{"Trust.Stop", app.Trust.Stop != nil},
-		{"Startup.RenderInitialMessages", app.Startup.RenderInitialMessages != nil},
-		{"Transcript.RenderProjectTrustWarning", app.Transcript.RenderProjectTrustWarning != nil},
-		{"Startup.ShowError", app.Startup.ShowError != nil},
-		{"Startup.ShowStatus", app.Startup.ShowStatus != nil},
-		{"Startup.RequestRender", app.Startup.RequestRender != nil},
-		{"Selectors.ShowError", app.Selectors.ShowError != nil},
-		{"Selectors.RebuildChat", app.Selectors.RebuildChat != nil},
-		{"Selectors.SetNavigatedEditorText", app.Selectors.SetNavigatedEditorText != nil},
-		{"Selectors.FlushCompactionQueue", app.Selectors.FlushCompactionQueue != nil},
-		{"SettingsW.RequestRender", app.SettingsW.RequestRender != nil},
-		{"Models.ShowError", app.Models.ShowError != nil},
-		{"Sessions.Shutdown", app.Sessions.Shutdown != nil},
-		{"Auth.ShowError", app.Auth.ShowError != nil},
+		{"Commands.WriteDebugLog", app.commands.WriteDebugLog != nil},
+		{"Commands.CopyToClipboard", app.commands.CopyToClipboard != nil},
+		{"Commands.ReloadNow", app.commands.ReloadNow != nil},
+		{"Commands.ApplyReloadedSettings", app.commands.ApplyReloadedSettings != nil},
+		{"Commands.ExportToHTML", app.commands.ExportToHTML != nil},
+		{"Commands.MarkdownTheme", app.commands.MarkdownTheme != nil},
+		{"Commands.RunDetached", app.commands.RunDetached != nil},
+		{"Autocomplete.Skills", app.autocomplete.Skills != nil},
+		{"Autocomplete.LoginProviders", app.autocomplete.LoginProviders != nil},
+		{"Runner.ShowLoadedResources", app.runner.ShowLoadedResources != nil},
+		{"Runner.OnSignal", app.runner.OnSignal != nil},
+		{"Runner.Prompt", app.runner.Prompt != nil},
+		{"Runner.RefreshModelCatalogs", app.runner.RefreshModelCatalogs != nil},
+		{"Runner.CheckVersion", app.runner.CheckVersion != nil},
+		{"Runner.TakeCrash", app.runner.TakeCrash != nil},
+		{"Runner.ShowError", app.runner.ShowError != nil},
+		{"Runner.RequestRender", app.runner.RequestRender != nil},
+		{"Runner.SetupKeyHandlers", app.runner.SetupKeyHandlers != nil},
+		{"Runner.SetupSubmitHandler", app.runner.SetupSubmitHandler != nil},
+		{"Key.OnToolsExpand", app.key.OnToolsExpand != nil},
+		{"Key.OnFollowUp", app.key.OnFollowUp != nil},
+		{"Key.OnDequeue", app.key.OnDequeue != nil},
+		{"Key.OnPasteImage", app.key.OnPasteImage != nil},
+		{"Key.OnModelSelect", app.key.OnModelSelect != nil},
+		{"Key.OnSessionTree", app.key.OnSessionTree != nil},
+		{"Key.OnExit", app.key.OnExit != nil},
+		{"Submit.Handlers.HandleDebugCommand", app.submit.Handlers.HandleDebugCommand != nil},
+		{"Submit.Handlers.HandleReloadCommand", app.submit.Handlers.HandleReloadCommand != nil},
+		{"Submit.Handlers.HandleCompactCommand", app.submit.Handlers.HandleCompactCommand != nil},
+		{"Submit.Handlers.HandleExportCommand", app.submit.Handlers.HandleExportCommand != nil},
+		{"Submit.Handlers.HandleHotkeysCommand", app.submit.Handlers.HandleHotkeysCommand != nil},
+		{"Submit.Handlers.ShowTrustSelector", app.submit.Handlers.ShowTrustSelector != nil},
+		{"Submit.Handlers.Shutdown", app.submit.Handlers.Shutdown != nil},
+		{"Trust.Stop", app.trust.Stop != nil},
+		{"Startup.RenderInitialMessages", app.startup.RenderInitialMessages != nil},
+		{"Transcript.RenderProjectTrustWarning", app.transcript.RenderProjectTrustWarning != nil},
+		{"Startup.ShowError", app.startup.ShowError != nil},
+		{"Startup.ShowStatus", app.startup.ShowStatus != nil},
+		{"Startup.RequestRender", app.startup.RequestRender != nil},
+		{"Selectors.ShowError", app.selectors.ShowError != nil},
+		{"Selectors.RebuildChat", app.selectors.RebuildChat != nil},
+		{"Selectors.SetNavigatedEditorText", app.selectors.SetNavigatedEditorText != nil},
+		{"Selectors.FlushCompactionQueue", app.selectors.FlushCompactionQueue != nil},
+		{"SettingsW.RequestRender", app.settingsW.RequestRender != nil},
+		{"Models.ShowError", app.models.ShowError != nil},
+		{"Sessions.Shutdown", app.sessions.Shutdown != nil},
+		{"Auth.ShowError", app.auth.ShowError != nil},
 	}
 	for _, check := range required {
 		if !check.set {
@@ -300,21 +300,21 @@ func TestNavigatedEditorTextKeepsDrafts(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
 
-	app.Selectors.SetNavigatedEditorText("from the tree")
-	if got := app.DefaultEditor.GetText(); got != "from the tree" {
+	app.selectors.SetNavigatedEditorText("from the tree")
+	if got := app.defaultEditor.GetText(); got != "from the tree" {
 		t.Errorf("editor text = %q", got)
 	}
 
-	app.DefaultEditor.SetText("my draft")
-	app.Selectors.SetNavigatedEditorText("another point")
-	if got := app.DefaultEditor.GetText(); got != "my draft" {
+	app.defaultEditor.SetText("my draft")
+	app.selectors.SetNavigatedEditorText("another point")
+	if got := app.defaultEditor.GetText(); got != "my draft" {
 		t.Errorf("a draft was overwritten: %q", got)
 	}
 
 	// Whitespace-only counts as empty, as upstream's trim() does.
-	app.DefaultEditor.SetText("   ")
-	app.Selectors.SetNavigatedEditorText("third point")
-	if got := app.DefaultEditor.GetText(); got != "third point" {
+	app.defaultEditor.SetText("   ")
+	app.selectors.SetNavigatedEditorText("third point")
+	if got := app.defaultEditor.GetText(); got != "third point" {
 		t.Errorf("whitespace-only editor = %q", got)
 	}
 }
@@ -328,23 +328,23 @@ func TestRenderInitialMessagesWarnsAboutUntrustedProject(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
 
-	cwd := app.SessionMgr.GetCwd()
+	cwd := app.sessionMgr.GetCwd()
 	configDir := filepath.Join(cwd, coding.ConfigDirName, "skills")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	// SettingsManagerCreateOptions.ProjectTrusted defaults to true.
-	app.Settings.SetProjectTrusted(false)
-	if app.Settings.IsProjectTrusted() {
+	app.settings.SetProjectTrusted(false)
+	if app.settings.IsProjectTrusted() {
 		t.Fatal("the test project should be untrusted")
 	}
 	if !coding.HasTrustRequiringProjectResources(cwd) {
 		t.Fatalf("expected %s to require trust", configDir)
 	}
 
-	app.Chat.Clear()
-	app.Transcript.RenderInitialMessages()
-	rendered := strings.Join(renderChat(t, app.Chat), "\n")
+	app.chat.Clear()
+	app.transcript.RenderInitialMessages()
+	rendered := strings.Join(renderChat(t, app.chat), "\n")
 	if !strings.Contains(rendered, "This project is not trusted") {
 		t.Errorf("the trust warning is missing from the transcript:\n%s", rendered)
 	}

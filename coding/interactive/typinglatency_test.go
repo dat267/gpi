@@ -18,7 +18,7 @@ import (
 func loopEditorText(t *testing.T, app *App) string {
 	t.Helper()
 	done := make(chan string, 1)
-	app.UI.Post(func() { done <- app.DefaultEditor.GetText() })
+	app.ui.Post(func() { done <- app.defaultEditor.GetText() })
 	select {
 	case text := <-done:
 		return text
@@ -45,11 +45,11 @@ func typeProbe(t *testing.T, app *App, probe string) []keystrokeSample {
 	for _, char := range probe {
 		before := loopEditorText(t, app)
 		expected := before + string(char)
-		renders := app.UI.RenderCount()
-		beats := app.LoopBeats()
+		renders := app.ui.RenderCount()
+		beats := app.loopBeats()
 
 		start := time.Now()
-		app.PostTerminalInput(string(char))
+		app.postTerminalInput(string(char))
 		deadline := time.Now().Add(5 * time.Second)
 		for loopEditorText(t, app) != expected {
 			if time.Now().After(deadline) {
@@ -58,7 +58,7 @@ func typeProbe(t *testing.T, app *App, probe string) []keystrokeSample {
 		}
 		samples = append(samples, keystrokeSample{
 			char: char, latency: time.Since(start),
-			renders: app.UI.RenderCount() - renders, beats: app.LoopBeats() - beats,
+			renders: app.ui.RenderCount() - renders, beats: app.loopBeats() - beats,
 			editorLen: len(expected),
 		})
 		time.Sleep(15 * time.Millisecond)
@@ -154,7 +154,7 @@ func (s *slowTerminal) Write(data string) {
 func onLoop(t *testing.T, app *App, fn func()) {
 	t.Helper()
 	done := make(chan struct{})
-	app.UI.Post(func() {
+	app.ui.Post(func() {
 		defer close(done)
 		fn()
 	})
@@ -208,7 +208,7 @@ func TestTypingLatencyDuringToolCall(t *testing.T) {
 
 	// A transcript with history, so the paint has real work to do.
 	for i := 0; i < 120; i++ {
-		app.Events.HandleEvent(&coding.SessionEvent{
+		app.events.HandleEvent(&coding.SessionEvent{
 			Type: coding.SessionMessageStart,
 			Agent: agentEvent("message_start", &ai.UserMessage{
 				Content: ai.StringOrBlocks{Text: fmt.Sprintf("user message %d with enough text to wrap across a couple of terminal lines", i)},
@@ -218,8 +218,8 @@ func TestTypingLatencyDuringToolCall(t *testing.T) {
 			API: ai.APIAnthropicMessages, Provider: "test", Model: "m",
 			Content: ai.ContentList{ai.TextContent{Text: fmt.Sprintf("reply %d\n\n```go\nfunc f%d() int { return %d }\n```\n", i, i, i)}},
 		}
-		app.Events.HandleEvent(&coding.SessionEvent{Type: coding.SessionMessageStart, Agent: agentEvent("message_start", assistant)})
-		app.Events.HandleEvent(&coding.SessionEvent{Type: coding.SessionMessageEnd, Agent: agentEvent("message_end", assistant)})
+		app.events.HandleEvent(&coding.SessionEvent{Type: coding.SessionMessageStart, Agent: agentEvent("message_start", assistant)})
+		app.events.HandleEvent(&coding.SessionEvent{Type: coding.SessionMessageEnd, Agent: agentEvent("message_end", assistant)})
 	}
 
 	stop := startLoopApp(t, app)
@@ -247,14 +247,14 @@ func TestTypingLatencyDuringToolCall(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 
 	// Output expanded: the component restyles its whole tail window per update.
-	onLoop(t, app, func() { app.Display.ToolOutputExpanded = true })
+	onLoop(t, app, func() { app.display.ToolOutputExpanded = true })
 	stopExpanded := streamToolOutput(app, 20000, 60, coding.BashUpdateThrottleMS)
 	time.Sleep(30 * time.Millisecond)
 	if w := logSamples(t, "streaming-expanded", typeProbe(t, app, "qzw")); w > worst {
 		worst = w
 	}
 	stopExpanded()
-	onLoop(t, app, func() { app.Display.ToolOutputExpanded = false })
+	onLoop(t, app, func() { app.display.ToolOutputExpanded = false })
 	time.Sleep(30 * time.Millisecond)
 
 	// A slow terminal: frame writes happen on the loop, so their cost is input

@@ -574,7 +574,7 @@ only as the code comment that introduced them. The range is **D1–D166**.
   applied by a `OnTerminalBackgroundColorChange` listener on the loop. The
   `CSI ? 2031` color-scheme notification toggle is likewise deferred: a request
   before `Start` only flips the flag and `Start` replays it, so the mode sequence
-  is never echoed. `App.Theme.ProbeTerminalBackground` is invoked from
+  is never echoed. `app.theme.ProbeTerminalBackground` is invoked from
   `RunWiring.OnStarted` (after `UI.Start`, i.e. raw mode + live reader) and
   re-armed on a renderer swap (`RebindTUI`). A terminal that does not answer
   leaves the `COLORFGBG`/fallback theme in place; nothing blocks on the reply.

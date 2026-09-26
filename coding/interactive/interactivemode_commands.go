@@ -741,30 +741,30 @@ var errNotAvailable = errors.New("not available")
 // newCommandWiring assembles the CommandWiring (port of the corresponding InteractiveMode wiring).
 func newCommandWiring(app *App) *CommandWiring {
 	return &CommandWiring{
-		Chat:                 app.Chat,
-		UI:                   app.UI,
-		Settings:             app.Settings,
+		Chat:                 app.chat,
+		UI:                   app.ui,
+		Settings:             app.settings,
 		Session:              app.commandSession(),
-		SessionInfo:          app.SessionMgr,
+		SessionInfo:          app.sessionMgr,
 		AppName:              app.options.AppName,
 		Platform:             app.options.Platform,
-		ShowStatus:           func(message string) { app.Transcript.ShowStatus(message) },
+		ShowStatus:           func(message string) { app.transcript.ShowStatus(message) },
 		ShowError:            func(message string) { app.showError(message) },
 		ShowWarning:          func(message string) { app.showWarning(message) },
-		RequestRender:        func() { app.UI.RequestRender(false) },
-		ClearStatusIndicator: func() { app.UIState.ClearStatusIndicator("", false) },
+		RequestRender:        func() { app.ui.RequestRender(false) },
+		ClearStatusIndicator: func() { app.uiState.ClearStatusIndicator("", false) },
 		MarkdownTheme:        func() tui.MarkdownTheme { return *app.markdownTheme() },
 		ModelDefaultNotice: func() (string, bool) {
-			result := app.Session.LastModelDefaultSync()
+			result := app.session.LastModelDefaultSync()
 			return result.Message, result.Warning
 		},
 		ExportToHTML: func(outputPath string) (string, error) {
-			themeSetting := app.Settings.GetThemeSetting()
+			themeSetting := app.settings.GetThemeSetting()
 			themeName := ""
 			if themeSetting != nil {
 				themeName = *themeSetting
 			}
-			return app.Session.ExportSessionToHTML(outputPath, themeName)
+			return app.session.ExportSessionToHTML(outputPath, themeName)
 		},
 
 		CopyToClipboard: func(text string) (bool, string) {
@@ -776,13 +776,13 @@ func newCommandWiring(app *App) *CommandWiring {
 				if err == nil {
 					return
 				}
-				app.UI.Post(func() { app.showError(err.Error()) })
+				app.ui.Post(func() { app.showError(err.Error()) })
 			})
 			return true, ""
 		},
 		WriteDebugLog:   WriteDebugLogFile,
-		EditorContainer: app.EditorContainer,
-		Editor:          app.DefaultEditor,
+		EditorContainer: app.editorContainer,
+		Editor:          app.defaultEditor,
 		// `/new` starts a fresh session. The seam was never assigned, so the
 		// command cleared the editor and returned without a word; the keybinding
 		// (app.session.new) already used this implementation.
@@ -804,7 +804,7 @@ func newCommandWiring(app *App) *CommandWiring {
 			return result.Cancelled, nil
 		},
 		NewSession: func(ctx context.Context) (bool, error) {
-			result, err := app.SessionNew(ctx)
+			result, err := app.sessionNew(ctx)
 			if err != nil {
 				return false, err
 			}
@@ -818,10 +818,10 @@ func newCommandWiring(app *App) *CommandWiring {
 			// re-read, queue modes, resource files and the system prompt (the
 			// extension runner is out of scope, D41), keybindings, and implicit
 			// project trust.
-			app.Session.Reload()
-			app.Keybindings.Reload()
-			savedTrust := app.Trust.MaybeSaveImplicitProjectTrustAfterReload(app.AutoTrustOnReloadCwd)
-			return app.Session.ModelRuntime().GetError(), savedTrust, nil
+			app.session.Reload()
+			app.keybindings.Reload()
+			savedTrust := app.trust.MaybeSaveImplicitProjectTrustAfterReload(app.autoTrustOnReloadCwd)
+			return app.session.ModelRuntime().GetError(), savedTrust, nil
 		},
 		ApplyReloadedSettings: app.applyReloadedSettings}
 }

@@ -239,11 +239,11 @@ func formatSkillDiagnostics(diagnostics []coding.ResourceDiagnostic) string {
 
 // ShowLoadedResources renders the loaded-resource sections into the container
 // (upstream showLoadedResources). force bypasses the quiet-startup gate.
-func (a *App) ShowLoadedResources(force bool) {
-	if a == nil || a.LoadedResourcesContainer == nil {
+func (a *App) showLoadedResources(force bool) {
+	if a == nil || a.loadedResourcesContainer == nil {
 		return
 	}
-	a.LoadedResourcesContainer.Clear()
+	a.loadedResourcesContainer.Clear()
 
 	showListing := force || a.options.Verbose || !a.options.QuietStartup
 	if !showListing {
@@ -252,21 +252,21 @@ func (a *App) ShowLoadedResources(force bool) {
 
 	theme := ActiveTheme()
 	sectionHeader := func(name string) string { return theme.Fg("mdHeading", "["+name+"]") }
-	expanded := a.options.Verbose || a.Display.ToolOutputExpanded
+	expanded := a.options.Verbose || a.display.ToolOutputExpanded
 	addLoadedSection := func(name string, collapsed string, expandedBody string) {
-		a.LoadedResourcesContainer.AddChild(NewExpandableText(
+		a.loadedResourcesContainer.AddChild(NewExpandableText(
 			func() string { return sectionHeader(name) + "\n" + collapsed },
 			func() string { return sectionHeader(name) + "\n" + expandedBody },
 			expanded, 0, 0,
 		))
-		a.LoadedResourcesContainer.AddChild(tui.NewSpacer(1))
+		a.loadedResourcesContainer.AddChild(tui.NewSpacer(1))
 	}
 
 	// The Context section lists the loaded prompt files first, then the
 	// context files (upstream spreads getSystemPromptSource and
 	// getAppendSystemPromptSources ahead of the agents files).
-	contextFiles := a.Session.ContextFiles()
-	promptSources := a.Session.PromptSourcePaths()
+	contextFiles := a.session.ContextFiles()
+	promptSources := a.session.PromptSourcePaths()
 	if len(contextFiles) > 0 || len(promptSources) > 0 {
 		cwd := a.options.Cwd
 		paths := make([]string, 0, len(promptSources)+len(contextFiles))
@@ -282,11 +282,11 @@ func (a *App) ShowLoadedResources(force bool) {
 		}
 		// Context is the first section and keeps discovery order (upstream
 		// {sort:false} and its leading spacer).
-		a.LoadedResourcesContainer.AddChild(tui.NewSpacer(1))
+		a.loadedResourcesContainer.AddChild(tui.NewSpacer(1))
 		addLoadedSection("Context", formatCompactListSorted(paths, false), strings.Join(expandedPaths, "\n"))
 	}
 
-	skills := a.Session.Skills()
+	skills := a.session.Skills()
 	if len(skills) > 0 {
 		items := make([]scopeGroupItem, 0, len(skills))
 		names := make([]string, 0, len(skills))
@@ -301,7 +301,7 @@ func (a *App) ShowLoadedResources(force bool) {
 		addLoadedSection("Skills", formatCompactList(names), expandedBody)
 	}
 
-	templates := a.Session.PromptTemplates()
+	templates := a.session.PromptTemplates()
 	if len(templates) > 0 {
 		byPath := map[string]coding.PromptTemplate{}
 		items := make([]scopeGroupItem, 0, len(templates))
@@ -324,10 +324,10 @@ func (a *App) ShowLoadedResources(force bool) {
 		addLoadedSection("Prompts", formatCompactList(labels), expandedBody)
 	}
 
-	diagnostics := a.Session.SkillDiagnostics()
+	diagnostics := a.session.SkillDiagnostics()
 	if len(diagnostics) > 0 {
-		a.LoadedResourcesContainer.AddChild(tui.NewText(
+		a.loadedResourcesContainer.AddChild(tui.NewText(
 			theme.Fg("warning", "[Skill conflicts]")+"\n"+formatSkillDiagnostics(diagnostics), 0, 0, nil))
-		a.LoadedResourcesContainer.AddChild(tui.NewSpacer(1))
+		a.loadedResourcesContainer.AddChild(tui.NewSpacer(1))
 	}
 }

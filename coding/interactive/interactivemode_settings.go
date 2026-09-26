@@ -434,28 +434,28 @@ func newSettingsWiring(app *App) *SettingsWiring {
 		// Turning clear-on-shrink off drops a stale idle status line (upstream
 		// clears the status container when no indicator is active).
 		ClearStatusContainerIfIdle: func() {
-			if app.UIState != nil {
-				app.UIState.ClearStatusContainerIfIdle()
+			if app.uiState != nil {
+				app.uiState.ClearStatusContainerIfIdle()
 			}
 		},
 		// The scrollbar row's side effect: the transcript's scroll view follows the
 		// setting, the same way a reload applies it.
 		ApplyFullscreenScrollbarSetting: func() { app.applyFullscreenScrollbarSetting() },
-		Slot:                            app.Slot,
-		Settings:                        app.Settings,
-		Session:                         app.Session,
-		ThemeController:                 themeSettingsControllerAdapter{app.Theme},
-		UI:                              app.UI,
-		Chat:                            app.Chat,
-		DefaultEditor:                   app.DefaultEditor,
-		Editor:                          app.DefaultEditor,
-		Renderer:                        app.UI,
+		Slot:                            app.slot,
+		Settings:                        app.settings,
+		Session:                         app.session,
+		ThemeController:                 themeSettingsControllerAdapter{app.theme},
+		UI:                              app.ui,
+		Chat:                            app.chat,
+		DefaultEditor:                   app.defaultEditor,
+		Editor:                          app.defaultEditor,
+		Renderer:                        app.ui,
 		UpdateThinkingBlockVisibility:   func(hidden bool) { app.updateThinkingBlockVisibility(hidden) },
-		RebuildChatFromMessages:         func() { app.Startup.RebuildChatFromMessages() },
+		RebuildChatFromMessages:         func() { app.startup.RebuildChatFromMessages() },
 		UpdateEditorBorderColor:         func() { app.updateEditorBorderColor() },
-		SetupAutocompleteProvider:       func() { app.Autocomplete.SetupAutocompleteProvider() },
-		SwitchTuiMode:                   func(mode string) bool { return app.Lifecycle.SwitchTuiMode(mode, true, true) },
-		ShowStatus:                      func(message string) { app.Transcript.ShowStatus(message) },
-		RequestRender:                   func() { app.UI.RequestRender(false) },
+		SetupAutocompleteProvider:       func() { app.autocomplete.SetupAutocompleteProvider() },
+		SwitchTuiMode:                   func(mode string) bool { return app.lifecycle.SwitchTuiMode(mode, true, true) },
+		ShowStatus:                      func(message string) { app.transcript.ShowStatus(message) },
+		RequestRender:                   func() { app.ui.RequestRender(false) },
 	}
 }

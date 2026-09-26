@@ -13,7 +13,7 @@ import (
 
 // bashComponentIn returns the transcript's bash component, if any.
 func bashComponentIn(app *App) *BashExecutionComponent {
-	for _, child := range app.Chat.Children {
+	for _, child := range app.chat.Children {
 		if component, ok := child.(*BashExecutionComponent); ok {
 			return component
 		}
@@ -27,7 +27,7 @@ func pumpUntilBashOutput(t *testing.T, app *App, want string) *BashExecutionComp
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		app.UI.RenderNow(true)
+		app.ui.RenderNow(true)
 		component := bashComponentIn(app)
 		if component != nil && strings.Contains(component.GetOutput(), want) {
 			return component
@@ -45,7 +45,7 @@ func pumpUntilBashOutput(t *testing.T, app *App, want string) *BashExecutionComp
 // recordedBashMessage returns the session's bash-execution message, decoded.
 func recordedBashMessage(t *testing.T, app *App) (command, output string, excludeFromContext bool) {
 	t.Helper()
-	for _, message := range app.Session.Agent.State().Messages {
+	for _, message := range app.session.Agent.State().Messages {
 		custom, ok := message.(*ai.CustomMessage)
 		if !ok || custom.Role != coding.RoleBashExecution {
 			continue
@@ -70,7 +70,7 @@ func pumpUntilRecorded(t *testing.T, app *App, want string) (command, output str
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		app.UI.RenderNow(true)
+		app.ui.RenderNow(true)
 		if command, output, exclude = recordedBashMessage(t, app); command == want {
 			return command, output, exclude
 		}
@@ -151,14 +151,14 @@ func waitForBashExitCode(t *testing.T, app *App, marker string) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		app.UI.RenderNow(true)
+		app.ui.RenderNow(true)
 		if component := bashComponentIn(app); component != nil {
 			if rendered := strings.Join(component.Render(80), "\n"); strings.Contains(rendered, marker) {
 				return
 			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the component never showed %q; children = %d", marker, len(app.Chat.Children))
+			t.Fatalf("the component never showed %q; children = %d", marker, len(app.chat.Children))
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -169,7 +169,7 @@ func waitForBashExitCode(t *testing.T, app *App, marker string) {
 func countBashExecutionEntries(t *testing.T, app *App) int {
 	t.Helper()
 	count := 0
-	for _, entry := range app.Session.Sessions.GetEntries() {
+	for _, entry := range app.session.Sessions.GetEntries() {
 		if len(entry.Message) == 0 {
 			continue
 		}
@@ -245,10 +245,10 @@ func TestNewCommandStartsASession(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
 
-	before := app.SessionMgr.GetSessionID()
-	app.Commands.HandleClearCommand(context.Background())
+	before := app.sessionMgr.GetSessionID()
+	app.commands.HandleClearCommand(context.Background())
 
-	if after := app.SessionMgr.GetSessionID(); after == before {
+	if after := app.sessionMgr.GetSessionID(); after == before {
 		t.Errorf("session id unchanged (%q)", after)
 	}
 	found := false

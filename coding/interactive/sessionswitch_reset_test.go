@@ -19,40 +19,40 @@ func TestSwitchSessionResetsTheTranscriptState(t *testing.T) {
 	defer cleanup()
 
 	// State a previous session left behind.
-	app.LoadedResourcesContainer.AddChild(tui.NewText("old skill", 0, 0, nil))
-	app.PendingMessages.AddChild(tui.NewText("queued while compacting", 0, 0, nil))
-	app.Transcript.StreamingComponent = NewAssistantMessageComponent(
+	app.loadedResourcesContainer.AddChild(tui.NewText("old skill", 0, 0, nil))
+	app.pendingMessages.AddChild(tui.NewText("queued while compacting", 0, 0, nil))
+	app.transcript.StreamingComponent = NewAssistantMessageComponent(
 		&ai.AssistantMessage{Content: ai.ContentList{ai.TextContent{Text: "half"}}},
-		false, app.Transcript.MarkdownTheme, "", 1, nil)
-	app.Transcript.pendingTools["stale"] = &ToolExecutionComponent{}
-	app.Queue.compactionQueuedMessages = []CompactionQueuedMessage{{Text: "queued for compaction", Mode: "steer"}}
+		false, app.transcript.MarkdownTheme, "", 1, nil)
+	app.transcript.pendingTools["stale"] = &ToolExecutionComponent{}
+	app.queue.compactionQueuedMessages = []CompactionQueuedMessage{{Text: "queued for compaction", Mode: "steer"}}
 
 	project := makeTrustRequiringProject(t, "alpha-theme")
 	target := makePersistedSession(t, project, "from the other project")
 
-	if _, err := app.SwitchSession(context.Background(), target.GetSessionFile(), ""); err != nil {
+	if _, err := app.switchSession(context.Background(), target.GetSessionFile(), ""); err != nil {
 		t.Fatalf("SwitchSession: %v", err)
 	}
 
-	if len(app.LoadedResourcesContainer.Children) != 0 {
-		t.Errorf("loaded resources kept %d children", len(app.LoadedResourcesContainer.Children))
+	if len(app.loadedResourcesContainer.Children) != 0 {
+		t.Errorf("loaded resources kept %d children", len(app.loadedResourcesContainer.Children))
 	}
-	if len(app.PendingMessages.Children) != 0 {
-		t.Errorf("pending messages kept %d children", len(app.PendingMessages.Children))
+	if len(app.pendingMessages.Children) != 0 {
+		t.Errorf("pending messages kept %d children", len(app.pendingMessages.Children))
 	}
-	if app.Transcript.StreamingComponent != nil {
+	if app.transcript.StreamingComponent != nil {
 		t.Error("the streaming component survived the switch")
 	}
-	if len(app.Queue.compactionQueuedMessages) != 0 {
-		t.Errorf("compaction queue survived the switch: %v", app.Queue.compactionQueuedMessages)
+	if len(app.queue.compactionQueuedMessages) != 0 {
+		t.Errorf("compaction queue survived the switch: %v", app.queue.compactionQueuedMessages)
 	}
-	if len(app.Transcript.pendingTools) != 0 {
-		t.Errorf("pending tools survived the switch: %v", app.Transcript.pendingTools)
+	if len(app.transcript.pendingTools) != 0 {
+		t.Errorf("pending tools survived the switch: %v", app.transcript.pendingTools)
 	}
 
 	// The untrusted project's warning comes back with the initial render — the
 	// switch re-resolved trust for that directory (D160).
-	rendered := app.Chat.Render(120)
+	rendered := app.chat.Render(120)
 	if !strings.Contains(strings.Join(rendered, "\n"), "This project is not trusted") {
 		t.Errorf("no trust warning after switching into an untrusted project:\n%s", strings.Join(rendered, "\n"))
 	}

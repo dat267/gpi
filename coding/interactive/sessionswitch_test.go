@@ -34,33 +34,33 @@ func TestSwitchSessionSwapsAndRebinds(t *testing.T) {
 	targetCwd := t.TempDir()
 	target := makePersistedSession(t, targetCwd, "from the other session")
 
-	result, err := app.SwitchSession(context.Background(), target.GetSessionFile(), "")
+	result, err := app.switchSession(context.Background(), target.GetSessionFile(), "")
 	if err != nil {
 		t.Fatalf("SwitchSession: %v", err)
 	}
 	if result == nil || result.Cancelled {
 		t.Fatalf("switch cancelled: %+v", result)
 	}
-	if app.SessionMgr.GetSessionID() != target.GetSessionID() {
-		t.Fatalf("app session manager id %s, want %s", app.SessionMgr.GetSessionID(), target.GetSessionID())
+	if app.sessionMgr.GetSessionID() != target.GetSessionID() {
+		t.Fatalf("app session manager id %s, want %s", app.sessionMgr.GetSessionID(), target.GetSessionID())
 	}
 	// The AppSession adapter is shared by every wiring; the embedded agent
 	// session must follow the swap.
-	if app.Session.AgentSession.SessionID() != target.GetSessionID() {
-		t.Fatalf("app session id %s, want %s", app.Session.AgentSession.SessionID(), target.GetSessionID())
+	if app.session.AgentSession.SessionID() != target.GetSessionID() {
+		t.Fatalf("app session id %s, want %s", app.session.AgentSession.SessionID(), target.GetSessionID())
 	}
 	// The session-info holders must all point at the new manager.
 	for _, info := range []*coding.SessionManager{
-		app.Sessions.SessionInfo, app.Commands.SessionInfo, app.Events.SessionInfo,
-		app.Startup.SessionInfo, app.Selectors.SessionInfo, app.Trust.SessionInfo,
-		app.Autocomplete.SessionInfo, app.Transcript.SessionInfo,
+		app.sessions.SessionInfo, app.commands.SessionInfo, app.events.SessionInfo,
+		app.startup.SessionInfo, app.selectors.SessionInfo, app.trust.SessionInfo,
+		app.autocomplete.SessionInfo, app.transcript.SessionInfo,
 	} {
 		if info.GetSessionID() != target.GetSessionID() {
 			t.Fatalf("wiring still holds session %s, want %s", info.GetSessionID(), target.GetSessionID())
 		}
 	}
 	// The transcript was rebuilt from the new session.
-	if len(app.Chat.Children) == 0 {
+	if len(app.chat.Children) == 0 {
 		t.Fatal("chat is empty after switching to a session with messages")
 	}
 	// The event pump is re-attached to the new session.
@@ -80,7 +80,7 @@ func TestSwitchSessionMissingCwdIsPromptable(t *testing.T) {
 		t.Fatalf("remove cwd: %v", err)
 	}
 
-	_, err := app.SwitchSession(context.Background(), target.GetSessionFile(), "")
+	_, err := app.switchSession(context.Background(), target.GetSessionFile(), "")
 	if err == nil {
 		t.Fatal("expected an error for a missing session cwd")
 	}
@@ -106,24 +106,24 @@ func TestSessionNewStartsFreshSession(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
 
-	previous := app.SessionMgr.GetSessionID()
-	result, err := app.SessionNew(context.Background())
+	previous := app.sessionMgr.GetSessionID()
+	result, err := app.sessionNew(context.Background())
 	if err != nil {
 		t.Fatalf("SessionNew: %v", err)
 	}
 	if result == nil || result.Cancelled {
 		t.Fatalf("new session cancelled: %+v", result)
 	}
-	if app.SessionMgr.GetSessionID() == previous {
+	if app.sessionMgr.GetSessionID() == previous {
 		t.Fatal("session id did not change")
 	}
-	if app.Session.SessionID() != app.SessionMgr.GetSessionID() {
+	if app.session.SessionID() != app.sessionMgr.GetSessionID() {
 		t.Fatalf("app session id %s does not match the manager %s",
-			app.Session.AgentSession.SessionID(), app.SessionMgr.GetSessionID())
+			app.session.AgentSession.SessionID(), app.sessionMgr.GetSessionID())
 	}
-	if len(app.Chat.Children) != 0 {
+	if len(app.chat.Children) != 0 {
 		t.Fatalf("chat should be empty for a fresh session, got %d children",
-			len(app.Chat.Children))
+			len(app.chat.Children))
 	}
 }
 
@@ -135,10 +135,10 @@ func TestSwitchSessionUpdatesFooterCwd(t *testing.T) {
 	targetCwd := t.TempDir()
 	target := makePersistedSession(t, targetCwd, "other project")
 
-	if _, err := app.SwitchSession(context.Background(), target.GetSessionFile(), ""); err != nil {
+	if _, err := app.switchSession(context.Background(), target.GetSessionFile(), ""); err != nil {
 		t.Fatalf("SwitchSession: %v", err)
 	}
-	if app.FooterData.Cwd() != targetCwd {
-		t.Fatalf("footer cwd %s, want %s", app.FooterData.Cwd(), targetCwd)
+	if app.footerData.Cwd() != targetCwd {
+		t.Fatalf("footer cwd %s, want %s", app.footerData.Cwd(), targetCwd)
 	}
 }

@@ -117,60 +117,60 @@ type App struct {
 	// trust-requiring resources, so a later reload can save trust for a
 	// project that gained them mid-session. Upstream also gates on the
 	// --trust CLI override, which the port does not have.
-	AutoTrustOnReloadCwd string
+	autoTrustOnReloadCwd string
 	options              AppOptions
 
 	// initialUI is the renderer created at composition time; the lifecycle
 	// swaps it on /tui switches and the exit replay.
 	initialUI tui.TUI
 
-	UI          tui.TUI
-	Theme       *InteractiveThemeController
-	Settings    *coding.SettingsManager
-	Session     *AppSession
-	SessionMgr  *coding.SessionManager
-	Runtime     *coding.ModelRuntime
-	Keybindings *AppKeybindingsManager
+	ui          tui.TUI
+	theme       *InteractiveThemeController
+	settings    *coding.SettingsManager
+	session     *AppSession
+	sessionMgr  *coding.SessionManager
+	runtime     *coding.ModelRuntime
+	keybindings *AppKeybindingsManager
 
-	HeaderContainer          *tui.Container
-	LoadedResourcesContainer *tui.Container
-	DocumentContainer        *tui.Container
-	Chat                     *tui.Container
-	PendingMessages          *tui.Container
-	StatusContainer          *tui.Container
-	WidgetAbove              *tui.Container
-	WidgetBelow              *tui.Container
-	EditorContainer          *tui.Container
-	FooterContainer          *tui.Container
+	headerContainer          *tui.Container
+	loadedResourcesContainer *tui.Container
+	documentContainer        *tui.Container
+	chat                     *tui.Container
+	pendingMessages          *tui.Container
+	statusContainer          *tui.Container
+	widgetAbove              *tui.Container
+	widgetBelow              *tui.Container
+	editorContainer          *tui.Container
+	footerContainer          *tui.Container
 
-	DefaultEditor *CustomEditor
-	Footer        *FooterComponent
-	FooterData    *coding.FooterDataProvider
+	defaultEditor *CustomEditor
+	footer        *FooterComponent
+	footerData    *coding.FooterDataProvider
 	// Display is the single owner of the display options shared by the
 	// transcript, event dispatcher, run wiring, trust wiring and UI state.
-	Display    *DisplayOptions
-	UIState    *InteractiveUIState
-	Transcript *TranscriptRenderer
+	display    *DisplayOptions
+	uiState    *InteractiveUIState
+	transcript *TranscriptRenderer
 	// TranscriptScrollView is the fullscreen transcript scroll view (upstream's
 	// transcriptScrollView).
-	TranscriptScrollView *tui.ScrollView
-	Queue                *QueueController
-	Events               *EventDispatcher
-	Slot                 *SelectorSlot
+	transcriptScrollView *tui.ScrollView
+	queue                *QueueController
+	events               *EventDispatcher
+	slot                 *SelectorSlot
 
-	Lifecycle    *Lifecycle
-	Startup      *StartupWiring
-	Runner       *RunWiring
-	Key          *KeyWiring
-	Submit       *SubmitWiring
-	Selectors    *SelectorWiring
-	SettingsW    *SettingsWiring
-	Models       *ModelWiring
-	Sessions     *SessionWiring
-	Auth         *AuthWiring
-	Commands     *CommandWiring
-	Trust        *TrustCrashWiring
-	Autocomplete *AutocompleteWiring
+	lifecycle    *Lifecycle
+	startup      *StartupWiring
+	runner       *RunWiring
+	key          *KeyWiring
+	submit       *SubmitWiring
+	selectors    *SelectorWiring
+	settingsW    *SettingsWiring
+	models       *ModelWiring
+	sessions     *SessionWiring
+	auth         *AuthWiring
+	commands     *CommandWiring
+	trust        *TrustCrashWiring
+	autocomplete *AutocompleteWiring
 
 	unsubscribe func()
 	// sessionEvents is the producer→loop queue (interactivemode_eventqueue.go).
@@ -236,10 +236,10 @@ func NewApp(options AppOptions) *App {
 
 	app := &App{
 		options:     options,
-		Settings:    options.Settings,
-		SessionMgr:  options.SessionMgr,
-		Runtime:     options.Runtime,
-		Keybindings: keybindings,
+		settings:    options.Settings,
+		sessionMgr:  options.SessionMgr,
+		runtime:     options.Runtime,
+		keybindings: keybindings,
 	}
 
 	// One owner for the off-loop queues. The command passes its group so a
@@ -268,17 +268,17 @@ func NewApp(options AppOptions) *App {
 		OnRightClickPaste:      app.handleRightClickPaste,
 	})
 	app.initialUI = aInitialUI
-	app.UI = tui.NewTuiReference(func() tui.TUI {
-		if app.Lifecycle != nil {
-			if current := app.Lifecycle.CurrentUI(); current != nil {
+	app.ui = tui.NewTuiReference(func() tui.TUI {
+		if app.lifecycle != nil {
+			if current := app.lifecycle.CurrentUI(); current != nil {
 				return current
 			}
 		}
 		return app.initialUI
 	})
-	app.UI.SetClearOnShrink(options.Settings.GetClearOnShrink())
-	app.Theme = NewInteractiveThemeController(ThemeControllerOptions{
-		UI:                  themeUIAdapter{ui: app.UI},
+	app.ui.SetClearOnShrink(options.Settings.GetClearOnShrink())
+	app.theme = NewInteractiveThemeController(ThemeControllerOptions{
+		UI:                  themeUIAdapter{ui: app.ui},
 		GetSettingsManager:  func() ThemeSettings { return themeSettingsAdapter{options.Settings} },
 		ShowError:           func(message string) { app.showError(message) },
 		OnChanged:           func() { app.updateEditorBorderColor() },
@@ -289,55 +289,55 @@ func NewApp(options AppOptions) *App {
 		Env: os.Getenv,
 		// Theme loads read files from disk; the selector paths that reach the
 		// controller run on the UI loop, so they load off it.
-		Marshal:    func(fn func()) { app.UI.Post(fn) },
+		Marshal:    func(fn func()) { app.ui.Post(fn) },
 		ThemeQueue: app.offloopGroup.Queue(),
 	})
 
 	// Containers.
-	app.HeaderContainer = &tui.Container{}
-	app.LoadedResourcesContainer = &tui.Container{}
-	app.Chat = &tui.Container{}
-	app.DocumentContainer = &tui.Container{}
-	app.DocumentContainer.AddChild(app.HeaderContainer)
-	app.DocumentContainer.AddChild(app.LoadedResourcesContainer)
-	app.DocumentContainer.AddChild(app.Chat)
-	app.PendingMessages = &tui.Container{}
-	app.StatusContainer = &tui.Container{}
-	app.WidgetAbove = &tui.Container{}
-	app.WidgetBelow = &tui.Container{}
-	app.EditorContainer = &tui.Container{}
-	app.FooterContainer = &tui.Container{}
+	app.headerContainer = &tui.Container{}
+	app.loadedResourcesContainer = &tui.Container{}
+	app.chat = &tui.Container{}
+	app.documentContainer = &tui.Container{}
+	app.documentContainer.AddChild(app.headerContainer)
+	app.documentContainer.AddChild(app.loadedResourcesContainer)
+	app.documentContainer.AddChild(app.chat)
+	app.pendingMessages = &tui.Container{}
+	app.statusContainer = &tui.Container{}
+	app.widgetAbove = &tui.Container{}
+	app.widgetBelow = &tui.Container{}
+	app.editorContainer = &tui.Container{}
+	app.footerContainer = &tui.Container{}
 
 	// Editor.
-	app.DefaultEditor = NewCustomEditor(editorHostAdapter{ui: app.UI}, GetEditorTheme(), keybindings, CustomEditorOptions{
+	app.defaultEditor = NewCustomEditor(editorHostAdapter{ui: app.ui}, GetEditorTheme(), keybindings, CustomEditorOptions{
 		PaddingX:               options.Settings.GetEditorPaddingX(),
 		AutocompleteMaxVisible: options.Settings.GetAutocompleteMaxVisible(),
 		EmbedWorkingStatus:     true,
 	})
-	app.EditorContainer.AddChild(app.DefaultEditor)
+	app.editorContainer.AddChild(app.defaultEditor)
 
 	// Footer + data provider.
 	cwd := options.Cwd
 	if cwd == "" && options.SessionMgr != nil {
 		cwd = options.SessionMgr.GetCwd()
 	}
-	app.FooterData = coding.NewFooterDataProvider(cwd, coding.FooterDataProviderOptions{})
-	app.Session = &AppSession{AgentSession: options.Session}
-	app.Footer = NewFooterComponent(app.Session, app.FooterData)
-	app.Footer.SetAutoCompactEnabled(options.Session.AutoCompactionEnabled())
-	app.FooterContainer.AddChild(app.Footer)
+	app.footerData = coding.NewFooterDataProvider(cwd, coding.FooterDataProviderOptions{})
+	app.session = &AppSession{AgentSession: options.Session}
+	app.footer = NewFooterComponent(app.session, app.footerData)
+	app.footer.SetAutoCompactEnabled(options.Session.AutoCompactionEnabled())
+	app.footerContainer.AddChild(app.footer)
 
 	// Display options: one value shared by the transcript, event dispatcher,
 	// run wiring, trust wiring and UI state (see DisplayOptions). It must
 	// exist before the wirings that reference it.
-	app.Display = &DisplayOptions{
+	app.display = &DisplayOptions{
 		OutputPad:           options.Settings.GetOutputPad(),
 		HideThinkingBlock:   options.Settings.GetHideThinkingBlock(),
 		HiddenThinkingLabel: defaultHiddenThinkingLabel,
 	}
 
 	// Trust/crash helpers (used by the event dispatcher and lifecycle).
-	app.Trust = newTrustCrashWiring(app)
+	app.trust = newTrustCrashWiring(app)
 
 	// Upstream main.ts:706: capture at startup so a later /reload can save
 	// an implicitly-trusted project whose cwd gained trust-requiring
@@ -346,79 +346,79 @@ func NewApp(options AppOptions) *App {
 	if options.InitialProjectTrust != nil && options.Cwd != "" {
 		app.projectTrustByCwd[coding.CanonicalizePath(coding.ResolvePath(options.Cwd, "", coding.PathInputOptions{}))] = *options.InitialProjectTrust
 	}
-	app.AutoTrustOnReloadCwd = ""
-	if app.SessionMgr != nil && !coding.HasTrustRequiringProjectResources(app.SessionMgr.GetCwd()) {
-		app.AutoTrustOnReloadCwd = app.SessionMgr.GetCwd()
+	app.autoTrustOnReloadCwd = ""
+	if app.sessionMgr != nil && !coding.HasTrustRequiringProjectResources(app.sessionMgr.GetCwd()) {
+		app.autoTrustOnReloadCwd = app.sessionMgr.GetCwd()
 	}
 
 	// UI state + transcript.
-	app.UIState = NewInteractiveUIState(app.UI)
+	app.uiState = NewInteractiveUIState(app.ui)
 
-	app.UIState.Display = app.Display
-	app.UIState.FooterData = app.FooterData
-	app.UIState.Footer = app.Footer
-	app.UIState.StatusContainer = app.StatusContainer
-	app.UIState.ChatContainer = app.Chat
-	app.UIState.WidgetContainerAbove = app.WidgetAbove
-	app.UIState.WidgetContainerBelow = app.WidgetBelow
-	app.UIState.FooterContainer = app.FooterContainer
-	app.UIState.HeaderContainer = app.HeaderContainer
-	app.UIState.DefaultEditor = app.DefaultEditor
-	app.UIState.Editor = app.DefaultEditor
-	app.UIState.WorkingMessage = app.UIState.DefaultWorkingMessage
+	app.uiState.Display = app.display
+	app.uiState.FooterData = app.footerData
+	app.uiState.Footer = app.footer
+	app.uiState.StatusContainer = app.statusContainer
+	app.uiState.ChatContainer = app.chat
+	app.uiState.WidgetContainerAbove = app.widgetAbove
+	app.uiState.WidgetContainerBelow = app.widgetBelow
+	app.uiState.FooterContainer = app.footerContainer
+	app.uiState.HeaderContainer = app.headerContainer
+	app.uiState.DefaultEditor = app.defaultEditor
+	app.uiState.Editor = app.defaultEditor
+	app.uiState.WorkingMessage = app.uiState.DefaultWorkingMessage
 
-	app.Transcript = NewTranscriptRenderer(app.Chat, app.UI, app.Settings, app.Session, app.SessionMgr)
+	app.transcript = NewTranscriptRenderer(app.chat, app.ui, app.settings, app.session, app.sessionMgr)
 	app.prerenderQueue = app.offloopGroup.Queue()
-	app.Transcript.PrerenderQueue = app.prerenderQueue
-	app.Transcript.Footer = app.Footer
-	app.Transcript.Editor = app.DefaultEditor
-	app.Transcript.Display = app.Display
-	app.Transcript.MarkdownTheme = app.markdownTheme()
+	app.transcript.PrerenderQueue = app.prerenderQueue
+	app.transcript.Footer = app.footer
+	app.transcript.Editor = app.defaultEditor
+	app.transcript.Display = app.display
+	app.transcript.MarkdownTheme = app.markdownTheme()
 	// Upstream's renderInitialMessages draws the untrusted-project warning, so the
 	// warning appears at startup and again whenever the transcript is rebuilt.
-	if app.Trust != nil {
-		app.Transcript.RenderProjectTrustWarning = app.Trust.RenderProjectTrustWarningIfNeeded
+	if app.trust != nil {
+		app.transcript.RenderProjectTrustWarning = app.trust.RenderProjectTrustWarningIfNeeded
 	}
 
-	app.Queue = NewQueueController(app.UI, app.Session, app.Settings, app.DefaultEditor, app.Chat, app.PendingMessages)
+	app.queue = NewQueueController(app.ui, app.session, app.settings, app.defaultEditor, app.chat, app.pendingMessages)
 	// The queue reports through these functions, and an unassigned one is a silent
 	// no-op — every status it raised (thinking blocks, tool output, thinking
 	// level, queued messages) disappeared, which made ctrl+t and ctrl+o look like
 	// dead keys. Upstream's queue controller calls the mode's reporters directly.
-	app.Queue.ShowStatus = func(message string) { app.Transcript.ShowStatus(message) }
-	app.Queue.ShowError = func(message string) { app.showError(message) }
-	app.Queue.ShowWarning = func(message string) { app.showWarning(message) }
+	app.queue.ShowStatus = func(message string) { app.transcript.ShowStatus(message) }
+	app.queue.ShowError = func(message string) { app.showError(message) }
+	app.queue.ShowWarning = func(message string) { app.showWarning(message) }
 
-	app.Events = NewEventDispatcher(app.Transcript, app.UIState, app.Footer, app.Settings, app.Session, app.SessionMgr, app.DefaultEditor)
-	app.Events.ShowError = func(message string) { app.showError(message) }
-	app.Events.UpdatePendingMessagesDisplay = app.Queue.UpdatePendingMessagesDisplay
-	app.Events.Display = app.Display
-	app.Events.MarkdownTheme = app.markdownTheme()
-	app.Events.TerminalProgress = func(active bool) { terminal.SetProgress(active) }
-	app.Events.FlushCompactionQueue = func(willRetry bool) {
-		app.Queue.FlushCompactionQueue(context.Background(), willRetry)
+	app.events = NewEventDispatcher(app.transcript, app.uiState, app.footer, app.settings, app.session, app.sessionMgr, app.defaultEditor)
+	app.events.ShowError = func(message string) { app.showError(message) }
+	app.events.UpdatePendingMessagesDisplay = app.queue.UpdatePendingMessagesDisplay
+	app.events.Display = app.display
+	app.events.MarkdownTheme = app.markdownTheme()
+	app.events.TerminalProgress = func(active bool) { terminal.SetProgress(active) }
+	app.events.FlushCompactionQueue = func(willRetry bool) {
+		app.queue.FlushCompactionQueue(context.Background(), willRetry)
 	}
-	app.Events.CheckShutdownRequested = app.LifecycleCheckShutdown
-	app.Events.Init = func() { app.Transcript.RenderInitialMessages() }
+	app.events.CheckShutdownRequested = app.lifecycleCheckShutdown
+	app.events.Init = func() { app.transcript.RenderInitialMessages() }
 	// The compaction-queue flush can start a turn; run it off-loop so events
 	// keep draining while it runs.
-	app.Events.StartWork = func(fn func(context.Context) error) {
-		if app.Runner.StartWork != nil {
-			app.Runner.StartWork(fn)
+	app.events.StartWork = func(fn func(context.Context) error) {
+		if app.runner.StartWork != nil {
+			app.runner.StartWork(fn)
 			return
 		}
 		fn(context.Background())
 	}
 
-	app.Slot = NewSelectorSlot(app.UI, app.EditorContainer, app.DefaultEditor)
+	app.slot = NewSelectorSlot(app.ui, app.editorContainer, app.defaultEditor)
 
 	// Upstream initializes the widget containers with their default spacers
 	// before mounting ("renderWidgets(); // Initialize with default spacer"):
 	// the empty widgets-above container renders the blank line on top of the
 	// divider above the input box.
-	app.UIState.RenderWidgets()
+	app.uiState.RenderWidgets()
 
-	app.Lifecycle = NewLifecycle(LifecycleOptions{
+	app.lifecycle = NewLifecycle(LifecycleOptions{
 		UI: aInitialUI,
 		CreateTui: func(mode string) tui.TUI {
 			return app.newLoopTui(InteractiveTuiOptions{
@@ -430,14 +430,14 @@ func NewApp(options AppOptions) *App {
 				OnRightClickPaste:      app.handleRightClickPaste,
 			})
 		},
-		Session:      app.Session,
-		Settings:     app.Settings,
+		Session:      app.session,
+		Settings:     app.settings,
 		Terminal:     terminal,
 		TuiMode:      options.TuiMode,
 		LogDirectory: options.AgentDir,
 		AppTitle:     options.AppName,
-		SessionCwd:   func() string { return app.SessionMgr.GetCwd() },
-		SessionName:  func() string { return app.SessionMgr.GetSessionName() },
+		SessionCwd:   func() string { return app.sessionMgr.GetCwd() },
+		SessionName:  func() string { return app.sessionMgr.GetSessionName() },
 		Exit:         options.Exit,
 		WriteOut:     options.WriteOut,
 		WriteErr:     options.WriteErr,
@@ -455,9 +455,9 @@ func NewApp(options AppOptions) *App {
 		OnUncaughtException: options.OnUncaughtException,
 
 		DisableThemeAutoSync:    func() { StopThemeWatcher() },
-		OnTuiModeSwitched:       func() { app.Theme.RebindTUI() },
-		RecordCrash:             func(kind string, err error) bool { return app.Trust.RecordCrash(kind, err) },
-		CrashReportInstructions: func() string { return app.Trust.CrashReportInstructions() }, // Upstream prints "To resume this session: pi --session …" after the
+		OnTuiModeSwitched:       func() { app.theme.RebindTUI() },
+		RecordCrash:             func(kind string, err error) bool { return app.trust.RecordCrash(kind, err) },
+		CrashReportInstructions: func() string { return app.trust.CrashReportInstructions() }, // Upstream prints "To resume this session: pi --session …" after the
 		// interactive shutdown (interactive-mode.ts shutdown(), chalk.dim
 		// prefix).
 		ResumeCommand: func() string {
@@ -466,7 +466,7 @@ func NewApp(options AppOptions) *App {
 				detected := term.IsTerminal(int(os.Stdout.Fd()))
 				stdoutIsTTY = &detected
 			}
-			return FormatResumeCommand(app.SessionMgr, options.AppName, *stdoutIsTTY)
+			return FormatResumeCommand(app.sessionMgr, options.AppName, *stdoutIsTTY)
 		},
 		FormatResumeMessage: func(command string) string {
 			return "\x1b[2mTo resume this session:\x1b[22m " + command
@@ -475,32 +475,32 @@ func NewApp(options AppOptions) *App {
 		StopMode:             func(output string) { app.StopMode(output) },
 	})
 
-	app.Startup = newStartupWiring(app)
+	app.startup = newStartupWiring(app)
 	// The submission channel exists from composition so the run loop always
 	// has a consumer side to select on.
-	app.Startup.InitInputs()
+	app.startup.InitInputs()
 
 	app.sessionEvents = newSessionEventQueue()
 
-	app.Runner = newRunWiring(app)
+	app.runner = newRunWiring(app)
 
-	app.Selectors = newSelectorWiring(app)
+	app.selectors = newSelectorWiring(app)
 
-	app.SettingsW = newSettingsWiring(app)
+	app.settingsW = newSettingsWiring(app)
 
-	app.Models = newModelWiring(app)
+	app.models = newModelWiring(app)
 
-	app.Sessions = newSessionWiring(app)
+	app.sessions = newSessionWiring(app)
 
-	app.Auth = newAuthWiring(app)
+	app.auth = newAuthWiring(app)
 
-	app.Commands = newCommandWiring(app)
+	app.commands = newCommandWiring(app)
 
-	app.Key = newKeyWiring(app)
+	app.key = newKeyWiring(app)
 
-	app.Submit = newSubmitWiring(app)
+	app.submit = newSubmitWiring(app)
 
-	app.Autocomplete = newAutocompleteWiring(app)
+	app.autocomplete = newAutocompleteWiring(app)
 
 	return app
 }
@@ -508,7 +508,7 @@ func NewApp(options AppOptions) *App {
 // skillCommands converts the session's loaded skills into autocomplete slash
 // commands (upstream builds `/skill:<name>` entries from the resource loader).
 func (a *App) skillCommands() []SkillCommand {
-	skills := a.Session.Skills()
+	skills := a.session.Skills()
 	commands := make([]SkillCommand, 0, len(skills))
 	for _, skill := range skills {
 		commands = append(commands, SkillCommand{
@@ -523,45 +523,45 @@ func (a *App) Init(ctx context.Context) {
 	if a.initialized {
 		return
 	}
-	a.Lifecycle.RegisterSignalHandlers()
-	a.Theme.ApplyFromSettings()
+	a.lifecycle.RegisterSignalHandlers()
+	a.theme.ApplyFromSettings()
 	// Build the shared fullscreen layout (scrollable transcript + fixed dock)
 	// and mount it as the renderer's layout root (upstream init).
 	theme := ActiveTheme()
 	viewport := CreateChatViewport(ChatViewportOptions{
-		Document:            a.DocumentContainer,
-		PendingMessages:     a.PendingMessages,
-		Status:              a.StatusContainer,
-		WidgetsAbove:        a.WidgetAbove,
-		Editor:              a.EditorContainer,
-		WidgetsBelow:        a.WidgetBelow,
-		Footer:              a.FooterContainer,
-		Scrollbar:           tui.ScrollViewScrollbar(a.Settings.GetFullscreenScrollbar()),
+		Document:            a.documentContainer,
+		PendingMessages:     a.pendingMessages,
+		Status:              a.statusContainer,
+		WidgetsAbove:        a.widgetAbove,
+		Editor:              a.editorContainer,
+		WidgetsBelow:        a.widgetBelow,
+		Footer:              a.footerContainer,
+		Scrollbar:           tui.ScrollViewScrollbar(a.settings.GetFullscreenScrollbar()),
 		ScrollbarTrackStyle: func(text string) string { return theme.Fg("scrollbarTrack", text) },
 		ScrollbarThumbStyle: func(text string) string { return theme.Fg("scrollbarThumb", text) },
 	})
-	a.TranscriptScrollView = viewport.Transcript
-	a.Lifecycle.MountInteractiveTui(a.currentRenderer(), []tui.Component{
-		a.DocumentContainer,
-		a.PendingMessages,
-		a.StatusContainer,
-		a.WidgetAbove,
-		a.EditorContainer,
-		a.WidgetBelow,
-		a.FooterContainer,
+	a.transcriptScrollView = viewport.Transcript
+	a.lifecycle.MountInteractiveTui(a.currentRenderer(), []tui.Component{
+		a.documentContainer,
+		a.pendingMessages,
+		a.statusContainer,
+		a.widgetAbove,
+		a.editorContainer,
+		a.widgetBelow,
+		a.footerContainer,
 	}, viewport.Root)
-	a.UI.SetFocus(a.DefaultEditor)
+	a.ui.SetFocus(a.defaultEditor)
 	a.initialized = true
-	a.Lifecycle.MarkInitialized()
+	a.lifecycle.MarkInitialized()
 
 	if a.unsubscribe == nil {
 		// Pure producer: the callback only enqueues; the run loop applies the
 		// event on the UI goroutine (interactivemode_eventqueue.go).
-		a.unsubscribe = a.Session.Subscribe(func(event *coding.SessionEvent) {
+		a.unsubscribe = a.session.Subscribe(func(event *coding.SessionEvent) {
 			a.sessionEvents.enqueue(event)
 		})
 	}
-	a.Autocomplete.SetupAutocompleteProvider()
+	a.autocomplete.SetupAutocompleteProvider()
 }
 
 // applySettingsDependentUI re-applies the settings-derived state (upstream
@@ -570,22 +570,22 @@ func (a *App) Init(ctx context.Context) {
 // /reload and after a session switch re-points the settings manager at another
 // project.
 func (a *App) applySettingsDependentUI() {
-	hidden := a.Settings.GetHideThinkingBlock()
-	pad := a.Settings.GetOutputPad()
+	hidden := a.settings.GetHideThinkingBlock()
+	pad := a.settings.GetOutputPad()
 	a.updateThinkingBlockVisibility(hidden)
-	a.Display.OutputPad = pad
+	a.display.OutputPad = pad
 	a.applyFullscreenScrollbarSetting()
-	if altscreen, ok := tuiConcrete(a.UI).(*tui.AltScreen); ok {
-		altscreen.SetCopyOnSelect(a.Settings.GetFullscreenCopyOnSelect())
+	if altscreen, ok := tuiConcrete(a.ui).(*tui.AltScreen); ok {
+		altscreen.SetCopyOnSelect(a.settings.GetFullscreenCopyOnSelect())
 	}
-	a.UI.SetShowHardwareCursor(a.Settings.GetShowHardwareCursor())
-	clearOnShrink := a.Settings.GetClearOnShrink()
-	a.UI.SetClearOnShrink(clearOnShrink)
-	if !clearOnShrink && a.UIState != nil {
-		a.UIState.ClearStatusContainerIfIdle()
+	a.ui.SetShowHardwareCursor(a.settings.GetShowHardwareCursor())
+	clearOnShrink := a.settings.GetClearOnShrink()
+	a.ui.SetClearOnShrink(clearOnShrink)
+	if !clearOnShrink && a.uiState != nil {
+		a.uiState.ClearStatusContainerIfIdle()
 	}
-	a.DefaultEditor.SetPaddingX(a.Settings.GetEditorPaddingX())
-	a.DefaultEditor.SetAutocompleteMaxVisible(a.Settings.GetAutocompleteMaxVisible())
+	a.defaultEditor.SetPaddingX(a.settings.GetEditorPaddingX())
+	a.defaultEditor.SetAutocompleteMaxVisible(a.settings.GetAutocompleteMaxVisible())
 }
 
 // runContext is the active run's context (producers select on it).
@@ -606,18 +606,18 @@ func (a *App) Run(ctx context.Context) {
 	if a.sessionEvents != nil {
 		a.sessionEvents.SetContext(ctx)
 	}
-	if a.Startup != nil {
-		a.Startup.SetContext(ctx)
+	if a.startup != nil {
+		a.startup.SetContext(ctx)
 	}
 	a.Init(ctx)
 	// modeldefault (D151): the session-start sync runs during creation, so its
 	// notice is read back from the session and reported with the other startup
 	// diagnostics.
-	modelDefault := a.Session.LastModelDefaultSync()
-	a.Runner.Run(ctx, InitOptions{
-		ScopedModels:    a.Session.ScopedModels(),
+	modelDefault := a.session.LastModelDefaultSync()
+	a.runner.Run(ctx, InitOptions{
+		ScopedModels:    a.session.ScopedModels(),
 		QuietStartup:    a.options.QuietStartup,
-		RegisterSignals: func() { a.Lifecycle.RegisterSignalHandlers() },
+		RegisterSignals: func() { a.lifecycle.RegisterSignalHandlers() },
 		Mount:           func() {},
 	}, RunOptions{
 		Offline:              a.options.Offline,
@@ -641,17 +641,17 @@ func (a *App) Close() {
 	// Release producers parked on the event/input queues (the loop has
 	// stopped consuming by now).
 	a.sessionEvents.Close()
-	if a.Startup != nil {
-		a.Startup.CloseInputs()
+	if a.startup != nil {
+		a.startup.CloseInputs()
 	}
 	a.loopInputsOnce.Do(func() { close(a.loopInputsClosed) })
-	a.Footer.Dispose()
-	a.FooterData.Dispose()
+	a.footer.Dispose()
+	a.footerData.Dispose()
 	StopThemeWatcher()
 }
 
 // LifecycleCheckShutdown performs a requested shutdown.
-func (a *App) LifecycleCheckShutdown() { a.Lifecycle.CheckShutdownRequested() }
+func (a *App) lifecycleCheckShutdown() { a.lifecycle.CheckShutdownRequested() }
 
 // newLoopTui creates a renderer wired to the UI loop: terminal input and
 // resize notifications are delivered as channel messages instead of being
@@ -695,14 +695,14 @@ func (a *App) newLoopTui(options InteractiveTuiOptions) tui.TUI {
 // renderer's global debug key runs (upstream wires ui.onDebug to
 // handleDebugCommand).
 func (a *App) runDebugCommand() {
-	if a.Commands == nil {
+	if a.commands == nil {
 		return
 	}
-	a.Commands.HandleDebugCommand(time.Now().UTC().Format("2006-01-02T15:04:05.000Z"))
+	a.commands.HandleDebugCommand(time.Now().UTC().Format("2006-01-02T15:04:05.000Z"))
 }
 
 // PostTerminalInput delivers a terminal sequence to the loop (test seam).
-func (a *App) PostTerminalInput(data string) {
+func (a *App) postTerminalInput(data string) {
 	select {
 	case a.loopInputs <- data:
 	case <-a.loopInputsClosed:
@@ -710,16 +710,14 @@ func (a *App) PostTerminalInput(data string) {
 }
 
 // LoopBeats reports the run loop's watchdog beat.
-func (a *App) LoopBeats() uint64 {
-	if a.Runner == nil {
+func (a *App) loopBeats() uint64 {
+	if a.runner == nil {
 		return 0
 	}
-	return a.Runner.LoopBeats()
+	return a.runner.LoopBeats()
 }
 
 // LoopInputs/LoopResizes expose the producer channels to the run loop.
-func (a *App) LoopInputs() <-chan string    { return a.loopInputs }
-func (a *App) LoopResizes() <-chan struct{} { return a.loopResizes }
 
 // runOffLoop dispatches blocking work to the loop's work goroutine when the
 // loop is running; it reports whether the work was dispatched. Callers use the
@@ -734,7 +732,7 @@ func (a *App) LoopResizes() <-chan struct{} { return a.loopResizes }
 // have no clipboard tool or deny access); the focus is re-read after the read
 // like upstream guards against it moving.
 func (a *App) handleRightClickPaste() {
-	target := a.UI.GetFocusedComponent()
+	target := a.ui.GetFocusedComponent()
 	if target == nil {
 		return
 	}
@@ -742,7 +740,7 @@ func (a *App) handleRightClickPaste() {
 	if err != nil || text == "" {
 		return
 	}
-	if a.UI.GetFocusedComponent() != target {
+	if a.ui.GetFocusedComponent() != target {
 		return
 	}
 	handler, ok := target.(tui.InputHandler)
@@ -750,13 +748,13 @@ func (a *App) handleRightClickPaste() {
 		return
 	}
 	handler.HandleInput("\x1b[200~" + text + "\x1b[201~")
-	a.UI.RequestRender(false)
+	a.ui.RequestRender(false)
 }
 
 func (a *App) runDetached(fn func(ctx context.Context) error) {
 	ctx := context.Background()
-	if a.Runner != nil {
-		if loopCtx := a.Runner.LoopContext(); loopCtx != nil {
+	if a.runner != nil {
+		if loopCtx := a.runner.LoopContext(); loopCtx != nil {
 			ctx = loopCtx
 		}
 	}
@@ -766,8 +764,8 @@ func (a *App) runDetached(fn func(ctx context.Context) error) {
 // currentRenderer returns the concrete active renderer (upstream's
 // this.renderer); app.UI is the forwarding reference.
 func (a *App) currentRenderer() tui.TUI {
-	if a.Lifecycle != nil {
-		if current := a.Lifecycle.CurrentUI(); current != nil {
+	if a.lifecycle != nil {
+		if current := a.lifecycle.CurrentUI(); current != nil {
 			return current
 		}
 	}
@@ -778,10 +776,10 @@ func (a *App) currentRenderer() tui.TUI {
 // pre-render. It is read on the loop (the same call the screen makes when it
 // renders); a missing terminal falls back to 80.
 func (a *App) terminalWidth() int {
-	if a.UI == nil {
+	if a.ui == nil {
 		return 80
 	}
-	if terminal := a.UI.GetTerminal(); terminal != nil {
+	if terminal := a.ui.GetTerminal(); terminal != nil {
 		return terminal.Columns()
 	}
 	return 80
@@ -796,26 +794,26 @@ func (a *App) StopMode(fullscreenExitOutput string) {
 	// save; signals route through the same hook), then stop every off-loop
 	// queue the app owns — including the theme queue, which nothing used to
 	// stop.
-	if a.Settings != nil {
-		a.Settings.FlushPersists()
+	if a.settings != nil {
+		a.settings.FlushPersists()
 	}
-	if a.SessionMgr != nil {
-		a.SessionMgr.FlushWrites()
+	if a.sessionMgr != nil {
+		a.sessionMgr.FlushWrites()
 	}
 	if a.offloopGroup != nil {
 		a.offloopGroup.StopAll()
 	}
-	if a.Commands == nil {
+	if a.commands == nil {
 		// Teardown before Init finished: stop the renderer only.
-		a.Lifecycle.StopInteractiveTui(fullscreenExitOutput)
+		a.lifecycle.StopInteractiveTui(fullscreenExitOutput)
 		return
 	}
-	a.Commands.Stop(
+	a.commands.Stop(
 		fullscreenExitOutput,
-		func() { a.Slot.DisposeActiveSelector() },
-		func() { a.UIState.ClearExtensionTerminalInputListeners() },
-		func() { a.Footer.Dispose() },
-		func() { a.FooterData.Dispose() },
+		func() { a.slot.DisposeActiveSelector() },
+		func() { a.uiState.ClearExtensionTerminalInputListeners() },
+		func() { a.footer.Dispose() },
+		func() { a.footerData.Dispose() },
 		func() {
 			if a.unsubscribe != nil {
 				a.unsubscribe()
@@ -823,53 +821,53 @@ func (a *App) StopMode(fullscreenExitOutput string) {
 		},
 		func(output string) {
 			// Upstream only stops the TUI once init completed.
-			if a.Lifecycle.IsInitialized() {
-				a.Lifecycle.StopInteractiveTui(output)
+			if a.lifecycle.IsInitialized() {
+				a.lifecycle.StopInteractiveTui(output)
 			}
 		},
-		a.Lifecycle.UnregisterSignalHandlers,
+		a.lifecycle.UnregisterSignalHandlers,
 	)
 }
 
 // RunnerShowChatError appends an error line.
-func (a *App) RunnerShowChatError(message string) { a.Runner.ShowChatError(message) }
+func (a *App) runnerShowChatError(message string) { a.runner.ShowChatError(message) }
 
 // RunnerShowChatWarning appends a warning line.
-func (a *App) RunnerShowChatWarning(message string) { a.Runner.ShowChatWarning(message) }
+func (a *App) runnerShowChatWarning(message string) { a.runner.ShowChatWarning(message) }
 
 // KeySetup enables the key handlers.
-func (a *App) KeySetup() { a.Key.SetupKeyHandlers(func() int64 { return time.Now().UnixMilli() }) }
+func (a *App) keySetup() { a.key.SetupKeyHandlers(func() int64 { return time.Now().UnixMilli() }) }
 
 // SubmitSetup installs the editor submit handler.
-func (a *App) SubmitSetup() {
-	a.DefaultEditor.OnSubmit = func(text string) {
-		if a.Lifecycle.IsInitialized() {
-			a.Submit.HandleSubmit(context.Background(), text)
+func (a *App) submitSetup() {
+	a.defaultEditor.OnSubmit = func(text string) {
+		if a.lifecycle.IsInitialized() {
+			a.submit.HandleSubmit(context.Background(), text)
 		} else {
-			a.Submit.HandleStartupSubmit(text)
+			a.submit.HandleStartupSubmit(text)
 		}
 	}
 }
 
 func (a *App) showError(message string) {
-	if a.Runner != nil {
-		a.Runner.ShowChatError(message)
+	if a.runner != nil {
+		a.runner.ShowChatError(message)
 		return
 	}
-	a.Transcript.ShowStatus(message)
+	a.transcript.ShowStatus(message)
 }
 
 func (a *App) showWarning(message string) {
-	if a.Runner != nil {
-		a.Runner.ShowChatWarning(message)
+	if a.runner != nil {
+		a.runner.ShowChatWarning(message)
 		return
 	}
-	a.Transcript.ShowStatus(message)
+	a.transcript.ShowStatus(message)
 }
 
 func (a *App) updateEditorBorderColor() {
-	if a.Queue != nil {
-		a.Queue.UpdateEditorBorderColor()
+	if a.queue != nil {
+		a.queue.UpdateEditorBorderColor()
 	}
 }
 
@@ -881,32 +879,32 @@ func (a *App) updateEditorBorderColor() {
 func (a *App) applyReloadedSettings() {
 	a.applySettingsDependentUI()
 	// Upstream rebuildChatFromMessages (the reload's beforeSessionStart hook).
-	if a.Startup != nil {
-		a.Startup.RebuildChatFromMessages()
+	if a.startup != nil {
+		a.startup.RebuildChatFromMessages()
 	}
 	// Header expansion (upstream activeHeader.setExpanded).
-	if a.UIState != nil {
-		if expandable, ok := IsExpandable(a.UIState.BuiltInHeader); ok {
-			expandable.SetExpanded(a.Display.ToolOutputExpanded)
+	if a.uiState != nil {
+		if expandable, ok := IsExpandable(a.uiState.BuiltInHeader); ok {
+			expandable.SetExpanded(a.display.ToolOutputExpanded)
 		}
 	}
 	// Reloaded resources (upstream showLoadedResources after /reload).
-	a.ShowLoadedResources(false)
+	a.showLoadedResources(false)
 	// Custom theme files are re-read from disk by ApplyFromSettings.
-	a.Theme.ApplyFromSettings()
+	a.theme.ApplyFromSettings()
 	// Rebuild the autocomplete provider (upstream setupAutocompleteProvider);
 	// the skills list is a func, so it re-reads on the next query.
-	a.Autocomplete.SetupAutocompleteProvider()
+	a.autocomplete.SetupAutocompleteProvider()
 }
 
 func (a *App) updateThinkingBlockVisibility(hidden bool) {
-	a.Display.HideThinkingBlock = hidden
+	a.display.HideThinkingBlock = hidden
 }
 
 func (a *App) markdownTheme() *tui.MarkdownTheme {
 	theme := GetMarkdownTheme()
-	if a.Startup != nil {
-		theme = a.Startup.GetMarkdownThemeWithSettings(theme)
+	if a.startup != nil {
+		theme = a.startup.GetMarkdownThemeWithSettings(theme)
 	}
 	return &theme
 }
@@ -914,17 +912,17 @@ func (a *App) markdownTheme() *tui.MarkdownTheme {
 // applyFullscreenScrollbarSetting applies the fullscreen scrollbar setting to the
 // transcript's scroll view.
 func (a *App) applyFullscreenScrollbarSetting() {
-	if a.TranscriptScrollView != nil {
-		a.TranscriptScrollView.SetScrollbar(tui.ScrollViewScrollbar(a.Settings.GetFullscreenScrollbar()))
+	if a.transcriptScrollView != nil {
+		a.transcriptScrollView.SetScrollbar(tui.ScrollViewScrollbar(a.settings.GetFullscreenScrollbar()))
 	}
 }
 
 // modelSession returns the ModelSession adapter (its ModelRuntime returns the
 // selector-runtime interface).
-func (a *App) modelSession() ModelSession { return appModelSession{a.Session} }
+func (a *App) modelSession() ModelSession { return appModelSession{a.session} }
 
 // commandSession returns the CommandSession adapter.
-func (a *App) commandSession() CommandSession { return appCommandSession{a.Session} }
+func (a *App) commandSession() CommandSession { return appCommandSession{a.session} }
 
 // appModelSession overrides ModelRuntime to return ModelSelectorRuntime.
 type appModelSession struct{ *AppSession }
