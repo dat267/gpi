@@ -95,7 +95,7 @@ func resolveIn(base, name string) string {
 func renderProjectContext(contextFiles []ContextFile) string {
 	parts := []string{"Project-specific instructions and guidelines:"}
 	for _, file := range contextFiles {
-		parts = append(parts, fmt.Sprintf("<project_instructions path=%q>\n%s\n</project_instructions>", file.Path, file.Content))
+		parts = append(parts, fmt.Sprintf("<project_instructions path=\"%s\">\n%s\n</project_instructions>", file.Path, file.Content))
 	}
 	return strings.Join(parts, "\n\n")
 }

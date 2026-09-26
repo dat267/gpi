@@ -628,7 +628,12 @@ func (p *CombinedAutocompleteProvider) getFileSuggestions(prefix string) []Autoc
 		if directoryTail {
 			dir = filepath.Join(dir, rawFile)
 		}
-		if strings.HasPrefix(dir, "~") || strings.HasPrefix(dir, "/") {
+		// Upstream tests the raw prefix for "~" here, not the expanded directory.
+		// On Windows the expanded home is a drive path (C:\Users\...), which is
+		// neither "~" nor "/", so testing only the expanded dir joined an
+		// already-absolute home onto basePath (basePath\C:\Users\...) and `~/`
+		// completion returned nothing.
+		if strings.HasPrefix(rawPrefix, "~") || strings.HasPrefix(dir, "~") || strings.HasPrefix(dir, "/") {
 			searchDir = dir
 		} else {
 			searchDir = filepath.Join(p.basePath, dir)
