@@ -3,6 +3,7 @@ package interactive
 import (
 	"context"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -371,18 +372,23 @@ func TestLoopBeatAdvances(t *testing.T) {
 		app.sessionEvents.enqueue(&coding.SessionEvent{Type: coding.SessionAgentSettled})
 	}
 	// One iteration handles one event and every iteration beats, so five events
-	// must reach five beats unless the loop stops iterating. Watch the run
-	// goroutine too: a loop that returned early is a different fault from one that
-	// is still running but stuck in a phase, and a bare timeout cannot tell them
-	// apart — this one failed on CI as "condition not met before timeout".
-	waitForConditionWithin(t, func() bool {
+	// must reach five beats unless the loop stops iterating. A loop that returned
+	// early is a different fault from one stuck inside a phase, and a bare timeout
+	// cannot tell them apart — it failed on CI as "condition not met before
+	// timeout", which is all it said. So: watch the run goroutine, and on timeout
+	// dump every goroutine stack, the way the stall log does for slow phases.
+	deadline := time.Now().Add(6 * time.Second)
+	for app.loopBeats() < 5 {
 		select {
 		case <-done:
 			t.Fatalf("the run loop exited with %d of 5 beats", app.loopBeats())
 		default:
 		}
-		return app.loopBeats() >= 5
-	}, 6*time.Second)
+		if time.Now().After(deadline) {
+			t.Fatalf("the loop stopped beating at %d of 5 beats:\n%s", app.loopBeats(), goroutineStacks())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 
 	cancel()
 	select {
@@ -450,4 +456,11 @@ func TestSubmitSendUnblocksOnContextCancel(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("context cancellation did not release the parked submit")
 	}
+}
+
+// goroutineStacks dumps every goroutine's stack, so a stalled-loop failure names
+// the frame the loop is parked in instead of costing another CI round-trip.
+func goroutineStacks() string {
+	buf := make([]byte, 1<<20)
+	return string(buf[:runtime.Stack(buf, true)])
 }
