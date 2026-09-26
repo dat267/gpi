@@ -49,6 +49,7 @@ func apiKeyEnvVars(provider string) []string {
 		"mistral":                    "MISTRAL_API_KEY",
 		"minimax":                    "MINIMAX_API_KEY",
 		"minimax-cn":                 "MINIMAX_CN_API_KEY",
+		"meta":                       "META_API_KEY",
 		"moonshotai":                 "MOONSHOT_API_KEY",
 		"moonshotai-cn":              "MOONSHOT_API_KEY",
 		"huggingface":                "HF_TOKEN",

@@ -43,6 +43,14 @@ var errAlreadyReported = errors.New("already reported")
 // Execute runs the CLI, exiting the process on a fatal error.
 func Execute() {
 	appName := executableName()
+	// `pi auth check|print-api-key|print-bearer-token` runs before anything
+	// else, off the raw argv (upstream runAuthCommand at the top of main).
+	if handled, code := coding.RunAuthCommand(os.Args[1:], os.Stdout, os.Stderr); handled {
+		if code != 0 {
+			os.Exit(code)
+		}
+		return
+	}
 	// Startup timing instrumentation (upstream's resetTimings + time("parseArgs")
 	// at the top of main). PI_TIMING=1 makes the boot's cost visible, which the
 	// UI-loop stall log cannot see; there is no work when it is off.

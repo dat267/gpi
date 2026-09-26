@@ -46,6 +46,7 @@ var DefaultModelPerProvider = map[ai.ProviderId]string{
 	"opencode":                   "kimi-k2.6",
 	"opencode-go":                "kimi-k2.6",
 	"kimi-coding":                "kimi-for-coding",
+	"meta":                       "muse-spark-1.3",
 	"cloudflare-workers-ai":      "@cf/moonshotai/kimi-k2.6",
 	"cloudflare-ai-gateway":      "workers-ai/@cf/moonshotai/kimi-k2.6",
 	"qwen-token-plan":            "qwen3.7-max",
@@ -667,7 +668,7 @@ var DefaultProviderOrder = []ai.ProviderId{
 	"radius", "nvidia", "deepseek", "google", "google-vertex", "github-copilot", "openrouter",
 	"vercel-ai-gateway", "xai", "groq", "cerebras", "zai", "zai-coding-cn", "mistral", "minimax",
 	"minimax-cn", "moonshotai", "moonshotai-cn", "huggingface", "fireworks", "together", "baseten",
-	"opencode", "opencode-go", "kimi-coding", "cloudflare-workers-ai", "cloudflare-ai-gateway",
+	"opencode", "opencode-go", "kimi-coding", "meta", "cloudflare-workers-ai", "cloudflare-ai-gateway",
 	"qwen-token-plan", "qwen-token-plan-cn", "qwen-token-plan-individual", "xiaomi",
 	"xiaomi-token-plan-cn", "xiaomi-token-plan-ams", "xiaomi-token-plan-sgp",
 }

@@ -182,6 +182,11 @@ func TestGetEnvApiKey(t *testing.T) {
 		t.Fatalf("unset deepseek = %q", got)
 	}
 
+	// Meta resolves from META_API_KEY.
+	if got := GetEnvApiKey("meta", ProviderEnv{"META_API_KEY": "m"}); got != "m" {
+		t.Fatalf("meta = %q", got)
+	}
+
 	// Anthropic: AUTH_TOKEN participates in discovery but is skipped for the
 	// key; OAUTH_TOKEN and API_KEY resolve.
 	if got := GetEnvApiKey("anthropic", ProviderEnv{AnthropicAuthTokenEnv: "tok"}); got != "" {

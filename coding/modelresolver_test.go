@@ -423,6 +423,7 @@ func TestDefaultModelPerProviderTracksCurrentModels(t *testing.T) {
 		"vercel-ai-gateway":          "zai/glm-5.1",
 		"xai":                        "grok-4.6",
 		"qwen-token-plan-individual": "qwen3.8-max",
+		"meta":                       "muse-spark-1.3",
 	}
 	for provider, want := range expectations {
 		if got := DefaultModelPerProvider[provider]; got != want {

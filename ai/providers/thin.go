@@ -310,15 +310,13 @@ func RadiusProvider(gateway string) *ai.Provider {
 var BuiltinProviderIDs = []string{
 	"amazon-bedrock", "ant-ling", "anthropic", "azure-openai-responses", "baseten", "cerebras",
 	"cloudflare-ai-gateway", "cloudflare-workers-ai", "deepseek", "fireworks", "github-copilot",
-	"google", "google-vertex", "groq", "huggingface", "kimi-coding", "minimax", "minimax-cn",
+	"google", "google-vertex", "groq", "huggingface", "kimi-coding", "meta", "minimax", "minimax-cn",
 	"mistral", "moonshotai", "moonshotai-cn", "nvidia", "openai", "openai-codex", "opencode",
 	"opencode-go", "openrouter", "qwen-token-plan", "qwen-token-plan-cn",
 	"qwen-token-plan-individual", "radius", "together", "vercel-ai-gateway", "xai", "xiaomi",
 	"xiaomi-token-plan-ams", "xiaomi-token-plan-cn", "xiaomi-token-plan-sgp", "zai", "zai-coding-cn",
 }
 
-// UnportedBuiltinProviderIDs are built-in providers whose API adapters are not
-// ported yet; BuiltinProviders skips them.
 // UnportedBuiltinProviderIDs lists built-in providers whose factories are not
 // ported. Every upstream provider is now ported, so the list is empty; it stays
 // so later gaps are recorded explicitly instead of silently.
@@ -369,6 +367,8 @@ func builtinProvider(id string) *ai.Provider {
 		return CloudflareWorkersAIProvider()
 	case "mistral":
 		return MistralProvider()
+	case "meta":
+		return MetaProvider()
 	}
 	spec := thinByID(id)
 	if spec.ID == "" || spec.ID != id {

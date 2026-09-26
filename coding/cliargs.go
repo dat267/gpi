@@ -346,12 +346,11 @@ func validThinkingLevelStrings() []string {
 
 // PrintHelp returns the CLI help text (upstream printHelp without ANSI color).
 //
-// Upstream's Commands table is gone: it lists install/remove/uninstall/update/
-// list/config/auth, and this port implements none of them (there is no package
-// manager and no extension mechanics, D41 — the one-time resource-manager TUI
-// went with them). A word the parser does not know is not an error either; it
-// becomes the first message to the model, so the table was advertising commands
-// that silently turn into prompts.
+// Upstream's Commands table lists install/remove/uninstall/update/list/config/
+// auth. Only `auth` is implemented here: the package manager and the
+// resource-manager TUI are out of scope (D41), so those lines are gone rather
+// than advertising commands that silently turn into the first message to the
+// model.
 //
 // The extension flag lines are gone for the same reason: -e/--extension loads
 // nothing here, and --no-extensions asks for less of something that does not
@@ -368,6 +367,9 @@ func PrintHelpNamed(appName string) string {
 	var builder strings.Builder
 	builder.WriteString(appName + " - AI coding assistant with read, bash, edit, write tools\n\n")
 	builder.WriteString("Usage:\n  " + appName + " [options] [--] [@files...] [messages...]\n\n")
+	builder.WriteString("Commands:\n")
+	builder.WriteString("  " + appName + " auth <command>            Print credentials or check provider readiness\n")
+	builder.WriteString("  " + appName + " auth --help              Show help for auth commands\n\n")
 	builder.WriteString("Options:\n")
 	for _, line := range helpOptionLines() {
 		builder.WriteString(line + "\n")
