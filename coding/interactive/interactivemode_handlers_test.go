@@ -23,6 +23,9 @@ type handlerTestSession struct {
 	streamingBehaviors []string
 	cleared            int
 	thinking           ai.ThinkingLevel
+	// abortWaits counts the waits for idle. A test that sees it rise after an
+	// Escape press knows the handler waited on the UI loop (D168).
+	abortWaits int
 }
 
 func (s *handlerTestSession) GetSteeringMessages() []string { return append([]string{}, s.steering...) }
@@ -33,9 +36,15 @@ func (s *handlerTestSession) ClearQueue() ([]string, []string) {
 	s.steering, s.followUp = nil, nil
 	return steering, followUp
 }
-func (s *handlerTestSession) Steer(ai.Message)      {}
-func (s *handlerTestSession) FollowUp(ai.Message)   {}
-func (s *handlerTestSession) Abort(context.Context) { s.abortCalls++ }
+func (s *handlerTestSession) Steer(ai.Message)    {}
+func (s *handlerTestSession) FollowUp(ai.Message) {}
+func (s *handlerTestSession) Abort(context.Context) {
+	s.abortCalls++
+	s.abortWaits++
+}
+
+// AbortAsync is the loop-safe half of Abort: it signals without waiting.
+func (s *handlerTestSession) AbortAsync() { s.abortCalls++ }
 func (s *handlerTestSession) CycleThinkingLevel(coding.ModelMutationOptions) (ai.ThinkingLevel, bool) {
 	return s.thinking, s.thinking != ""
 }
@@ -150,6 +159,30 @@ func TestKeyWiringEscape(t *testing.T) {
 	editor.OnEscape()
 	if treeShown+forkShown != 2 {
 		t.Fatal("action ran with none")
+	}
+}
+
+// TestEscapeHandlerDoesNotWaitForIdle pins D168: pressing Escape while a turn is
+// streaming restores the queue into the editor and then aborts, and the abort
+// must not wait for the session to go idle — this handler runs on the UI loop, so
+// the wait froze every later keystroke for as long as the turn took to unwind
+// (188 ms measured mid-turn).
+func TestEscapeHandlerDoesNotWaitForIdle(t *testing.T) {
+	keys, _, session, editor := newHandlerTestWiring(t)
+	keys.SetupKeyHandlers(nil)
+	session.streaming = true
+	session.steering = []string{"queued"}
+
+	editor.OnEscape()
+
+	if session.abortCalls != 1 {
+		t.Fatalf("abort calls = %d, want the abort signalled", session.abortCalls)
+	}
+	if session.abortWaits != 0 {
+		t.Fatal("the escape handler waited for the session to go idle, which blocks the UI loop")
+	}
+	if got := editor.GetText(); got != "queued" {
+		t.Fatalf("editor = %q, want the restored queue", got)
 	}
 }
 
