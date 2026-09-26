@@ -147,11 +147,30 @@ func TestProcessImagePassesThroughSmallImages(t *testing.T) {
 		t.Fatalf("result = %+v", result)
 	}
 
-	// An image that needs resizing reports the resize omission (D26).
+	// An image that needs resizing is scaled to the max dimensions and carries the
+	// dimension note (D26: this used to be an omission, because the port had no
+	// resizer).
 	large := pngBytes(t, 2100, 4)
 	result = ProcessImage(large, "image/png", nil)
-	if result.OK || result.Message != "[Image omitted: could not be resized below the inline image size limit.]" {
-		t.Fatalf("result = %+v", result)
+	if !result.OK {
+		t.Fatalf("an oversized image should be resized, got %+v", result)
+	}
+	if result.MimeType != "image/png" {
+		t.Fatalf("mime = %s", result.MimeType)
+	}
+	resizedBytes, err := base64.StdEncoding.DecodeString(result.Data)
+	if err != nil {
+		t.Fatalf("data is not base64: %v", err)
+	}
+	config, _, err := image.DecodeConfig(bytes.NewReader(resizedBytes))
+	if err != nil {
+		t.Fatalf("resized bytes do not decode: %v", err)
+	}
+	if config.Width != 2000 || config.Height != 4 {
+		t.Fatalf("resized to %dx%d, want 2000x4", config.Width, config.Height)
+	}
+	if len(result.Hints) != 1 {
+		t.Fatalf("hints = %#v, want the dimension note", result.Hints)
 	}
 
 	// A corrupt supported-format image cannot be measured and is omitted.
