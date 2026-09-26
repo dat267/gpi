@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dat267/pier/agent"
 	"github.com/dat267/pier/ai"
@@ -183,8 +184,8 @@ func (s *AgentSession) IsIdle() bool { return !s.IsStreaming() && !s.IsCompactin
 
 // SystemPrompt returns the effective system prompt.
 func (s *AgentSession) SystemPrompt() string {
-	if s.SystemPromptOptions != nil {
-		prompt, err := BuildSystemPrompt(*s.SystemPromptOptions)
+	if options, ok := s.resolvedSystemPromptOptions(); ok {
+		prompt, err := BuildSystemPrompt(options)
 		if err == nil {
 			return prompt
 		}
@@ -414,12 +415,88 @@ func (s *AgentSession) SetActiveToolsByName(names []string) {
 
 // RebuildSystemPrompt refreshes the session prompt for a tool set.
 func (s *AgentSession) RebuildSystemPrompt(toolNames []string) {
+	s.promptOptionsMu.Lock()
+	defer s.promptOptionsMu.Unlock()
 	if s.SystemPromptOptions == nil {
 		return
 	}
 	options := *s.SystemPromptOptions
 	options.SelectedTools = toolNames
 	s.SystemPromptOptions = &options
+}
+
+// systemPromptOptionsSnapshot returns a copy of the prompt options.
+func (s *AgentSession) systemPromptOptionsSnapshot() (BuildSystemPromptOptions, bool) {
+	s.promptOptionsMu.Lock()
+	defer s.promptOptionsMu.Unlock()
+	if s.SystemPromptOptions == nil {
+		return BuildSystemPromptOptions{}, false
+	}
+	return *s.SystemPromptOptions, true
+}
+
+// resolvedSystemPromptOptions snapshots the prompt options and fills the
+// registry-derived inputs (active tool names, snippets, guidelines).
+func (s *AgentSession) resolvedSystemPromptOptions() (BuildSystemPromptOptions, bool) {
+	options, ok := s.systemPromptOptionsSnapshot()
+	if !ok {
+		return options, false
+	}
+	options.SelectedTools = selectedRegistryTools(options.SelectedTools, s.control.Tools)
+	options.ToolSnippets, options.ToolGuidelines = s.toolPromptContributions()
+	return options, true
+}
+
+// preparePromptAndToolLoadout resolves the active tool registry set and returns
+// a system message carrying the prompt-section diff, or nil when nothing
+// changed (port of _preparePromptAndToolLoadout). It updates the agent's tool
+// set as a side effect. The message is installed in the transcript by the
+// caller; the agent loop declares tool changes itself.
+func (s *AgentSession) preparePromptAndToolLoadout() *ai.SystemMessage {
+	options, ok := s.resolvedSystemPromptOptions()
+	if !ok {
+		return nil
+	}
+
+	tools := make([]agent.AgentTool, 0, len(options.SelectedTools))
+	for _, name := range options.SelectedTools {
+		tools = append(tools, s.control.Tools[name].Tool)
+	}
+	s.Agent.SetTools(tools)
+
+	previous := map[string]string{}
+	if current := ai.GetCurrentSystemMessage(s.Agent.State().Messages); current != nil {
+		for name, value := range current.Sections {
+			if value != nil {
+				previous[name] = *value
+			}
+		}
+	}
+	built, err := BuildSystemPromptSections(options)
+	if err != nil {
+		return nil
+	}
+	patch := DiffSystemPromptSections(previous, built)
+	if len(patch) == 0 {
+		return nil
+	}
+	message := &ai.SystemMessage{Content: ai.StringOrBlocks{Text: ""}, Timestamp: time.Now().UnixMilli()}
+	for _, name := range append([]string{"preamble"}, sectionInsertionOrder(built)...) {
+		if value, ok := patch[name]; ok {
+			message.SetSection(name, value)
+		}
+	}
+	var removed []string
+	for name := range patch {
+		if _, ok := built[name]; !ok {
+			removed = append(removed, name)
+		}
+	}
+	sortNames(removed)
+	for _, name := range removed {
+		message.SetSection(name, nil)
+	}
+	return message
 }
 
 // SetModel switches the session model (auth-checked) and applies the thinking

@@ -51,8 +51,9 @@ func TestAgentSessionPersistence(t *testing.T) {
 	}
 
 	entries := sessions.GetEntries()
-	// user + assistant persisted from agent events.
-	if len(entries) != 2 {
+	// The prompt/tool loadout system message, then user + assistant persisted
+	// from agent events.
+	if len(entries) != 3 {
 		t.Fatalf("entries = %d", len(entries))
 	}
 	role := func(raw json.RawMessage) string {
@@ -62,8 +63,8 @@ func TestAgentSessionPersistence(t *testing.T) {
 		json.Unmarshal(raw, &probe)
 		return probe.Role
 	}
-	if role(entries[0].Message) != "user" || role(entries[1].Message) != "assistant" {
-		t.Fatalf("roles = %s/%s", role(entries[0].Message), role(entries[1].Message))
+	if role(entries[0].Message) != "system" || role(entries[1].Message) != "user" || role(entries[2].Message) != "assistant" {
+		t.Fatalf("roles = %s/%s/%s", role(entries[0].Message), role(entries[1].Message), role(entries[2].Message))
 	}
 }
 

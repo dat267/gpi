@@ -185,7 +185,12 @@ type AgentSession struct {
 	pendingBashMessages []*ai.CustomMessage
 
 	// System prompt options for section diffing on tool changes.
+	//
+	// promptOptionsMu guards the field across goroutines: the work goroutine
+	// re-applies the loadout between turns, while the UI loop rebuilds the
+	// options on /reload and tool changes.
 	SystemPromptOptions *BuildSystemPromptOptions
+	promptOptionsMu     sync.Mutex
 
 	// skillDiagnostics are the skill loader's warnings/collisions.
 	skillDiagnostics []ResourceDiagnostic
@@ -268,7 +273,10 @@ func NewAgentSession(config *SessionConfig) (*AgentSession, error) {
 	}
 
 	initialState := &agent.AgentInitialState{
-		SystemPrompt:  config.SystemPrompt,
+		// The base prompt rides in the system prompt's preamble section, which
+		// preparePromptAndToolLoadout installs (upstream buildSystemPromptSections
+		// reads customPrompt into the preamble, not into message content).
+		SystemPrompt:  "",
 		Model:         config.Model,
 		ThinkingLevel: config.ThinkingLevel,
 		Tools:         config.Tools,
@@ -297,6 +305,14 @@ func NewAgentSession(config *SessionConfig) (*AgentSession, error) {
 	}
 	if control.Tools == nil {
 		control.Tools = map[string]AgentToolDefinition{}
+	}
+	// Seed the registry from the configured tools so preparePromptAndToolLoadout
+	// (and SetActiveToolsByName) resolve them even when the caller did not build
+	// a full registry (the SDK replaces these with its own definitions).
+	for _, tool := range config.Tools {
+		if _, ok := control.Tools[tool.Name]; !ok {
+			control.Tools[tool.Name] = AgentToolDefinition{Tool: tool}
+		}
 	}
 
 	s := &AgentSession{
@@ -331,10 +347,15 @@ func NewAgentSession(config *SessionConfig) (*AgentSession, error) {
 	// model or thinking-level switch made while the turn is running reaches the
 	// next assistant request in that same turn, not only the next prompt
 	// (upstream agent-session.ts prepareNextTurnWithContext, applied by the loop
-	// as nextTurnSnapshot); the tool set is refreshed with it.
+	// as nextTurnSnapshot). The prompt/tool loadout is re-applied too, so a
+	// changed system prompt or tool set reaches the rest of the turn.
 	a.PrepareNextTurnWithContext = func(turn *agent.ShouldStopAfterTurnContext, ctx context.Context) (*agent.AgentLoopTurnUpdate, error) {
 		if err := s.maybeAutoCompact(ctx); err != nil {
 			return nil, err
+		}
+		var prepared []ai.Message
+		if update := s.preparePromptAndToolLoadout(); update != nil {
+			prepared = []ai.Message{update}
 		}
 		state := s.Agent.State()
 		updated := turn.Context
@@ -342,6 +363,7 @@ func NewAgentSession(config *SessionConfig) (*AgentSession, error) {
 		updated.Tools = append([]agent.AgentTool{}, state.Tools...)
 		return &agent.AgentLoopTurnUpdate{
 			Context:          &updated,
+			Messages:         prepared,
 			Model:            state.Model,
 			ThinkingLevel:    state.ThinkingLevel,
 			HasThinkingLevel: true,
@@ -502,7 +524,10 @@ func (s *AgentSession) FollowUp(message ai.Message) {
 
 // PromptText runs a prompt from text.
 func (s *AgentSession) PromptText(ctx context.Context, input string) error {
-	return s.Agent.PromptText(ctx, input)
+	// The canonical pipeline (upstream prompt): expansion, validation,
+	// compaction checks and the prompt/tool loadout. Upstream has no separate
+	// promptText; print mode calls prompt too.
+	return s.Prompt(ctx, input, nil)
 }
 
 // PromptMessages runs a prompt from messages.

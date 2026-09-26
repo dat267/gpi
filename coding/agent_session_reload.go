@@ -48,6 +48,7 @@ func (s *AgentSession) reloadResources() {
 		SystemPrompt: s.promptSources.SystemPrompt, AppendSystemPrompt: s.promptSources.AppendSystemPrompt,
 	})
 
+	s.promptOptionsMu.Lock()
 	if s.SystemPromptOptions != nil {
 		options := *s.SystemPromptOptions
 		options.CustomPrompt = overrides.SystemPrompt
@@ -57,6 +58,7 @@ func (s *AgentSession) reloadResources() {
 		options.ContextFiles = contextFiles
 		s.SystemPromptOptions = &options
 	}
+	s.promptOptionsMu.Unlock()
 	s.skillDiagnostics = skills.Diagnostics
 	s.control.PromptTemplates = promptTemplates
 }

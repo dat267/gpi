@@ -63,11 +63,11 @@ func TestPrintModeTextPrintsTheFinalResponse(t *testing.T) {
 	if strings.TrimSpace(output) != "hello from print" {
 		t.Fatalf("output = %q", output)
 	}
-	// The transcript survives: the prompt and response persisted. GetEntries
-	// excludes the header line, so this is user + assistant.
+	// The transcript survives: the loadout system message, the prompt, and the
+	// response persisted. GetEntries excludes the header line.
 	sessions.FlushWrites()
 	entries := sessions.GetEntries()
-	if len(entries) != 2 {
+	if len(entries) != 3 {
 		t.Fatalf("entries = %d", len(entries))
 	}
 }
@@ -137,10 +137,12 @@ func TestPrintModeJSONStreamsHeaderAndEvents(t *testing.T) {
 	if types[0] != "agent_start" {
 		t.Fatalf("first event = %q", types[0])
 	}
-	if types[len(types)-1] != "agent_end" {
+	// agent_settled is the session event emitted after the run (upstream
+	// agent-session emits it after agent_end).
+	if types[len(types)-1] != "agent_settled" {
 		t.Fatalf("last event = %q", types[len(types)-1])
 	}
-	for _, wanted := range []string{"message_start", "message_end", "turn_end"} {
+	for _, wanted := range []string{"message_start", "message_end", "turn_end", "agent_end"} {
 		found := false
 		for _, typ := range types {
 			if typ == wanted {

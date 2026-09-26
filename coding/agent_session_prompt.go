@@ -169,6 +169,11 @@ func (s *AgentSession) Prompt(ctx context.Context, text string, options *PromptO
 	}
 	messages := []ai.Message{&ai.UserMessage{Content: ai.StringOrBlocks{Blocks: userContent}, Timestamp: time.Now().UnixMilli()}}
 	messages = append(messages, s.takePendingNextTurnMessages()...)
+	// Install the prompt/tool loadout as a leading system message so the model
+	// receives the built sections (upstream _preparePromptAndToolLoadout).
+	if update := s.preparePromptAndToolLoadout(); update != nil {
+		messages = append([]ai.Message{update}, messages...)
+	}
 
 	preflight(true)
 	if s.CacheWarmer != nil && options.SessionID != "" && options.SessionID == s.SessionID() {
