@@ -272,7 +272,23 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 
 	// The registry holds every built-in tool (upstream createAllToolDefinitions);
 	// the active selection is filtered by name.
-	toolByName := CreateAllTools(cwd, nil)
+	// The read tool resolves its image limits and the non-vision note from the
+	// model in play, read per call the way upstream reads ctx.model, so a
+	// mid-session model switch takes effect. The session is created below, hence
+	// the pointer; AutoResizeImages is set because a non-nil ReadToolOptions
+	// otherwise selects its zero value, which would disable resizing.
+	var sessionForTools *AgentSession
+	toolByName := CreateAllTools(cwd, &ToolsOptions{
+		Read: &ReadToolOptions{
+			AutoResizeImages: true,
+			Model: func() *ai.Model {
+				if sessionForTools == nil {
+					return nil
+				}
+				return sessionForTools.Model()
+			},
+		},
+	})
 	activeTools := make([]agent.AgentTool, 0, len(initialActiveToolNames))
 	for _, name := range initialActiveToolNames {
 		if tool, ok := toolByName[name]; ok {
@@ -448,6 +464,7 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 		ThinkingBudgets: thinkingBudgetsOf(settingsManager.GetThinkingBudgets()),
 		MaxRetryDelayMS: &maxRetryDelay,
 	})
+	sessionForTools = session
 	if err != nil {
 		return nil, err
 	}
