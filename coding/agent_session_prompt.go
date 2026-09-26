@@ -440,10 +440,10 @@ func (s *AgentSession) expandSkillCommand(text string) string {
 	}
 
 	var skill *Skill
-	if s.SystemPromptOptions != nil {
-		for index := range s.SystemPromptOptions.Skills {
-			if s.SystemPromptOptions.Skills[index].Name == skillName {
-				skill = &s.SystemPromptOptions.Skills[index]
+	if options, ok := s.systemPromptOptionsSnapshot(); ok {
+		for index := range options.Skills {
+			if options.Skills[index].Name == skillName {
+				skill = &options.Skills[index]
 				break
 			}
 		}

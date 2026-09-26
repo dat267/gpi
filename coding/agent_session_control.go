@@ -297,27 +297,30 @@ func (s *AgentSession) PromptTemplates() []PromptTemplate {
 
 // Skills returns the loaded skills (the system-prompt options).
 func (s *AgentSession) Skills() []Skill {
-	if s.SystemPromptOptions == nil {
+	options, ok := s.systemPromptOptionsSnapshot()
+	if !ok {
 		return nil
 	}
-	return append([]Skill{}, s.SystemPromptOptions.Skills...)
+	return append([]Skill{}, options.Skills...)
 }
 
 // ContextFiles returns the loaded context files (the system-prompt options).
 // PromptSourcePaths returns the loaded system/append prompt files, base prompt
 // first (upstream getSystemPromptSource / getAppendSystemPromptSources).
 func (s *AgentSession) PromptSourcePaths() []string {
-	if s.SystemPromptOptions == nil {
+	options, ok := s.systemPromptOptionsSnapshot()
+	if !ok {
 		return nil
 	}
-	return append([]string{}, s.SystemPromptOptions.PromptSourcePaths...)
+	return append([]string{}, options.PromptSourcePaths...)
 }
 
 func (s *AgentSession) ContextFiles() []ContextFile {
-	if s.SystemPromptOptions == nil {
+	options, ok := s.systemPromptOptionsSnapshot()
+	if !ok {
 		return nil
 	}
-	return append([]ContextFile{}, s.SystemPromptOptions.ContextFiles...)
+	return append([]ContextFile{}, options.ContextFiles...)
 }
 
 // SkillDiagnostics returns the skill loader's warnings/collisions.
