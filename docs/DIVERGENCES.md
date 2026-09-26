@@ -651,3 +651,11 @@ only as the code comment that introduced them. The range is **D1–D169**.
   `TestSplitMouseReportAcrossTheDeadline`,
   `TestOrphanedMouseReportIsStillDispatched`,
   `TestTruncatedMouseReportIsConsumed`.
+
+- D170 — **the startup header drops upstream's "Pi can explain its own features"
+  hint**. Upstream's onboarding block ends with `Pi can explain its own features and
+  look up its docs. Ask it how to use or extend Pi.` (`interactive-mode.ts:997`),
+  used in both the compact and the expanded header. The port omits that line by
+  request: the product it ships is pier, and the hint advertises the capability
+  under the upstream name. The key-binding lists and the ctrl+o pointer above it are
+  unchanged.

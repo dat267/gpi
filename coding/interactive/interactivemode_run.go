@@ -284,14 +284,12 @@ func (w *RunWiring) BuildStartupHeader(scopedModels []coding.ScopedModel) tui.Co
 	}, theme.Fg("muted", " · "))
 	compactOnboarding := theme.Fg("dim",
 		"Press "+KeyText("app.tools.expand")+" to show full startup help and loaded resources.")
-	onboarding := theme.Fg("dim",
-		"Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.")
 	expanded := w.GetStartupExpansionState()
 	header := NewExpandableText(
 		func() string {
-			return logo + "\n" + compactInstructions + "\n" + compactOnboarding + "\n\n" + onboarding
+			return logo + "\n" + compactInstructions + "\n" + compactOnboarding
 		},
-		func() string { return logo + "\n" + expandedInstructions + "\n\n" + onboarding },
+		func() string { return logo + "\n" + expandedInstructions },
 		expanded, 1, 0)
 	return header
 }
