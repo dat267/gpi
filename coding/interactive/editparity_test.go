@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -22,6 +23,12 @@ import (
 // renderShell:"self"; the 0.86.0 checkout renders a nested double box) and
 // the diff line formatting ("-1 ", "+1 ", " 2 " context normalization).
 func TestEditToolRenderUpstreamParity(t *testing.T) {
+	// The golden was recorded on a Unix host driving /tmp/pier_parity and embeds
+	// that path. The renderer prints the path it was given (filepath.Join's form,
+	// i.e. the platform separator), so the comparison only holds on Unix.
+	if runtime.GOOS == "windows" {
+		t.Skip("the golden embeds the Unix host path /tmp/pier_parity")
+	}
 	dir := "/tmp/pier_parity"
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Skipf("cannot create %s: %v", dir, err)

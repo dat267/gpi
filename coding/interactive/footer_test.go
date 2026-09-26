@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/dat267/pier/ai"
@@ -67,6 +68,13 @@ func (f *fakeFooterData) OnBranchChange(func()) func() { return func() {} }
 // TestFooterHelpersAgainstUpstreamGolden replays the pure formatting helpers
 // that keep their upstream behavior.
 func TestFooterHelpersAgainstUpstreamGolden(t *testing.T) {
+	// The cwd corpus is Unix data (POSIX paths) fed to FormatCwdForFooter, which
+	// mirrors Node's path.relative and is therefore platform-sensitive: on
+	// Windows the same inputs render with the platform separator, so the Unix
+	// golden cannot match.
+	if runtime.GOOS == "windows" {
+		t.Skip("the cwd corpus is Unix data for a platform-sensitive helper")
+	}
 	SetCustomThemesDir(t.TempDir())
 	SetRegisteredThemes(nil)
 	SetTrueColorSupport(true)

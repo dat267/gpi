@@ -2,6 +2,7 @@ package interactive
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -208,10 +209,13 @@ func TestKeyWiringActions(t *testing.T) {
 	if actions["exit"] != 1 {
 		t.Fatalf("actions = %v", actions)
 	}
-	// ctrl+z suspends.
-	editor.HandleInput("\x1a")
-	if actions["suspend"] != 1 {
-		t.Fatalf("actions = %v", actions)
+	// ctrl+z suspends. Windows leaves app.suspend unbound (there is no SIGTSTP),
+	// so the binding is asserted only where it exists.
+	if runtime.GOOS != "windows" {
+		editor.HandleInput("\x1a")
+		if actions["suspend"] != 1 {
+			t.Fatalf("actions = %v", actions)
+		}
 	}
 	// ctrl+o toggles tools.
 	editor.HandleInput("\x0f")
@@ -231,13 +235,20 @@ func TestKeyWiringActions(t *testing.T) {
 	keys.OnFollowUp = func() { actions["followUp"]++ }
 	keys.OnDequeue = func() { actions["dequeue"]++ }
 	keys.SetupKeyHandlers(nil)
-	editor.HandleInput("\x1b\r")
-	if actions["followUp"] != 1 {
-		t.Fatalf("alt+enter did not reach OnFollowUp: %v", actions)
+	// The follow-up and dequeue bindings are platform-keyed (upstream
+	// keybindings.ts: ctrl+q / alt+q where windowsKeybindings, alt+enter / alt+up
+	// otherwise), so drive the binding this platform actually defines.
+	followUpInput, dequeueInput := "\x1b\r", "\x1bp"
+	if runtime.GOOS == "windows" {
+		followUpInput, dequeueInput = "\x11", "\x1bq"
 	}
-	editor.HandleInput("\x1bp")
+	editor.HandleInput(followUpInput)
+	if actions["followUp"] != 1 {
+		t.Fatalf("the follow-up key did not reach OnFollowUp: %v", actions)
+	}
+	editor.HandleInput(dequeueInput)
 	if actions["dequeue"] != 1 {
-		t.Fatalf("alt+up did not reach OnDequeue: %v", actions)
+		t.Fatalf("the dequeue key did not reach OnDequeue: %v", actions)
 	}
 	// The onChange handler toggles bash mode.
 	editor.SetText("!ls")

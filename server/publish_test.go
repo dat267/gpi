@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"testing"
 )
@@ -65,8 +66,13 @@ func TestPublishSocketMovesTheBoundSocket(t *testing.T) {
 			}
 			// The cleanup path compares device/inode to recognise its own
 			// socket, so the published path must be the very file that was
-			// bound — not a copy of it.
-			if !os.SameFile(bound, published) {
+			// bound — not a copy of it. Windows' os.SameFile has no stable index
+			// to compare here: os.Stat returns Win32FileAttributeData (a zeroed
+			// index), and once the temporary link is removed the two stats stop
+			// matching even though it is the same file, so this identity check is
+			// Unix-only. The link/os.Rename behaviour it guards is asserted below
+			// by the temporary name being gone and the content surviving.
+			if runtime.GOOS != "windows" && !os.SameFile(bound, published) {
 				t.Error("the published path is not the bound file")
 			}
 			if _, err := os.Lstat(owned); !errors.Is(err, fs.ErrNotExist) {

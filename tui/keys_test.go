@@ -46,6 +46,7 @@ func decodeJSONString(t *testing.T, literal string) (string, bool) {
 // TestKeysAgainstUpstreamGolden verifies parseKey, decodePrintableKey, and
 // matchesKey against the upstream-generated golden matrix.
 func TestKeysAgainstUpstreamGolden(t *testing.T) {
+	pinKeyEnvironment(t)
 	file, err := os.Open("testdata/keys_golden.txt")
 	if err != nil {
 		t.Fatalf("open golden: %v", err)
@@ -197,6 +198,19 @@ func splitGoldenLeft(left string) (command string, dataLiteral string, extra str
 	return command, rest[:index+1], strings.TrimSpace(rest[index+1:])
 }
 
+// pinKeyEnvironment clears the ambient terminal variables that the raw-0x08
+// heuristic reads (keys.go matchesRawBackspace/isWindowsTerminalSession). The
+// golden matrix and the expectations below are defined without Windows
+// Terminal; without this, a run inside Windows Terminal shifted 0x08 from
+// Backspace to Ctrl+Backspace and the assertions below failed.
+func pinKeyEnvironment(t *testing.T) {
+	t.Helper()
+	t.Setenv("WT_SESSION", "")
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+}
+
 func keyOf(kittyActive bool, data string) string {
 	if kittyActive {
 		return "true\x00" + data
@@ -207,6 +221,7 @@ func keyOf(kittyActive bool, data string) string {
 // TestMatchesRawBackspaceWindowsTerminal covers the env-dependent heuristic
 // that is not part of the golden matrix (generated without WT_SESSION).
 func TestMatchesRawBackspaceWindowsTerminal(t *testing.T) {
+	pinKeyEnvironment(t)
 	SetKittyProtocolActive(false)
 	t.Cleanup(func() { SetKittyProtocolActive(false) })
 

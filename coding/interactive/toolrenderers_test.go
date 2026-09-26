@@ -64,7 +64,17 @@ func TestToolRenderersCallHeaders(t *testing.T) {
 	if got := renderCall("read", args(`{"file_path":"/tmp/proj/main.go"}`), theme); !strings.Contains(got, "read /tmp/proj/main.go") {
 		t.Fatalf("read call = %q", got)
 	}
-	if got := renderCall("read", args(`{"file_path":"`+filepath.Join(homeDir(t), "notes.md")+`"}`), theme); !strings.Contains(got, "read ~/notes.md") {
+	// Build the home case with json.Marshal: concatenating a Windows path into
+	// JSON leaves its backslashes unescaped (\U, \n), which is invalid JSON and
+	// renders as the empty-path fallback. upstream shortenPath swaps the home
+	// prefix for "~" and keeps the remainder verbatim, so the separator here is
+	// the platform's.
+	homePath := filepath.Join(homeDir(t), "notes.md")
+	homeArgs, err := json.Marshal(map[string]string{"file_path": homePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := renderCall("read", args(string(homeArgs)), theme); !strings.Contains(got, "read ~"+strings.TrimPrefix(homePath, homeDir(t))) {
 		t.Fatalf("read home call = %q", got)
 	}
 	if got := renderCall("read", args(`{"file_path":"/tmp/proj/main.go","offset":10,"limit":5}`), theme); !strings.Contains(got, ":10-14") {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -52,7 +54,43 @@ func TestBashNonZeroExitIsError(t *testing.T) {
 	}
 }
 
+// requirePosixShell skips when the resolved shell cannot run a POSIX command.
+// The tests below assert POSIX semantics (128+N signal codes, `env | grep | wc`
+// pipelines). A Windows machine without Git for Windows resolves bash from
+// PATH, which may be the WSL launcher stub.
+func requirePosixShell(t *testing.T) {
+	t.Helper()
+	config, err := GetShellConfig("")
+	if err != nil {
+		t.Skipf("no shell available: %v", err)
+	}
+	out, err := exec.Command(config.Shell, "-c", "echo posix-probe").Output()
+	if err != nil || !strings.Contains(string(out), "posix-probe") {
+		t.Skipf("%s does not run POSIX shell commands", config.Shell)
+	}
+}
+
+// requireShellEnvInjection also requires the shell to receive the child
+// environment. Reaching bash through the WSL launcher does not: it runs `echo`
+// and friends, but drops cmd.Env, so the exposure assertions below cannot hold
+// there (verified by hand: even a plain variable does not arrive).
+func requireShellEnvInjection(t *testing.T) {
+	t.Helper()
+	requirePosixShell(t)
+	config, err := GetShellConfig("")
+	if err != nil {
+		t.Skipf("no shell available: %v", err)
+	}
+	command := exec.Command(config.Shell, "-c", "echo env-probe=$PIER_SHELL_PROBE")
+	command.Env = append(os.Environ(), "PIER_SHELL_PROBE=1")
+	out, err := command.Output()
+	if err != nil || !strings.Contains(string(out), "env-probe=1") {
+		t.Skipf("%s does not receive the child environment", config.Shell)
+	}
+}
+
 func TestBashSignalKillIsNotSuccess(t *testing.T) {
+	requirePosixShell(t)
 	// D68: a signal-terminated command must FAIL, never report success.
 	dir := t.TempDir()
 	tool := CreateBashTool(dir, nil)
@@ -60,7 +98,10 @@ func TestBashSignalKillIsNotSuccess(t *testing.T) {
 	if err == nil {
 		t.Fatal("signal-terminated command must error")
 	}
-	if !strings.Contains(err.Error(), "143") {
+	// 128+N needs a wait status that carries the signal. Windows has none: the
+	// WSL launcher surfaces the raw code (15) instead, so only assert it where
+	// the status reports the signal.
+	if runtime.GOOS != "windows" && !strings.Contains(err.Error(), "143") {
 		t.Fatalf("expected 128+15=143, err = %v", err)
 	}
 }
@@ -98,6 +139,7 @@ func TestBashTruncationKeepsTail(t *testing.T) {
 }
 
 func TestBashTimeout(t *testing.T) {
+	requirePosixShell(t)
 	dir := t.TempDir()
 	tool := CreateBashTool(dir, nil)
 	start := time.Now()
@@ -175,6 +217,7 @@ func TestBashWorkingDirectoryAndMissingCwd(t *testing.T) {
 }
 
 func TestBashSessionEnvStripped(t *testing.T) {
+	requireShellEnvInjection(t)
 	dir := t.TempDir()
 	t.Setenv("PI_MODEL", "leak")
 	tool := CreateBashTool(dir, nil)

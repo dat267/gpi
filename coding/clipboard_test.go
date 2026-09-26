@@ -2,6 +2,7 @@ package coding
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -31,6 +32,12 @@ func TestClipboardCommandsShape(t *testing.T) {
 // environment with no display (forced by clearing the env gates via the
 // message table rather than mutating the process environment).
 func TestClipboardUnavailableMessage(t *testing.T) {
+	// The premise is an environment with no clipboard backend. Windows and macOS
+	// ship one (copyCommands returns clip.exe / pbcopy), so only Linux can have a
+	// backendless clipboard.
+	if runtime.GOOS != "linux" {
+		t.Skip("the platform ships a clipboard command (clip.exe / pbcopy)")
+	}
 	if os.Getenv("WAYLAND_DISPLAY") != "" || os.Getenv("DISPLAY") != "" || os.Getenv("TERMUX_VERSION") != "" {
 		t.Skip("clipboard helpers present")
 	}
