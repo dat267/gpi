@@ -340,3 +340,26 @@ func TestSettingsShowSelector(t *testing.T) {
 		t.Fatal("dispose did not close the selector")
 	}
 }
+
+// TestOutputPadChangeUpdatesTheDisplayOptions pins the composition bug: the
+// settings callback wrote a nil pointer, so DisplayOptions.OutputPad (which the
+// transcript renderer reads when it builds message components) kept the old
+// value. An idle change rebuilt the transcript with the stale padding, so the
+// change looked like it needed a /reload.
+func TestOutputPadChangeUpdatesTheDisplayOptions(t *testing.T) {
+	app, cleanup := newTestApp(t)
+	defer cleanup()
+
+	if app.display == nil || app.settingsW == nil {
+		t.Fatal("app not composed")
+	}
+	want := 1 - app.display.OutputPad
+	app.settingsW.BuildSettingsCallbacks(nil, nil).OnOutputPadChange(want)
+
+	if app.display.OutputPad != want {
+		t.Fatalf("display.OutputPad = %d, want %d (it only changed on /reload)", app.display.OutputPad, want)
+	}
+	if app.settings.GetOutputPad() != want {
+		t.Fatalf("setting = %d, want %d", app.settings.GetOutputPad(), want)
+	}
+}

@@ -451,11 +451,17 @@ func newSettingsWiring(app *App) *SettingsWiring {
 		Editor:                          app.defaultEditor,
 		Renderer:                        app.ui,
 		UpdateThinkingBlockVisibility:   func(hidden bool) { app.updateThinkingBlockVisibility(hidden) },
-		RebuildChatFromMessages:         func() { app.startup.RebuildChatFromMessages() },
-		UpdateEditorBorderColor:         func() { app.updateEditorBorderColor() },
-		SetupAutocompleteProvider:       func() { app.autocomplete.SetupAutocompleteProvider() },
-		SwitchTuiMode:                   func(mode string) bool { return app.lifecycle.SwitchTuiMode(mode, true, true) },
-		ShowStatus:                      func(message string) { app.transcript.ShowStatus(message) },
-		RequestRender:                   func() { app.ui.RequestRender(false) },
+		// DisplayOptions is the single owner of these values; point the settings
+		// callbacks at it so a change reaches the transcript without a /reload.
+		// The output-padding callback rebuilt the chat with the stale padding
+		// (the transcript renderer reads Display.OutputPad).
+		HideThinkingBlock:         &app.display.HideThinkingBlock,
+		OutputPad:                 &app.display.OutputPad,
+		RebuildChatFromMessages:   func() { app.startup.RebuildChatFromMessages() },
+		UpdateEditorBorderColor:   func() { app.updateEditorBorderColor() },
+		SetupAutocompleteProvider: func() { app.autocomplete.SetupAutocompleteProvider() },
+		SwitchTuiMode:             func(mode string) bool { return app.lifecycle.SwitchTuiMode(mode, true, true) },
+		ShowStatus:                func(message string) { app.transcript.ShowStatus(message) },
+		RequestRender:             func() { app.ui.RequestRender(false) },
 	}
 }
