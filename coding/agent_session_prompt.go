@@ -2,6 +2,7 @@ package coding
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strings"
@@ -102,6 +103,44 @@ func (s *AgentSession) SetCacheWarmingMode(mode CacheWarmingMode) {
 	}
 }
 
+// normalizePromptImages runs prompt image attachments through ProcessImage so
+// the request's resize profile applies (the imageAutoResize setting and the
+// active model's image limits) and returns the per-image hints/omission notes.
+// Port of AgentSession._normalizePromptImages; queueing paths (steer/follow-up)
+// stay raw, matching upstream.
+func (s *AgentSession) normalizePromptImages(images []ai.ImageContent) ([]ai.ImageContent, []string) {
+	if len(images) == 0 {
+		return nil, nil
+	}
+	autoResize := true
+	if s.control.Settings != nil {
+		autoResize = s.control.Settings.GetImageAutoResize()
+	}
+	resizeOptions := imageResizeOptionsFor(s.Model())
+	var normalized []ai.ImageContent
+	var hints []string
+	for _, image := range images {
+		data, err := base64.StdEncoding.DecodeString(image.Data)
+		if err != nil {
+			// Upstream decodes base64 leniently; keep an undecodable block
+			// rather than dropping it.
+			normalized = append(normalized, image)
+			continue
+		}
+		processed := ProcessImage(data, image.MimeType, &ProcessImageOptions{
+			AutoResizeImages: &autoResize,
+			ResizeOptions:    &resizeOptions,
+		})
+		if !processed.OK {
+			hints = append(hints, processed.Message)
+			continue
+		}
+		normalized = append(normalized, ai.ImageContent{Data: processed.Data, MimeType: processed.MimeType})
+		hints = append(hints, processed.Hints...)
+	}
+	return normalized, hints
+}
+
 // Prompt submits text to the session, expanding skill commands and prompt
 // templates and honoring the streaming behavior.
 func (s *AgentSession) Prompt(ctx context.Context, text string, options *PromptOptions) error {
@@ -163,8 +202,16 @@ func (s *AgentSession) Prompt(ctx context.Context, text string, options *PromptO
 	}
 
 	// Build the prompt: the user message plus any pending next-turn messages.
-	userContent := ai.ContentList{ai.TextContent{Text: expandedText}}
-	for _, image := range options.Images {
+	// The images are normalized before the message is built so the resize
+	// profile of the model that will serve the request applies (upstream
+	// normalizes after before_agent_start, whose hooks can pick the model).
+	normalizedImages, imageHints := s.normalizePromptImages(options.Images)
+	userText := expandedText
+	if len(imageHints) > 0 {
+		userText = expandedText + "\n\n" + strings.Join(imageHints, "\n")
+	}
+	userContent := ai.ContentList{ai.TextContent{Text: userText}}
+	for _, image := range normalizedImages {
 		userContent = append(userContent, image)
 	}
 	messages := []ai.Message{&ai.UserMessage{Content: ai.StringOrBlocks{Blocks: userContent}, Timestamp: time.Now().UnixMilli()}}

@@ -275,12 +275,13 @@ func CreateAgentSession(ctx context.Context, options *CreateAgentSessionOptions)
 	// The read tool resolves its image limits and the non-vision note from the
 	// model in play, read per call the way upstream reads ctx.model, so a
 	// mid-session model switch takes effect. The session is created below, hence
-	// the pointer; AutoResizeImages is set because a non-nil ReadToolOptions
-	// otherwise selects its zero value, which would disable resizing.
+	// the pointer. AutoResizeImages takes the settings value as upstream does at
+	// tool-build time (a non-nil ReadToolOptions otherwise selects its zero value,
+	// which would disable resizing).
 	var sessionForTools *AgentSession
 	toolByName := CreateAllTools(cwd, &ToolsOptions{
 		Read: &ReadToolOptions{
-			AutoResizeImages: true,
+			AutoResizeImages: settingsManager.GetImageAutoResize(),
 			Model: func() *ai.Model {
 				if sessionForTools == nil {
 					return nil

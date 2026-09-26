@@ -2,6 +2,7 @@ package coding
 
 import (
 	ctxpkg "context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -241,13 +242,14 @@ func TestSendUserMessageAndCustomMessages(t *testing.T) {
 		t.Fatalf("prompts = %d", prompts.Load())
 	}
 	if err := session.SendUserMessage(ctxpkg.Background(), ai.ContentList{
-		ai.TextContent{Text: "with"}, ai.ImageContent{MimeType: "image/png", Data: "AAAA"},
+		ai.TextContent{Text: "with"}, ai.ImageContent{MimeType: "image/png", Data: base64.StdEncoding.EncodeToString(solidPNG(t, 20, 20))},
 	}, ""); err != nil {
 		t.Fatal(err)
 	}
 	messages := session.Messages()
 	last := lastUserMessage(messages)
-	if contentTextJoinedNoSep(last.Content) != "with" || len(last.Content.Blocks) != 2 {
+	// The image survives normalization; the text may carry a processing hint.
+	if !strings.HasPrefix(contentTextJoinedNoSep(last.Content), "with") || len(last.Content.Blocks) != 2 {
 		t.Fatalf("content = %+v", last.Content)
 	}
 
