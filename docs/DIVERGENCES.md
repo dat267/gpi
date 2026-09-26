@@ -5,7 +5,7 @@ usually because upstream relies on a JS or Node behaviour that has no direct Go
 equivalent, or because a defect upstream is fixed here. D-row numbers live in
 code comments at the point of divergence; this file is the log, and it is
 representative: the rows below carry a written-up rationale, while the rest live
-only as the code comment that introduced them. The range is **D1–D169**.
+only as the code comment that introduced them. The range is **D1–D173**.
 
 - D30 — startup timings read `PI_TIMING` **per call** instead of once at module
   load (upstream reads the flag when the timing module is first imported), so a
@@ -669,3 +669,15 @@ only as the code comment that introduced them. The range is **D1–D169**.
   (EPIPE) and `unexpected EOF`. A request that hit one failed with no retry at
   all. The port matches those four; the quota/billing guard is still evaluated
   first, so a usage-limit error that also mentions a reset is not retried.
+
+- D173 — **one plain label while compacting**. Upstream's
+  `CompactionStatusIndicator` (`components/status-indicator.ts:84`) branches on
+  the reason: `Compacting context... ${cancelHint}` for a manual `/compact`, and
+  `${reason === "overflow" ? "Context overflow detected, " : ""}Auto-compacting...
+  ${cancelHint}` for one that the threshold or an overflow triggered, with
+  `cancelHint` the bound `app.interrupt` key. The port shows `Compacting...` for
+  every reason and drops the hint, so the spinner line reads the same whether the
+  compaction was asked for or automatic. The `reason` argument is still plumbed
+  through the constructor so its shape matches upstream's; no caller changed.
+  The rendered frame is pinned by the `m status compaction` row of
+  `coding/interactive/testdata/message_golden.txt`.

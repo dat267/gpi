@@ -12,7 +12,7 @@ import (
 // the working/compaction indicator is embedded in the editor's border and is
 // not a container child, so the renderer's animation walk can only find it if
 // the editor itself reports as an Animator. Regression for the frozen
-// "⠋ Compacting context..." frame (no repaints happen during compaction, so
+// "⠋ Compacting..." frame (no repaints happen during compaction, so
 // the time-derived frame never advanced).
 func TestCustomEditorEmbeddedStatusAnimates(t *testing.T) {
 	SetTrueColorSupport(true)

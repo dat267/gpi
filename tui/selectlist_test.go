@@ -351,7 +351,7 @@ func TestAltScreenFlashAgainstUpstreamGolden(t *testing.T) {
 // current frame. Upstream's own setInterval mutated the text between frames;
 // in loop mode the owner's animation tick is the only mutator, and nothing
 // calls updateDisplay between paints, so a cached frame froze the spinner
-// (the frozen "Compacting context..." regression).
+// (the frozen compaction spinner regression).
 func TestLoaderRenderAdvancesFrame(t *testing.T) {
 	loader := NewLoader(nil, identityFunc, identityFunc, "Working",
 		&LoaderIndicatorOptions{Frames: []string{"A", "B"}, HasFrames: true, IntervalMS: 5})

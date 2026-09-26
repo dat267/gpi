@@ -115,23 +115,18 @@ func (r *RetryStatusIndicator) Dispose() {
 }
 
 // NewCompactionStatusIndicator creates the compaction indicator.
+//
+// D173: the port shows one plain label for every reason. Upstream branches on
+// the reason — `Compacting context... ${cancelHint}` for a manual compaction,
+// and `${overflow ? "Context overflow detected, " : ""}Auto-compacting...
+// ${cancelHint}` for an automatic one — and always appends the key hint to
+// cancel. The reason is still taken so the constructor keeps upstream's shape
+// (status-indicator.ts CompactionStatusIndicator).
 func NewCompactionStatusIndicator(host tui.RenderRequester, reason string) *StatusIndicator {
-	cancelHint := "(" + KeyText("app.interrupt") + " to cancel)"
-	label := ""
-	switch reason {
-	case "manual":
-		label = "Compacting context... " + cancelHint
-	default:
-		prefix := ""
-		if reason == "overflow" {
-			prefix = "Context overflow detected, "
-		}
-		label = prefix + "Auto-compacting... " + cancelHint
-	}
 	return NewStatusIndicator(StatusCompaction, host,
 		func(spinner string) string { return ActiveTheme().Fg("accent", spinner) },
 		func(text string) string { return ActiveTheme().Fg("muted", text) },
-		label, nil)
+		"Compacting...", nil)
 }
 
 // NewBranchSummaryStatusIndicator creates the branch summary indicator.

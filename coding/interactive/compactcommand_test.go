@@ -10,7 +10,7 @@ import (
 // TestCompactCommandReportsErrorAndClearsIndicator drives /compact on an empty
 // session: the compaction fails ("Nothing to compact"), the compaction_end
 // event must clear the status indicator and the error must surface in the
-// chat. Regression for the stuck "Compacting context..." spinner.
+// chat. Regression for the stuck compaction spinner.
 //
 // The command is invoked before the loop starts, so its events are queued and
 // drained by the loop (stage 1: producers only enqueue). Running the command
