@@ -14,6 +14,13 @@ import (
 // Divergences: Go writes the file and waits for the child process (upstream
 // avoids spawnSync on Windows for console-input reasons that do not apply to
 // Go) (D77).
+//
+// The child inherits this process's console (os.Stdin/os.Stdout/os.Stderr) and
+// its environment, which is the point when a user pressed ctrl+g and the wrong
+// thing inside a test: it launches the developer's editor. It is worse on
+// Windows, where the spawn is `cmd /c <command> <tempfile>` and a command that
+// cannot be executed hands the temp file to the shell's association fallback
+// instead of failing. Tests stub externalEditorRunner for that reason.
 
 // ExternalEditorOptions configure the external editor invocation.
 type ExternalEditorOptions struct {
@@ -26,6 +33,13 @@ type ExternalEditorResult struct {
 	Status  string // "complete" | "failed"
 	Content string
 }
+
+// externalEditorRunner runs the editor, blocking until it exits. It is a seam:
+// the real runner hands this process's console and environment to the developer's
+// $EDITOR, which must not happen inside a test run (see the note above), so tests
+// replace it with a stub (stubExternalEditorRunner). The package's tests do not
+// run in parallel, so a swap cannot race.
+var externalEditorRunner = func(command *exec.Cmd) error { return command.Run() }
 
 // EditInExternalEditor runs $EDITOR (or the configured command) on a temporary
 // prompt file and returns the edited content.
@@ -63,7 +77,7 @@ func EditInExternalEditor(options ExternalEditorOptions) ExternalEditorResult {
 		command.Stdout = os.Stdout
 		command.Stderr = os.Stderr
 	}
-	if err := command.Run(); err != nil {
+	if err := externalEditorRunner(command); err != nil {
 		return ExternalEditorResult{Status: "failed"}
 	}
 

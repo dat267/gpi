@@ -134,6 +134,13 @@ func isCompleteApcSequence(data string) seqStatus {
 var (
 	sgrMouseRegex       = regexp.MustCompile(`^<\d+;\d+;\d+[Mm]$`)
 	kittyPrintableRegex = regexp.MustCompile(`^\x1b\[(\d+)(?::\d*)?(?::\d+)?u$`)
+	// mouseReportHeadRegex matches what a force-flush can release while it is
+	// still the head of an SGR mouse report: a lone ESC (whose tail arrives as
+	// plain characters) or a truncated report.
+	mouseReportHeadRegex = regexp.MustCompile(`^\x1b(\[<[\d;]*)?$`)
+	// mouseReportTailRegex matches the tail of ESC[<B;X;YM, which is what the
+	// terminal sends once the head has already been flushed.
+	mouseReportTailRegex = regexp.MustCompile(`^\[<\d+;\d+;\d+[Mm]$`)
 )
 
 // extractCompleteSequences splits the accumulated buffer into complete
@@ -224,12 +231,17 @@ type StdinBuffer struct {
 	OnData  func(sequence string)
 	OnPaste func(content string)
 
-	buffer              string
-	pendingDeadline     time.Time
-	timeoutMS           int
-	escapeTimeoutMS     int
-	pasteMode           bool
-	pasteBuffer         string
+	buffer          string
+	pendingDeadline time.Time
+	timeoutMS       int
+	escapeTimeoutMS int
+	pasteMode       bool
+	pasteBuffer     string
+	// flushedHead holds what a deadline flush just released when it could still
+	// be the head of an SGR mouse report. The report's tail then arrives as a
+	// plain chunk, which would be shredded into characters and typed into the
+	// prompt; the next chunk re-joins it when it completes a report (D169).
+	flushedHead         string
 	pendingCodepoint    int
 	hasPendingCodepoint bool
 }
@@ -269,6 +281,18 @@ func (b *StdinBuffer) ProcessString(data string) {
 }
 
 func (b *StdinBuffer) process(str string) {
+	// A report whose head was force-flushed is completed by this chunk: re-join
+	// the two so the mouse event is dispatched and the tail is not typed (D169).
+	// Any other chunk clears the head, so nothing a user typed is held back.
+	if b.flushedHead != "" {
+		head := b.flushedHead
+		b.flushedHead = ""
+		if str != "" && mouseReportTailRegex.MatchString(str) {
+			b.emitDataSequence(head + str)
+			return
+		}
+	}
+
 	// High-byte conversion (for compatibility with parseKeypress): a single
 	// byte > 127 becomes ESC + (byte - 128).
 	if len(str) == 1 && str[0] > 127 {
@@ -409,10 +433,19 @@ func (b *StdinBuffer) FlushExpired(now time.Time) []string {
 		return nil
 	}
 	sequences := []string{b.buffer}
+	b.rememberFlushedHead(b.buffer)
 	b.buffer = ""
 	b.pendingCodepoint = 0
 	b.hasPendingCodepoint = false
 	return sequences
+}
+
+// rememberFlushedHead notes a flushed sequence that a following tail may
+// complete (see flushedHead).
+func (b *StdinBuffer) rememberFlushedHead(sequence string) {
+	if mouseReportHeadRegex.MatchString(sequence) {
+		b.flushedHead = sequence
+	}
 }
 
 // Flush returns the buffered incomplete sequence, if any.
@@ -422,6 +455,7 @@ func (b *StdinBuffer) Flush() []string {
 		return nil
 	}
 	sequences := []string{b.buffer}
+	b.rememberFlushedHead(b.buffer)
 	b.buffer = ""
 	b.pendingCodepoint = 0
 	b.hasPendingCodepoint = false
@@ -432,6 +466,7 @@ func (b *StdinBuffer) Flush() []string {
 func (b *StdinBuffer) Clear() {
 	b.pendingDeadline = time.Time{}
 	b.buffer = ""
+	b.flushedHead = ""
 	b.pasteMode = false
 	b.pasteBuffer = ""
 	b.pendingCodepoint = 0

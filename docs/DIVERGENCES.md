@@ -5,7 +5,7 @@ usually because upstream relies on a JS or Node behaviour that has no direct Go
 equivalent, or because a defect upstream is fixed here. D-row numbers live in
 code comments at the point of divergence; this file is the log, and it is
 representative: the rows below carry a written-up rationale, while the rest live
-only as the code comment that introduced them. The range is **D1–D166**.
+only as the code comment that introduced them. The range is **D1–D169**.
 
 - D30 — startup timings read `PI_TIMING` **per call** instead of once at module
   load (upstream reads the flag when the timing module is first imported), so a
@@ -609,3 +609,43 @@ only as the code comment that introduced them. The range is **D1–D166**.
   The port flushes the carried prefix before writing an in-range code. The golden
   corpus is unchanged (it never covers a slice starting on a reset), and
   `tui/sliceansiorder_test.go` pins the order.
+
+- D168 — **the Escape handler does not wait for the session to go idle**.
+  `AgentSession.Abort` cancels the turn and then waits for idle; upstream's
+  `session.abort()` is awaited the same way, but awaiting a promise in JavaScript
+  yields to the event loop, so the window keeps painting and keeps taking input.
+  The port's `waitForSessionIdle` parks the goroutine instead, and the Escape
+  handler runs on the UI loop: pressing Escape while a turn streamed froze every
+  later keystroke for as long as the turn took to unwind. Measured on a live
+  session — `slow UI phase "raw-input" 188ms` with the loop parked in
+  `waitForSessionIdle` (`HandleEscape` → `RestoreQueuedMessagesToEditor` →
+  `Abort`) — while the neighbouring keystrokes showed `read=8.8ms write=91ms`.
+  `AbortAsync` is the loop-safe half: it cancels the retry, the bash run and the
+  agent run, and returns. `Abort` keeps its wait for the two callers that need
+  the session settled before they continue — session replacement
+  (`sessionswitch.go`, which disposes the session next) and tree navigation
+  (`interactivemode_selectors.go`, which reads the tree next) — so those two stay
+  deliberately blocking. The queue restore already happens before the abort, so
+  nothing on the loop needs the turn to have unwound. Tests:
+  `TestEscapeHandlerDoesNotWaitForIdle`.
+
+- D169 — **a mouse report that arrives split is still a mouse report**. The input
+  buffer holds an incomplete escape sequence for 50 ms, and a lone ESC for 10 ms,
+  then force-flushes it — that is how the Escape key itself is delivered. A
+  terminal that writes a report in two pieces across that deadline therefore
+  delivers `\x1b` as an Escape key and the rest as a plain chunk, and the buffer
+  shreds a plain chunk into one sequence per rune: the prompt received
+  `[<65;59;42M` as typed text (wheel-down at column 59, row 42). Seen on Windows,
+  where `ReadConsole` returns as soon as any byte is available, so a busy loop can
+  leave the two pieces more than 10 ms apart. Upstream requires the ESC
+  (`/^\x1b\[<.../`), so its tail is typed the same way. The port remembers what a
+  flush released while it could still be a report head — a lone ESC, or a
+  truncated `\x1b[<...` — and re-joins the next chunk when that chunk completes a
+  report, so the wheel still scrolls and nothing reaches the prompt; any other
+  chunk clears the memory instead of holding a user's typing back. The alt screen
+  additionally accepts a report without its ESC and consumes a truncated
+  fragment of one. Residual: a report split again mid-tail still arrives as text,
+  and the Escape key it was split from has already been dispatched. Tests:
+  `TestSplitMouseReportAcrossTheDeadline`,
+  `TestOrphanedMouseReportIsStillDispatched`,
+  `TestTruncatedMouseReportIsConsumed`.

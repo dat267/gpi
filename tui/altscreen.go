@@ -45,8 +45,12 @@ var (
 	// start of a line: checking it first keeps the per-frame pass over every
 	// document line off the regexp engine.
 	osc133ZonePrefixMatch = "\x1b]133;"
-	altSgrMouseRegex      = regexp.MustCompile(`^\x1b\[<(\d+);(\d+);(\d+)([Mm])$`)
-	wheelSgrRegex         = regexp.MustCompile(`^\x1b\[<(\d+);(\d+);(\d+)[Mm]$`)
+	altSgrMouseRegex      = regexp.MustCompile(`^\x1b?\[<(\d+);(\d+);(\d+)([Mm])$`)
+	wheelSgrRegex         = regexp.MustCompile(`^\x1b?\[<(\d+);(\d+);(\d+)[Mm]$`)
+	// truncatedSgrMouse matches a fragment of one: a report whose tail is still
+	// in flight, or a tail whose ESC was already dispatched as the Escape key
+	// (the input buffer force-flushes a lone ESC after 10ms, D169).
+	truncatedSgrMouseRegex = regexp.MustCompile(`^\x1b?\[<\d*(;\d*){0,2}[Mm]?$`)
 )
 
 var terminalWordSelectionJoiners = map[string]bool{"/": true, "-": true}
@@ -2030,6 +2034,9 @@ func (s *AltScreen) applySelection(screen []string, layout *LayoutFrame) []strin
 
 func (s *AltScreen) isMouseSequence(data string) bool {
 	if altSgrMouseRegex.MatchString(data) {
+		return true
+	}
+	if truncatedSgrMouseRegex.MatchString(data) {
 		return true
 	}
 	return len(data) == 6 && strings.HasPrefix(data, "\x1b[M")

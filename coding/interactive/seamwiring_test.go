@@ -2,7 +2,8 @@ package interactive
 
 import (
 	"os"
-	"path/filepath"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,25 +11,43 @@ import (
 	"github.com/dat267/pier/coding"
 )
 
-// ctrl+shift+e hands the prompt to $EDITOR and takes the result back: the editor
-// owns the terminal while it runs, so the TUI is stopped and restarted around it
-// (upstream handleOpenExternalEditor).
+// ctrl+g hands the prompt to $EDITOR and takes the result back: the editor owns
+// the terminal while it runs, so the TUI is stopped and restarted around it
+// (upstream handleOpenExternalEditor). The runner is stubbed — the real one would
+// launch the developer's editor on a temp file (see stubExternalEditorRunner).
 func TestExternalEditorWiring(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
 
-	script := filepath.Join(t.TempDir(), "editor.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'edited in the editor' > \"$1\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("VISUAL", script)
-	t.Setenv("EDITOR", script)
+	// The handler resolves the command from the environment, so the stub can
+	// assert which one reached the editor; VISUAL wins over EDITOR.
+	t.Setenv("VISUAL", "visual-editor")
+	t.Setenv("EDITOR", "env-editor")
 	app.defaultEditor.SetText("the original prompt")
+
+	commandLine := ""
+	handedOver := ""
+	stubExternalEditorRunner(t, func(command *exec.Cmd) error {
+		commandLine = strings.Join(command.Args, " ")
+		path := command.Args[len(command.Args)-1]
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		handedOver = string(data)
+		return os.WriteFile(path, []byte("edited in the editor"), 0o644)
+	})
 
 	newKeyWiring(app).OnExternalEditor()
 
 	if got := app.defaultEditor.GetText(); got != "edited in the editor" {
 		t.Errorf("editor text = %q, want the edited content", got)
+	}
+	if handedOver != "the original prompt" {
+		t.Errorf("editor received %q, want the prompt text", handedOver)
+	}
+	if !strings.Contains(commandLine, "visual-editor") {
+		t.Errorf("editor command = %q, want the $VISUAL command", commandLine)
 	}
 }
 

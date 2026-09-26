@@ -363,12 +363,25 @@ func (s *AgentSession) takePendingNextTurnMessages() []ai.Message {
 	return pending
 }
 
-// Abort aborts the current operation and waits for idle.
+// Abort aborts the current operation and waits for idle. Callers that need the
+// session settled before they continue (session switch, tree navigation) use
+// this; a caller on the UI loop must not, because the wait parks the loop (D168).
 func (s *AgentSession) Abort(ctx context.Context) {
+	s.AbortAsync()
+	_ = s.waitForSessionIdle(ctx)
+}
+
+// AbortAsync aborts the current operation without waiting for the session to go
+// idle. The wait in Abort is what the UI loop cannot afford: the Escape handler
+// restores the queued messages, then aborts, so waiting there stalled every later
+// keystroke for as long as the in-flight turn took to unwind — 188 ms measured
+// mid-turn (`slow UI phase "raw-input" 188ms`, loop parked in waitForSessionIdle),
+// which upstream never pays because awaiting a promise yields to its event loop
+// (D168).
+func (s *AgentSession) AbortAsync() {
 	s.AbortRetry()
 	s.AbortBash()
 	s.Agent.Abort()
-	_ = s.waitForSessionIdle(ctx)
 }
 
 // waitForSessionIdle blocks until no agent run or compaction is active,
