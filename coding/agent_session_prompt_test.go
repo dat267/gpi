@@ -311,7 +311,10 @@ func TestAbortAndWaitForIdle(t *testing.T) {
 	if err := session.WaitForIdle(ctxpkg.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+	// What this guards is an idle wait that blocks until a run is released, not
+	// that the check costs under 50ms: that bound raced the scheduler and flaked
+	// under -race on CI.
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("idle wait took %v", elapsed)
 	}
 

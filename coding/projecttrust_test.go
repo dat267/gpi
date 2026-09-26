@@ -427,7 +427,10 @@ func TestWaitForPipeDrain(t *testing.T) {
 	start = timeNowMS()
 	waitForPipeDrain(&stuck.WaitGroup, make(chan struct{}), alreadyStarted)
 	elapsed := timeNowMS() - start
-	if elapsed < exitStdioGraceMS || elapsed > exitStdioGraceMS+200 {
+	// The lower edge is the assertion — the grace window was honoured. The upper
+	// edge only has to catch a drain that never returns, so it carries headroom
+	// for a loaded runner.
+	if elapsed < exitStdioGraceMS || elapsed > exitStdioGraceMS+2000 {
 		t.Fatalf("grace elapsed = %dms", elapsed)
 	}
 

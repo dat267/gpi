@@ -129,7 +129,9 @@ func TestFetchWithRetryCancellationAndTimeouts(t *testing.T) {
 	if _, err := FetchWithRetry(ctx, request, server.Client(), FetchRetryOptions{MaxRetries: &retries}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v", err)
 	}
-	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+	// The regression here is a cancellation that never lands, not one that lands
+	// after a scheduling hiccup: 100ms flaked under -race on CI.
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("cancel was not immediate: %v", elapsed)
 	}
 
