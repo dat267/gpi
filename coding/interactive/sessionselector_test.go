@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -127,11 +128,13 @@ func TestSessionSelectorAgainstUpstreamGolden(t *testing.T) {
 			return all, nil
 		}
 
+		queue := &postQueue{}
 		options := SessionSelectorOptions{
 			Keybindings:            appKeybindings.KeybindingsManager,
 			CurrentSessionFilePath: spec.CurrentSessionFilePath,
 			Now:                    func() time.Time { return now },
 			ScheduleTimer:          func(ms int, fn func()) {},
+			Post:                   queue.Post,
 		}
 		canRename := true
 		if spec.CanRename != nil {
@@ -153,11 +156,13 @@ func TestSessionSelectorAgainstUpstreamGolden(t *testing.T) {
 			func() { events = append(events, "exit") },
 			func() {}, options)
 		component.WaitForPendingLoads()
+		queue.drain()
 
 		checkEasterGolden(t, golden, label+"@"+itoa(spec.Width), normalizeRender(component.Render(spec.Width)))
 		for index, input := range spec.Inputs {
 			component.HandleInput(input)
 			component.WaitForPendingLoads()
+			queue.drain()
 			encoded, _ := json.Marshal(input)
 			checkEasterGolden(t, golden, label+"+"+itoa(index)+"+"+string(encoded)+"@"+itoa(spec.Width),
 				normalizeRender(component.Render(spec.Width)))
@@ -265,6 +270,7 @@ func TestSessionSelectorDeleteFlow(t *testing.T) {
 		{Path: "/s/b.jsonl", FirstMessage: "b", Modified: now.Add(-time.Hour)},
 	}
 	var deleted []string
+	queue := &postQueue{}
 	component := NewSessionSelectorComponent(
 		func(SessionListProgress, context.Context) ([]coding.SessionInfo, error) { return sessions, nil },
 		func(SessionListProgress, context.Context) ([]coding.SessionInfo, error) { return sessions, nil },
@@ -275,8 +281,10 @@ func TestSessionSelectorDeleteFlow(t *testing.T) {
 				return SessionDeleteResult{OK: true, Method: "trash"}
 			},
 			ScheduleTimer: func(ms int, fn func()) {},
+			Post:          queue.Post,
 		})
 	component.WaitForPendingLoads()
+	queue.drain()
 
 	list := component.GetSessionList()
 	// Ctrl+D starts the confirmation.
@@ -459,5 +467,71 @@ func TestWrapParts(t *testing.T) {
 	}
 	if got := wrapParts([]string{"averyveryveryverylongpart"}, " · ", 8); len(got) != 1 || tui.VisibleWidth(got[0]) > 8 {
 		t.Fatalf("oversized part = %#v", got)
+	}
+}
+
+// postQueue is a Post sink for tests without a UI loop: it queues the
+// background loader's callbacks so the test can run them on its own goroutine
+// after WaitForPendingLoads, never concurrently with Render.
+type postQueue struct {
+	mu      sync.Mutex
+	pending []func()
+}
+
+func (q *postQueue) Post(fn func()) {
+	q.mu.Lock()
+	q.pending = append(q.pending, fn)
+	q.mu.Unlock()
+}
+
+// drain runs every queued callback, including ones queued while draining.
+func (q *postQueue) drain() {
+	for {
+		q.mu.Lock()
+		if len(q.pending) == 0 {
+			q.mu.Unlock()
+			return
+		}
+		fn := q.pending[0]
+		q.pending = q.pending[1:]
+		q.mu.Unlock()
+		fn()
+	}
+}
+
+// TestSessionSelectorApplyStaysOnTheLoop pins the same stage-4 invariant as the
+// model selector: the loader worker is a pure producer, so its apply reaches
+// the selector only through the Post sink. Running it inline let SetLoading
+// mutate the header while the owner rendered it.
+func TestSessionSelectorApplyStaysOnTheLoop(t *testing.T) {
+	SetCustomThemesDir(t.TempDir())
+	SetRegisteredThemes(nil)
+	SetTrueColorSupport(true)
+	SetStyleColorsEnabled(true)
+	InitTheme("dark", false)
+
+	loader := func(SessionListProgress, context.Context) ([]coding.SessionInfo, error) { return nil, nil }
+	component := NewSessionSelectorComponent(loader, loader,
+		func(string) {}, func() {}, func() {}, func() {},
+		SessionSelectorOptions{ScheduleTimer: func(int, func()) {}})
+
+	var worker sync.WaitGroup
+	worker.Add(1)
+	go func() {
+		defer worker.Done()
+		for i := 0; i < 200; i++ {
+			component.postApply(func() { component.header.SetLoading(false) })
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		_ = component.Render(80)
+	}
+	worker.Wait()
+
+	// The constructor started the load with the header loading; a dropped apply
+	// must leave that as is. An inline apply would have cleared it (and raced the
+	// owner's Render).
+	if !component.header.loading {
+		t.Fatal("a loader apply ran off-loop; it can race the owner's Render")
 	}
 }

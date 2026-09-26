@@ -368,27 +368,28 @@ func TestLoopBeatAdvances(t *testing.T) {
 	}()
 	waitForConditionWithin(t, func() bool { return app.lifecycle.IsInitialized() }, 6*time.Second)
 
-	// Events wake the loop and advance the beat.
+	// Events wake the loop and advance the beat. Enqueue one at a time and wait
+	// for the beat it produces: an input/resize iteration calls
+	// drainReadyEvents, which consumes every ready lossless event, so a
+	// synchronous burst of five can legitimately reach the loop as fewer than
+	// five beats. Waiting per event still catches a loop that stops iterating,
+	// and a bare timeout cannot tell a stall from a slow phase, so on timeout we
+	// dump every goroutine stack the way the stall log does.
 	for i := 0; i < 5; i++ {
+		before := app.loopBeats()
 		app.sessionEvents.enqueue(&coding.SessionEvent{Type: coding.SessionAgentSettled})
-	}
-	// One iteration handles one event and every iteration beats, so five events
-	// must reach five beats unless the loop stops iterating. A loop that returned
-	// early is a different fault from one stuck inside a phase, and a bare timeout
-	// cannot tell them apart — it failed on CI as "condition not met before
-	// timeout", which is all it said. So: watch the run goroutine, and on timeout
-	// dump every goroutine stack, the way the stall log does for slow phases.
-	deadline := time.Now().Add(6 * time.Second)
-	for app.loopBeats() < 5 {
-		select {
-		case <-done:
-			t.Fatalf("the run loop exited with %d of 5 beats", app.loopBeats())
-		default:
+		deadline := time.Now().Add(6 * time.Second)
+		for app.loopBeats() == before {
+			select {
+			case <-done:
+				t.Fatalf("the run loop exited at beat %d (event %d)", before, i)
+			default:
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the loop stopped beating at beat %d (event %d):\n%s", before, i, goroutineStacks())
+			}
+			time.Sleep(2 * time.Millisecond)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the loop stopped beating at %d of 5 beats:\n%s", app.loopBeats(), goroutineStacks())
-		}
-		time.Sleep(5 * time.Millisecond)
 	}
 
 	cancel()

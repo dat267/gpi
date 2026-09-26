@@ -943,7 +943,8 @@ type SessionSelectorComponent struct {
 	loads       sync.WaitGroup
 
 	// Post marshals background loader results onto the UI loop (stage 4).
-	// Nil applies inline (tests without a loop).
+	// It must be set for any loader that reports progress or results; without a
+	// sink the loader's apply is dropped rather than run on the loader goroutine.
 	Post func(fn func())
 
 	mode             string // "list" | "rename"
@@ -1090,7 +1091,8 @@ func (c *SessionSelectorComponent) requestRenderNow() {
 }
 
 // WaitForPendingLoads blocks until the in-flight loaders have finished (test
-// seam, D103). Loader results apply inline when no Post sink is installed.
+// seam, D103). It does not run the posted applies; a test without a UI loop
+// installs a Post queue and drains it after this returns.
 func (c *SessionSelectorComponent) WaitForPendingLoads() {
 	c.loads.Wait()
 }
@@ -1325,14 +1327,16 @@ func (c *SessionSelectorComponent) loadScope(scope SessionScope) {
 	}()
 }
 
-// postApply runs fn on the UI loop when a Post sink is installed, else inline
-// (tests without a loop).
+// postApply hands a background loader result to the UI loop through the Post
+// sink. The loader worker is a pure producer: it must never touch the selector
+// state off the owner goroutine, so with no sink the result is dropped instead
+// of run inline (running it inline raced the loader's container mutation
+// against the owner's Render). Tests without a loop install a Post queue.
 func (c *SessionSelectorComponent) postApply(fn func()) {
-	if c.Post != nil {
-		c.Post(fn)
+	if c.Post == nil {
 		return
 	}
-	fn()
+	c.Post(fn)
 }
 
 func (c *SessionSelectorComponent) toggleSortMode() {

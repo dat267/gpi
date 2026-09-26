@@ -252,13 +252,16 @@ func (c *ModelSelectorComponent) startRefresh() {
 	}()
 }
 
-// postApply runs fn on the UI loop when a Post sink is installed, else inline.
+// postApply hands a background result to the UI loop through the Post sink.
+// The refresh worker is a pure producer: it must never touch the selector's
+// state (the list container, the status fields) off the owner goroutine, so
+// with no sink the result is dropped instead of run inline. Running it inline
+// raced updateList's container mutation against the owner's Render.
 func (c *ModelSelectorComponent) postApply(fn func()) {
-	if c.Post != nil {
-		c.Post(fn)
+	if c.Post == nil {
 		return
 	}
-	fn()
+	c.Post(fn)
 }
 
 func firstErrorKey(errors map[string]error) string {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -255,5 +256,45 @@ func TestModelSelectorSelectNoDeadlock(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("onSelect not called")
+	}
+}
+
+// TestModelSelectorRefreshApplyStaysOnTheLoop pins the stage-4 invariant: the
+// background refresh is a pure producer and its apply reaches the selector only
+// through the Post sink (the UI loop). With no sink the apply must be dropped,
+// never run on the worker goroutine. Running it inline let updateList mutate the
+// list container while the owner rendered it, which is the data race the golden
+// test tripped under `-race -count=2 ./...`.
+func TestModelSelectorRefreshApplyStaysOnTheLoop(t *testing.T) {
+	SetCustomThemesDir(t.TempDir())
+	SetRegisteredThemes(nil)
+	SetTrueColorSupport(true)
+	SetStyleColorsEnabled(true)
+	InitTheme("dark", false)
+
+	models := testModels()
+	runtime := &fakeModelRuntime{models: models}
+	component := NewModelSelectorComponent(nil, nil, models[0], runtime, nil,
+		func(*ai.Model) {}, func() {}, "", nil, nil)
+	defer component.Dispose()
+
+	// Simulate the refresh worker handing its result to the component while the
+	// owner renders. With the inline fallback this is a concurrent mutation of
+	// the list container (`updateList`) and its read (`Render`).
+	var worker sync.WaitGroup
+	worker.Add(1)
+	go func() {
+		defer worker.Done()
+		for i := 0; i < 200; i++ {
+			component.postApply(func() { component.updateList() })
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		_ = component.Render(80)
+	}
+	worker.Wait()
+
+	if component.refreshStatusMessage != "Refreshing model catalogs…" {
+		t.Fatalf("a worker apply ran off-loop: status = %q", component.refreshStatusMessage)
 	}
 }
