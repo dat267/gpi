@@ -123,9 +123,9 @@ func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
 
 func TestReadToolImageDetection(t *testing.T) {
 	dir := t.TempDir()
-	// Minimal valid PNG header.
-	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 16)...)
-	os.WriteFile(filepath.Join(dir, "img.png"), png, 0o644)
+	// A real PNG: the pipeline decodes and re-encodes now, so a bare magic header
+	// would take the omission path instead of attaching an image.
+	os.WriteFile(filepath.Join(dir, "img.png"), solidPNG(t, 8, 8), 0o644)
 
 	tool := CreateReadTool(dir, nil)
 	result := execTool(t, tool, `{"path":"img.png"}`)

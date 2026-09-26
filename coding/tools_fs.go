@@ -26,6 +26,11 @@ func numSchema(description string) map[string]any {
 type ReadToolOptions struct {
 	// AutoResizeImages resizes images to 2000x2000 max. Default true.
 	AutoResizeImages bool
+	// Model returns the model in play, read per call the way upstream reads
+	// ctx.model: a session can switch models, and both the image resize limits and
+	// the non-vision note depend on the current one. Nil means unknown, which
+	// gives the default limits and no note.
+	Model func() *ai.Model
 }
 
 // ReadToolDetails carries the truncation info.
@@ -58,6 +63,10 @@ const ReadToolDescription = "Read the contents of a file. Supports text files an
 // CreateReadTool builds the read tool.
 func CreateReadTool(cwd string, options *ReadToolOptions) agent.AgentTool {
 	autoResize := options == nil || options.AutoResizeImages
+	var modelFor func() *ai.Model
+	if options != nil {
+		modelFor = options.Model
+	}
 	return agent.AgentTool{
 		Name:        "read",
 		Description: ReadToolDescription,
@@ -81,7 +90,7 @@ func CreateReadTool(cwd string, options *ReadToolOptions) agent.AgentTool {
 			}
 
 			if mimeType := DetectImageMimeTypeFromFile(absolutePath); mimeType != "" {
-				return readImageFile(absolutePath, mimeType, input.Path, autoResize)
+				return readImageFile(absolutePath, mimeType, input.Path, autoResize, modelFor)
 			}
 
 			data, err := os.ReadFile(absolutePath)
@@ -199,39 +208,51 @@ func imageResizeOptionsFor(model *ai.Model) ImageResizeOptions {
 	return options
 }
 
-// readImageFile reads an image; resizing lands with the image round (D8).
-func readImageFile(absolutePath, mimeType, originalPath string, autoResize bool) (agent.AgentToolResult, error) {
+// readImageFile prepares an image the way upstream's read tool does. The bytes go
+// through ProcessImage, which resizes within the limits (D26: bilinear resampling
+// rather than Photon's Lanczos3) or reports an omission message,
+// which resizes within the limits or reports an omission message; the processing
+// hints and the non-vision note are folded into the text, and the image content
+// is attached only when the processing succeeded.
+func readImageFile(absolutePath, mimeType, originalPath string, autoResize bool, modelFor func() *ai.Model) (agent.AgentToolResult, error) {
 	data, err := os.ReadFile(absolutePath)
 	if err != nil {
 		return agent.AgentToolResult{}, err
 	}
-	textNote := fmt.Sprintf("Read image file [%s]", mimeType)
+	var model *ai.Model
+	if modelFor != nil {
+		model = modelFor()
+	}
+	resizeOptions := imageResizeOptionsFor(model)
+	processed := ProcessImage(data, mimeType, &ProcessImageOptions{
+		AutoResizeImages: &autoResize,
+		ResizeOptions:    &resizeOptions,
+	})
+	note := nonVisionImageNote(model)
+	if !processed.OK {
+		text := fmt.Sprintf("Read image file [%s]\n%s", mimeType, processed.Message)
+		if note != "" {
+			text += "\n" + note
+		}
+		return agent.AgentToolResult{
+			Content: []ai.Content{ai.TextContent{Text: text}},
+			Details: json.RawMessage(`{}`),
+		}, nil
+	}
+	text := fmt.Sprintf("Read image file [%s]", processed.MimeType)
+	if len(processed.Hints) > 0 {
+		text += "\n" + strings.Join(processed.Hints, "\n")
+	}
+	if note != "" {
+		text += "\n" + note
+	}
 	return agent.AgentToolResult{
 		Content: []ai.Content{
-			ai.TextContent{Text: textNote},
-			ai.ImageContent{Data: base64Of(data), MimeType: mimeType},
+			ai.TextContent{Text: text},
+			ai.ImageContent{Data: processed.Data, MimeType: processed.MimeType},
 		},
 		Details: json.RawMessage(`{}`),
 	}, nil
-}
-
-func base64Of(data []byte) string {
-	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-	out := make([]byte, 0, (len(data)+2)/3*4)
-	for i := 0; i < len(data); i += 3 {
-		var b [3]byte
-		copy(b[:], data[i:])
-		n := uint32(b[0])<<16 | uint32(b[1])<<8 | uint32(b[2])
-		out = append(out, charset[n>>18&63], charset[n>>12&63], charset[n>>6&63], charset[n&63])
-	}
-	switch len(data) % 3 {
-	case 1:
-		out[len(out)-2] = '='
-		out[len(out)-1] = '='
-	case 2:
-		out[len(out)-1] = '='
-	}
-	return string(out)
 }
 
 // DetectImageMimeTypeFromFile sniffs image MIME from magic bytes.
