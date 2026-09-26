@@ -669,3 +669,14 @@ only as the code comment that introduced them. The range is **D1–D169**.
   (EPIPE) and `unexpected EOF`. A request that hit one failed with no retry at
   all. The port matches those four; the quota/billing guard is still evaluated
   first, so a usage-limit error that also mentions a reset is not retried.
+
+- D172 — **the read tool's description says the path is literal**. Upstream's
+  description (`core/tools/read.ts`) says nothing about quoting, and a path with a
+  space fails for a model that reaches for shell habits: `"my file.png"` names a
+  file whose name contains quote characters, and `my\ file.png` names one with a
+  literal backslash — measured, not assumed: Go's decoder rejects the bare `\ `
+  escape outright, and the doubly-escaped form parses to a path containing a
+  backslash, which stats as "no such file or directory". The failure therefore
+  looks like a missing file rather than a quoting mistake. The port appends one
+  sentence stating that the field is used exactly as given. Shell quoting still
+  applies to `@file` arguments and to the bash tool, which is where it belongs.
