@@ -370,7 +370,19 @@ func TestLoopBeatAdvances(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		app.sessionEvents.enqueue(&coding.SessionEvent{Type: coding.SessionAgentSettled})
 	}
-	waitForConditionWithin(t, func() bool { return app.loopBeats() >= 5 }, 6*time.Second)
+	// One iteration handles one event and every iteration beats, so five events
+	// must reach five beats unless the loop stops iterating. Watch the run
+	// goroutine too: a loop that returned early is a different fault from one that
+	// is still running but stuck in a phase, and a bare timeout cannot tell them
+	// apart — this one failed on CI as "condition not met before timeout".
+	waitForConditionWithin(t, func() bool {
+		select {
+		case <-done:
+			t.Fatalf("the run loop exited with %d of 5 beats", app.loopBeats())
+		default:
+		}
+		return app.loopBeats() >= 5
+	}, 6*time.Second)
 
 	cancel()
 	select {
