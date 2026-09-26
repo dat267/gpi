@@ -115,3 +115,32 @@ func TestReadToolReadsTheModelPerCall(t *testing.T) {
 		t.Fatalf("the switched-to model did not take effect: %q", text)
 	}
 }
+
+// A filename with a space is not special: the path travels as one JSON string,
+// nothing in the pipeline splits on spaces, and ResolveReadPath only folds the
+// unicode variants (macOS screenshots) on top of the plain form.
+func TestReadToolHandlesSpacedImageNames(t *testing.T) {
+	dir := t.TempDir()
+	name := "my screenshot 2026.png"
+	if err := os.WriteFile(filepath.Join(dir, name), solidPNG(t, 24, 16), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := execTool(t, CreateReadTool(dir, nil), `{"path":"my screenshot 2026.png"}`)
+	if len(result.Content) != 2 {
+		t.Fatalf("content = %#v, want text and image", result.Content)
+	}
+	if text := result.Content[0].(ai.TextContent).Text; !strings.HasPrefix(text, "Read image file [image/png]") {
+		t.Errorf("text = %q", text)
+	}
+	if _, ok := result.Content[1].(ai.ImageContent); !ok {
+		t.Errorf("content[1] = %T, want an image", result.Content[1])
+	}
+
+	// The narrow-no-break-space form macOS screenshots use resolves to the same
+	// file, which is what the AM/PM variant is for.
+	narrow := "my screenshot\u202f2026.png"
+	result = execTool(t, CreateReadTool(dir, nil), `{"path":"`+narrow+`"}`)
+	if len(result.Content) != 2 {
+		t.Fatalf("the narrow-space variant did not resolve: %#v", result.Content)
+	}
+}
